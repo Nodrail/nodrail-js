@@ -21,17 +21,65 @@ export const SECRET_PLACES = [
   "id_rsa",
   "id_ecdsa",
   "id_ed25519",
+  // Agents' and Nodrail's own credentials, and a process's environment.
+  ".credentials.json",
+  ".nodrail",
+  "environ",
+  // Key files, by extension.
+  "*.pem",
+  "*.key",
+  "*.p12",
+  "*.pfx",
 ] as const;
 
 const secretSet = new Set<string>(SECRET_PLACES);
 
 /**
- * The names a path part answers to: itself, and for a dot file with a suffix,
- * its base too, so .env.staging and .env.local also count as .env.
+ * Credentials that live under a name too common to deny alone: a folder and a
+ * file name that together mean a token.
+ */
+export const SECRET_PAIRS = [
+  { label: "GitHub CLI tokens", parts: [".config", "gh"] },
+  { label: "Codex sign-in", parts: [".codex", "auth.json"] },
+  // A remote URL in git's config can carry a token.
+  { label: "git config", parts: [".git", "config"] },
+] as const;
+
+/**
+ * Whether a described file call reaches a place credentials live, the same way
+ * the starter packs decide. Checked on the machine, with no server.
+ */
+export function reachesSecret(params: Record<string, unknown>) {
+  if (params.reaches_secrets === true) return true;
+  const parts = Array.isArray(params.path_parts)
+    ? params.path_parts.filter((part): part is string => typeof part === "string")
+    : [];
+  return (
+    parts.some(isSecretName) ||
+    SECRET_PAIRS.some((pair) => pair.parts.every((part) => parts.includes(part)))
+  );
+}
+
+const KEY_EXTENSIONS = new Set(["pem", "key", "p12", "pfx"]);
+
+/**
+ * The names a path part answers to, so a rule naming one form catches them all:
+ * - itself, and its lowercase form: many disks ignore case, so .CLAUDE is
+ *   .claude, even when the folder doesn't exist yet;
+ * - a dot file's base: .env.staging is .env;
+ * - the .env family: .env-prod, .env_test and prod.env are .env;
+ * - key files by extension: server.pem is *.pem.
  */
 export function nameForms(part: string): string[] {
-  const second = part.startsWith(".") ? part.indexOf(".", 1) : -1;
-  return second > 1 ? [part, part.slice(0, second)] : [part];
+  const lower = part.toLowerCase();
+  const forms = new Set([part, lower]);
+  const second = lower.startsWith(".") ? lower.indexOf(".", 1) : -1;
+  if (second > 1) forms.add(lower.slice(0, second));
+  if (/^\.env[._-]/.test(lower) || /.\.env$/.test(lower)) forms.add(".env");
+  const extension = lower.slice(lower.lastIndexOf(".") + 1);
+  if (lower.includes(".") && KEY_EXTENSIONS.has(extension))
+    forms.add(`*.${extension}`);
+  return [...forms];
 }
 
 export const isSecretName = (part: string) =>
@@ -119,10 +167,12 @@ function matchesPart(pattern: Token[], name: string) {
   return row[name.length] ?? false;
 }
 
-/** Examples of each place, including suffixed forms such as .env.local. */
-const secretExamples = SECRET_PLACES.flatMap((place) =>
-  place.startsWith(".") ? [place, `${place}.local`] : [place],
-);
+/** Examples of each place, including the forms nameForms recognises. */
+const secretExamples = SECRET_PLACES.flatMap((place) => {
+  if (place.startsWith("*.")) return [`server${place.slice(1)}`];
+  if (place === ".env") return [".env", ".env.local", ".env-prod", "prod.env"];
+  return place.startsWith(".") ? [place, `${place}.local`] : [place];
+});
 
 /**
  * Whether a file pattern could pick out a place where credentials live: a part
@@ -142,7 +192,8 @@ export function globCouldReachSecret(glob: string) {
         // ** walks folders but picks none out by name; the other parts decide.
         if (part === "**") return false;
         if (!/[*?[]/.test(part)) return isSecretName(part);
-        const pattern = tokens(part);
+        // Many disks ignore case, so .E* reaches .env.
+        const pattern = tokens(part.toLowerCase());
         return secretExamples.some((name) => matchesPart(pattern, name));
       }),
   );

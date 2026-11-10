@@ -1,7 +1,22 @@
-import { SECRET_PLACES } from "./secrets.ts";
+import { SECRET_PAIRS, SECRET_PLACES } from "./secrets.ts";
 
+// Quoted: *.pem would otherwise read as a YAML alias.
 const yamlList = (items: readonly string[]) =>
-  items.map((item) => `    - ${item}`).join("\n");
+  items.map((item) => `    - ${JSON.stringify(item)}`).join("\n");
+
+// A folder and a file name that together mean a token, for reads and searches.
+const pairRules = SECRET_PAIRS.flatMap(({ label, parts }) =>
+  (["read", "search"] as const).map(
+    (verb) => `- rule: Never ${verb} ${label}
+  tool: files
+  operation: file.${verb}
+  resource: { kind: file, match: any }
+  condition:
+${parts.map((part) => `    - { field: path_parts, op: contains, value: ${JSON.stringify(part)} }`).join("\n")}
+  effect: deny
+`,
+  ),
+).join("\n");
 
 /** Starting points, written the way a team would write its own rules. */
 const readOnlyRules = `- required_engine_version: 2
@@ -38,15 +53,7 @@ ${yamlList(SECRET_PLACES)}
     - { field: reaches_secrets, op: eq, value: true }
   effect: deny
 
-- rule: Never read GitHub CLI tokens
-  tool: files
-  operation: file.read
-  resource: { kind: file, match: any }
-  condition:
-    - { field: path_parts, op: contains, value: .config }
-    - { field: path_parts, op: contains, value: gh }
-  effect: deny
-
+${pairRules}
 # Reading and searching the project.
 - rule: Read files
   tool: files
@@ -158,6 +165,35 @@ const repoWorkRules = `
     - { field: path_parts, op: contains, list: control_places }
   effect: deny
 
+# What the everyday commands below run. Changing it would change what an
+# allowed npm test or make does, so a person reviews it.
+- list: script_places
+  items:
+    - package.json
+    - pnpm-workspace.yaml
+    - Makefile
+    - makefile
+    - GNUmakefile
+    - justfile
+    - Taskfile.yml
+    - node_modules
+
+- rule: A person reviews script writes
+  tool: files
+  operation: file.write
+  resource: { kind: file, match: any }
+  condition:
+    - { field: path_parts, op: contains, list: script_places }
+  effect: require_approval
+
+- rule: A person reviews script edits
+  tool: files
+  operation: file.edit
+  resource: { kind: file, match: any }
+  condition:
+    - { field: path_parts, op: contains, list: script_places }
+  effect: require_approval
+
 - rule: A person reviews workflow writes
   tool: files
   operation: file.write
@@ -218,7 +254,8 @@ export const starterPacks = {
   },
   "repo-work": {
     label: "Repository work",
-    summary: "Also edits, tests and commits. Pushes go to a person.",
+    summary:
+      "Also edits, tests and commits inside the project. Pushes and changes to build scripts go to a person. Tests run code the agent can write.",
     text: readOnlyRules + repoWorkRules,
   },
 } as const satisfies Record<string, StarterPack>;

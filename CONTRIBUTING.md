@@ -22,6 +22,10 @@ command line from source.
 
 ## Pull requests
 
+Titles follow `type(scope): summary`, for example
+`fix(engine): match secret names case-insensitively`, and a check enforces it.
+See [names and descriptions](https://github.com/Nodrail/.github/blob/main/CONTRIBUTING.md#names-and-descriptions).
+
 - Open an issue first for anything large, or that changes how rules are judged.
 - Add a test. If you're fixing a way around a rule, add the exact input to the
   tests.
