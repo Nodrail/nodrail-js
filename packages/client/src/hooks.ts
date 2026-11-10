@@ -6,9 +6,9 @@ import {
   type HookResult,
   type ToolInput as Input,
 } from "@nodrail/policy-engine/actions";
-import { blockedText } from "./blocked-text";
-import { resolveConnection, waitMsFrom, type Environment } from "./connection";
-import { authorize, NodrailClient, type Decision } from "./index";
+import { blockedText } from "./blocked-text.ts";
+import { resolveConnection, waitMsFrom, type Environment } from "./connection.ts";
+import { authorize, NodrailClient, type Decision } from "./index.ts";
 
 export {
   describeToolCall,
@@ -16,7 +16,7 @@ export {
   type HookResult,
 } from "@nodrail/policy-engine/actions";
 
-export const HOOK_VERSION = "0.1.1";
+export const HOOK_VERSION = "0.1.2";
 
 /** Longer than the wait for a person, shorter than the hook's own time limit. */
 const HOOK_DEADLINE_MS = 345_000;

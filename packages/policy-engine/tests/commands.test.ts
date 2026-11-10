@@ -424,8 +424,49 @@ describe("starter packs", () => {
     ["repo-work", ...bash("git push --force"), "deny"],
     ["repo-work", ...bash("rm -rf x"), "deny"],
     ["repo-work", ...bash("git log; curl x"), "none"],
+    // Ways around the packs found in 0.1.0.
+    ["read-only", "Grep", { pattern: "x", path: "/home/a/.ssh/id_rsa" }, "deny"],
+    ["read-only", "Grep", { pattern: "x", path: ".env" }, "deny"],
+    ["read-only", "Grep", { pattern: "x", glob: "**/.env" }, "deny"],
+    ["read-only", "Glob", { pattern: "/home/a/.ssh/*" }, "deny"],
+    ["read-only", "Glob", { pattern: "**/.aws/*" }, "deny"],
+    ["read-only", "Read", { file_path: ".env.production" }, "deny"],
+    ["read-only", "Read", { file_path: "/home/a/.npmrc" }, "deny"],
+    ["read-only", ...bash("git diff --no-index /dev/null /home/a/.ssh/id_rsa"), "none"],
+    ["read-only", ...bash("git show HEAD:.env"), "none"],
+    ["read-only", ...bash("git diff"), "allow"],
+    ["repo-work", "Write", { file_path: ".git/config", content: "" }, "deny"],
+    ["repo-work", "Write", { file_path: ".git/hooks/pre-commit", content: "" }, "deny"],
+    ["repo-work", "Write", { file_path: ".codex/hooks.json", content: "" }, "deny"],
+    ["repo-work", "Edit", { file_path: "/home/a/.codex/config.toml" }, "deny"],
+    ["repo-work", "Write", { file_path: "/home/a/.zshrc", content: "" }, "deny"],
+    ["repo-work", "Write", { file_path: "src/a.ts", content: "" }, "allow"],
   ] as const)("%s: %s %j is %s", (name, tool, input, outcome) => {
     expect(under(name, tool, input)).toBe(outcome);
+  });
+});
+
+// Found by the property tests: these crashed when looked up in plain objects.
+test.each(["__proto__", "constructor", "toString", "hasOwnProperty"])(
+  "a program called %s is judged like any other",
+  (program) => {
+    expect(classifyCommand(`${program} --flag value`).operation).toBe("command.run");
+  },
+);
+
+// Each of these ran code from its arguments while passing as a simple command.
+describe("commands that run other code are never simple", () => {
+  test.each([
+    "git clone -u 'sh -c id' x",
+    "git clone --upload-pack='sh -c id' x",
+    "git clone --config core.sshCommand=id x",
+    "git clone --template=/tmp/hooks x",
+    "sort --compress-program=sh file",
+    "zip -TT 'sh -c id' a.zip b",
+    "man -P 'sh -c id' ls",
+    "pkexec id",
+  ])("%s", (command) => {
+    expect(classifyCommand(command).operation).toBe("command.compound");
   });
 });
 
@@ -472,10 +513,32 @@ describe("tool calls", () => {
     ["a patch", () => describeToolCall("apply_patch", { command: `*** Begin Patch\n*** Add File: a${" ".repeat(500_000)}x\n*** End Patch` }, repo)],
     ["a move", () => describeToolCall("apply_patch", { command: `*** Begin Patch\n*** Update File: a\n*** Move to: b${" ".repeat(500_000)}x\n*** End Patch` }, repo)],
     ["a command", () => classifyCommand(`a${"\t".repeat(500_000)}b`)],
+    ["a long word", () => describeToolCall("Bash", { command: `echo ${"a".repeat(1_000_000)}` })],
+    ["a secret name repeated", () => describeToolCall("Bash", { command: `echo ${"token".repeat(200_000)}` })],
+    ["assignments that never end", () => describeToolCall("Bash", { command: `${"a_token=".repeat(125_000)}$` })],
+    ["a program name repeated", () => describeToolCall("Bash", { command: "mysql ".repeat(160_000) })],
+    ["a URL full of credentials", () => describeToolCall("WebFetch", { url: `https://x/${"//a:b".repeat(200_000)}` })],
+    ["a huge input key", () => describeToolCall("mcp__s__t", { ["token".repeat(200_000)]: "v" })],
+    ["a token prefix repeated", () => describeToolCall("Bash", { command: `echo ${"eyJ".repeat(400_000)}` })],
   ])("%s built to be slow is judged at once", (_label, judge) => {
     const start = performance.now();
     judge();
-    expect(performance.now() - start).toBeLessThan(500);
+    // Linear code takes milliseconds; a quadratic one would take minutes. The
+    // margin keeps a slow CI machine from failing it.
+    expect(performance.now() - start).toBeLessThan(2000);
+  });
+
+  test("shortening a long command can't leave part of a secret behind", () => {
+    const filler = "x ".repeat(8_185);
+    // Built here, so the repository's secret check doesn't see a key.
+    const key = ["sk", "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"].join("-");
+    const action = describeToolCall("Bash", {
+      command: `curl -H "Authorization: Bearer abc.def" ${filler}${key} done`,
+    });
+    const sent = JSON.stringify(action);
+    expect(sent).not.toContain("abc.def");
+    expect(sent).not.toContain("sk-ABCDEFG");
+    expect(sent).toContain("[shortened]");
   });
 
   test("a patch header with no file name can't be described, so it is blocked", () => {

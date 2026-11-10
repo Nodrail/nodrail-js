@@ -15,17 +15,17 @@ export {
   type ResourceScope,
   type RuleInput,
   type SimulationRequest,
-} from "./policies";
+} from "./policies.ts";
 export {
   evaluate,
   type Descriptor,
   type EvaluatedRule,
   type Evaluation,
-} from "./evaluator";
-export { isPlainJson, type JsonValue } from "./json";
+} from "./evaluator.ts";
+export { isPlainJson, type JsonValue } from "./json.ts";
 export {
   simulate,
   type SimulationInput,
   type SimulationResult,
-} from "./simulator";
-export * from "./commands";
+} from "./simulator.ts";
+export * from "./commands.ts";

@@ -6,5 +6,5 @@ export {
   type CompiledRule,
   type PolicyIssue,
   type PolicySource,
-} from "./rules-file";
-export { starterPacks, type StarterPack, type StarterPackName } from "./packs";
+} from "./rules-file.ts";
+export { starterPacks, type StarterPack, type StarterPackName } from "./packs.ts";

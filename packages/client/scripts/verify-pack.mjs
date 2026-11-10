@@ -78,7 +78,7 @@ const descriptor = { tool: "t", operation: "o", resource: { kind: "k", id: "i" }
 if (!descriptorDigest("i", descriptor).startsWith("sha256:")) throw new Error("digest");
 
 const client = new NodrailClient({
-  url: "http://x", credential: "c",
+  url: "https://x", credential: "c",
   fetch: async () => { throw new Error("down"); },
 });
 const decision = await authorize(client, descriptor, "key");
@@ -111,12 +111,15 @@ for (const [name, outcome] of Object.entries(expected)) {
 
   writeFileSync(
     join(folder, "types.ts"),
-    `import { authorize, NodrailClient, type Decision } from "@nodrail/client";
+    `import { authorize, guard, NodrailClient, type Decision } from "@nodrail/client";
 import { simulate } from "@nodrail/policy-engine";
 const client = new NodrailClient({ url: "u", credential: "c" });
 export const decide = (): Promise<Decision> =>
   authorize(client, { tool: "t", operation: "o", resource: { kind: "k", id: "i" }, params: {} }, "k");
 export const typed: typeof simulate = simulate;
+// If the types ever resolved to any, this marker would be unused and fail.
+// @ts-expect-error a guarded function asks first, so it returns a promise
+export const wrong: string = guard((n: number) => String(n), { name: "f" })(1);
 `,
   );
   writeFileSync(
@@ -135,6 +138,15 @@ export const typed: typeof simulate = simulate;
     }),
   );
   run("node", [typescript, "-p", "tsconfig.json"], folder);
+  // The same types under Node's own resolution, which needs file extensions.
+  writeFileSync(
+    join(folder, "tsconfig.node.json"),
+    JSON.stringify({
+      extends: "./tsconfig.json",
+      compilerOptions: { module: "nodenext", moduleResolution: "nodenext" },
+    }),
+  );
+  run("node", [typescript, "-p", "tsconfig.node.json"], folder);
 
   const hook = join("node_modules", ".bin", "nodrail-claude-hook");
   const unconfigured = spawnSync(hook, [], {

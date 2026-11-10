@@ -18,6 +18,8 @@
 
 **Shell commands are hard.** The engine doesn't run a full shell parser. It normalizes simple commands, and judges anything it can't reason about as a whole line. Allowed prefixes trust the program with its arguments, and the list of risky flags can't be complete. See [What a prefix trusts](commands-and-tools.md#what-a-prefix-trusts).
 
+**Running the project's code trusts the agent with it.** Allowing `npm test` or `make` runs whatever the project's scripts say, and an agent that may edit files may also edit those scripts or the tests. Deny rules stop the agent doing something directly, not through code it wrote and then ran. The `repo-work` pack makes this trade; `read-only` doesn't.
+
 **Declared facts are declared.** Conditions compare what the caller says. Agent names are not authenticated, and an allow doesn't prove that the action ran or what it did.
 
 **Redaction is best effort.** It catches common credential shapes, not everything.

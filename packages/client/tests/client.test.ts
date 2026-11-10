@@ -80,7 +80,7 @@ const allow = (nonce: string, overrides: object = {}) => ({
 
 const run = (send: typeof fetch, waitMs = 0) =>
   authorize(
-    new NodrailClient({ url: "http://x", credential: "c", fetch: send }),
+    new NodrailClient({ url: "https://x", credential: "c", fetch: send }),
     descriptor,
     "key",
     { waitMs, pollMs: 1, sleep: () => Promise.resolve() },
@@ -246,7 +246,7 @@ describe("everything else blocks", () => {
   test.each([NaN, Infinity])("params holding %s", async (value) => {
     const send = fakeFetch({ submit: { body: status() }, permit: allow });
     const decision = await authorize(
-      new NodrailClient({ url: "http://x", credential: "c", fetch: send }),
+      new NodrailClient({ url: "https://x", credential: "c", fetch: send }),
       { ...descriptor, params: { value } },
       "key",
     );

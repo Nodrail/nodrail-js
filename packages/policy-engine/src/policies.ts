@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { isPlainJson } from "./json";
+import { isPlainJson } from "./json.ts";
 
 export const effects = ["deny", "require_approval", "allow"] as const;
 export type Effect = (typeof effects)[number];

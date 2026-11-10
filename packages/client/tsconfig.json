@@ -8,7 +8,9 @@
     "skipLibCheck": true,
     "types": [
       "node"
-    ]
+    ],
+    "allowImportingTsExtensions": true,
+    "rewriteRelativeImportExtensions": true
   },
   "include": [
     "src/**/*.ts",

@@ -7,7 +7,8 @@ Every call is described as a tool, an operation and a resource, and rules match 
 | Simple command                                             | `shell`       | `command.run`              | `command`       |
 | Chain, pipe, substitution, `FOO=1 cmd`, `sudo`, `bash -c`… | `shell`       | `command.compound`         | `command`       |
 | Command containing a secret                                | `shell`       | `command.redacted`         | `command`       |
-| File read or search                                        | `files`       | `file.read`, `file.search` | `file`          |
+| File read                                                  | `files`       | `file.read`                | `file`          |
+| Search (Grep, Glob)                                        | `files`       | `file.search`              | `file`          |
 | File write or edit                                         | `files`       | `file.write`, `file.edit`  | `file`          |
 | File delete (Codex)                                        | `files`       | `file.delete`              | `file`      |
 | Patch of several files, or a rename (Codex)                | `files`       | `file.patch`               | `file`      |
@@ -30,7 +31,7 @@ Every call is described as a tool, an operation and a resource, and rules match 
   effect: allow
 
 - list: safe_commands
-  items: [git status, git diff]
+  items: [git status, git log]
 
 - rule: From a list
   command: { list: safe_commands, match: prefix }
@@ -63,10 +64,13 @@ An allow on a prefix trusts that program with every argument it gets. The engine
 
 - Allow exact commands where you can.
 - A deny prefix is easy to step around, because a flag can sit anywhere. Use it together with an allow list.
+- Some read commands print any file they're pointed at: `git diff --no-index a b`, `git show HEAD:.env`, `cat`. Allow them exactly, without arguments, or not at all.
 
 ## Files
 
 Paths are made absolute, then symlinks are followed and the disk's own casing is used, so `src/../.env` and `.ENV` on a case-insensitive disk are judged as the real file.
+
+A search is judged by everywhere it can reach. Its resource is the folder it searches, narrowed by the fixed start of its file pattern, so `Glob /home/me/.ssh/*` is a search of `/home/me/.ssh`. Its `path_parts` also hold every part of the pattern, so `**/.env` contains `.env`.
 
 To name a folder or file anywhere in a path, use `path_parts`:
 

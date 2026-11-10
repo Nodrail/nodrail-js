@@ -1,4 +1,4 @@
-import type { Decision } from "./index";
+import type { Decision } from "./index.ts";
 
 /** What an agent, and the person reading its output, is told about a block. */
 export function blockedText(decision: Extract<Decision, { allowed: false }>) {
@@ -15,6 +15,8 @@ export function blockedText(decision: Extract<Decision, { allowed: false }>) {
       return `Nodrail: the request was closed because something changed.${reference} Try again to ask for a new decision.`;
     case "NOT_CONFIGURED":
       return "Nodrail: not configured, so this action is blocked. Set NODRAIL_CREDENTIAL or save it to ~/.nodrail/credential.";
+    case "INSECURE_URL":
+      return "Nodrail: its address must use https (plain http only for this machine), so the credential isn't sent and this action is blocked.";
     case "UNAUTHENTICATED":
       return "Nodrail: the credential was refused, so this action is blocked.";
     case "QUOTA_EXCEEDED":

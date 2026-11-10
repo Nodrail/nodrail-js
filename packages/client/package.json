@@ -1,6 +1,6 @@
 {
   "name": "@nodrail/client",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Check with Nodrail before an AI agent acts. Wrap the tools of LangChain, the Vercel AI SDK, OpenAI Agents or any agent in one line.",
   "keywords": [
     "ai",
@@ -37,7 +37,7 @@
     "./setup": "./src/setup.ts"
   },
   "scripts": {
-    "build": "pnpm --filter @nodrail/policy-engine build && node scripts/build.mjs && tsc -p tsconfig.build.json",
+    "build": "pnpm --filter @nodrail/policy-engine build && node scripts/build.mjs && tsc -p tsconfig.build.json && node ../policy-engine/scripts/declarations.mjs dist",
     "lint": "oxlint --type-aware -D typescript/no-floating-promises -D typescript/no-misused-promises src tests",
     "check": "tsc --noEmit",
     "test": "vitest run",
@@ -62,6 +62,7 @@
     "@types/node": "^26.6.6",
     "ai": "^7.0.165",
     "esbuild": "^0.28.2",
+    "fast-check": "^4.10.2",
     "langchain": "^1.6.3",
     "oxlint": "^1.92.0",
     "oxlint-tsgolint": "^7.0.2006",

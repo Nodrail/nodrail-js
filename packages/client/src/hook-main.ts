@@ -1,4 +1,4 @@
-import { runHook, type AgentKind } from "./hooks";
+import { runHook, type AgentKind } from "./hooks.ts";
 
 /**
  * Exit 2 is what blocks a tool in both agents. Any other failure lets it run

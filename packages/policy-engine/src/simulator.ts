@@ -2,14 +2,14 @@ import {
   policyDocument,
   simulationRequest,
   type PolicyDocument,
-} from "./policies";
+} from "./policies.ts";
 import {
   evaluate,
   type Descriptor,
   type EvaluatedRule,
   type Evaluation,
-} from "./evaluator";
-import { isPlainJson } from "./json";
+} from "./evaluator.ts";
+import { isPlainJson } from "./json.ts";
 
 export type SimulationInput = {
   document: unknown;

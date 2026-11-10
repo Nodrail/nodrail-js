@@ -5,9 +5,9 @@ import {
   classifyArguments,
   classifyCommand,
   type CommandShape,
-} from "./commands";
-import { fingerprint } from "./protocol";
-import type { ActionDescriptor, JsonValue } from "./protocol";
+} from "./commands.ts";
+import { fingerprint } from "./protocol.ts";
+import type { ActionDescriptor, JsonValue } from "./protocol.ts";
 
 const MAX_RESOURCE = 512;
 const MAX_INLINE_INPUT = 16 * 1024;
@@ -18,8 +18,8 @@ export const nonEmptyText = (value: unknown) =>
 export type ToolInput = Record<string, unknown>;
 
 const REDACTED = "[redacted]";
-const sensitiveName =
-  "[A-Za-z0-9_-]*(?:token|secret|passw(?:or)?d|pwd|api[_-]?key|credential|authorization)[A-Za-z0-9_-]*";
+const sensitiveWord =
+  /token|secret|passw(?:or)?d|pwd|api[_-]?key|credential|authorization/i;
 
 /**
  * A value worth hiding. Something computed in place is code, not a secret, and
@@ -34,35 +34,83 @@ const secretPatterns: [RegExp, string][] = [
     `$1$2${REDACTED}`,
   ],
   [/\b(Bearer|Basic)\s+[A-Za-z0-9._~+/=-]+/gi, `$1 ${REDACTED}`],
-  // NAME=value and name: value, at any position.
-  [
-    new RegExp(`(${sensitiveName})(=|:\\s*)(${secretValue})`, "gi"),
-    `$1$2${REDACTED}`,
-  ],
-  // A value after a space only counts when the name is really a flag, so a path
-  // like ./tokens can't hide the argument that follows it.
-  [
-    new RegExp(`(\\s--?${sensitiveName})(\\s+)(${secretValue})`, "gi"),
-    `$1$2${REDACTED}`,
-  ],
   [/([?&](?:key|sig|signature|auth|code)=)[^&\s'"]+/gi, `$1${REDACTED}`],
   [/(\s-u\s+)[^\s:]+:\S+/g, `$1${REDACTED}`],
   [/\b(mysql|mysqldump|mariadb)\b([^|;&\n]*\s-p)[^\s]+/g, `$1$2${REDACTED}`],
   [/(\/\/)[^/\s:@]+:[^/\s@]+@/g, `$1${REDACTED}@`],
+  // Known token shapes, found anywhere: a shell joins 0'ghp_…'_ into one word,
+  // and the token must still be found inside it.
   [
-    /\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|sk-[A-Za-z0-9_-]{20,}|xox[abprs]-[A-Za-z0-9-]{10,}|AKIA[0-9A-Z]{16}|eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]+)\b/g,
+    /(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|xox[abprs]-[A-Za-z0-9-]{10,}|AKIA[0-9A-Z]{16}|eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]+)/g,
     REDACTED,
   ],
+  // sk- is common inside ordinary words (task-…), so it needs no letter or
+  // digit just before it.
+  [/(?<![A-Za-z0-9])sk-[A-Za-z0-9_-]{20,}/g, REDACTED],
 ];
+
+const nameChars = /[A-Za-z0-9_-]+/g;
+const assignmentAt = /=|:\s*/y;
+const spaceAt = /\s+/y;
+const valueAt = new RegExp(`(?:${secretValue})`, "y");
+
+/**
+ * NAME=value, name: value, and --name value, found word by word. A pattern
+ * that searched for the name anywhere took quadratic time on a long word, and
+ * an agent writes the text.
+ */
+function redactNamedValues(text: string) {
+  let shown = "";
+  let copied = 0;
+  for (const word of text.matchAll(nameChars)) {
+    const start = word.index;
+    if (start < copied || !sensitiveWord.test(word[0])) continue;
+    let at = start + word[0].length;
+    assignmentAt.lastIndex = at;
+    const assignment = assignmentAt.exec(text);
+    if (assignment) at += assignment[0].length;
+    else {
+      // A value after a space only counts when the name is really a flag, so a
+      // path like ./tokens can't hide the argument that follows it.
+      const isFlag =
+        word[0].startsWith("-") && (start === 0 || /\s/.test(text[start - 1] ?? ""));
+      spaceAt.lastIndex = at;
+      const space = isFlag ? spaceAt.exec(text) : null;
+      if (!space) continue;
+      at += space[0].length;
+    }
+    valueAt.lastIndex = at;
+    const value = valueAt.exec(text);
+    if (!value) continue;
+    shown += text.slice(copied, at) + REDACTED;
+    copied = at + value[0].length;
+  }
+  return shown + text.slice(copied);
+}
+
+/** Text longer than this is shortened before it is read, so reading stays fast. */
+const MAX_REDACTED = MAX_INLINE_INPUT;
+
+/**
+ * At most MAX_REDACTED characters, cut at a space where there is one, so the
+ * end of a secret can't survive as a fragment too short to recognise.
+ */
+function bounded(value: string) {
+  if (value.length <= MAX_REDACTED) return value;
+  const head = value.slice(0, MAX_REDACTED);
+  const space = head.search(/\s\S*$/);
+  return `${space > 0 ? head.slice(0, space) : ""} … [shortened]`;
+}
 
 /**
  * Best effort: it removes what looks like a secret before anything leaves this
  * machine. The fingerprint sent beside it still binds the exact original.
+ * Shortening a long value changes it too, so it counts as hidden.
  */
 export const redact = (value: string) =>
   secretPatterns.reduce(
     (current, [pattern, replacement]) => current.replace(pattern, replacement),
-    value,
+    redactNamedValues(bounded(value)),
   );
 
 /**
@@ -85,7 +133,9 @@ function redactCommand(line: string) {
   return shown + redact(part);
 }
 
-const sensitiveKey = new RegExp(`^${sensitiveName}$`, "i");
+/** A key that names a secret, such as api_key or GITHUB_TOKEN. Linear on any key. */
+const isSensitiveKey = (key: string) =>
+  /^[A-Za-z0-9_-]+$/.test(key) && sensitiveWord.test(key);
 
 function redactJson(value: unknown): JsonValue {
   if (typeof value === "string") return redact(value);
@@ -94,7 +144,7 @@ function redactJson(value: unknown): JsonValue {
     return Object.fromEntries(
       Object.entries(value).map(([key, item]) => [
         key,
-        sensitiveKey.test(key) ? REDACTED : redactJson(item),
+        isSensitiveKey(key) ? REDACTED : redactJson(item),
       ]),
     );
   return value as JsonValue;
@@ -108,9 +158,12 @@ function commandAction(
   original: unknown,
   extra: Record<string, JsonValue>,
 ): ActionDescriptor {
-  const shown = redactCommand(shape.text);
-  const hidden = shown !== shape.text;
-  const shortened = shown.length > MAX_COMMAND_ID;
+  // Only a bounded prefix is read. Shortened and hidden are told apart, so a
+  // reviewer isn't told a secret was removed when the command was just long.
+  const visible = bounded(shape.text);
+  const shown = redactCommand(visible);
+  const hidden = shown !== visible;
+  const shortened = shape.text.length > MAX_COMMAND_ID;
   // Rules see less than what will run, so none written for the visible part may
   // cover it, and a rule made from this request can only match this exact call.
   let operation: string = shape.operation;
@@ -204,9 +257,28 @@ function fileCall(
 }
 
 /** Searches read files too, so they are ruled by where they look. */
-function searchCall(input: ToolInput, cwd: string | null) {
+/** The folders a glob names before its first wildcard. */
+function globRoot(pattern: string) {
+  const fixed: string[] = [];
+  for (const part of pattern.split(/[\\/]/)) {
+    if (/[*?[\]{}]/.test(part)) break;
+    fixed.push(part);
+  }
+  return fixed.join("/");
+}
+
+/**
+ * A search is judged by everywhere it can reach: its folder, and any path its
+ * file pattern names, so a pattern like /home/me/.ssh/* or **\/.env can't
+ * search where a rule forbids reading.
+ */
+function searchCall(input: ToolInput, cwd: string | null, filePattern: unknown) {
   const within = nonEmptyText(input.path) ?? cwd;
-  const path = within ? fullPath(within, cwd) : null;
+  const base = within ? fullPath(within, cwd) : null;
+  if (!base) return null;
+  const glob = nonEmptyText(filePattern);
+  const root = glob ? globRoot(glob) : "";
+  const path = root ? fullPath(root, base) : base;
   if (!path) return null;
   return {
     tool: "files",
@@ -214,7 +286,7 @@ function searchCall(input: ToolInput, cwd: string | null) {
     resource: { kind: "file", id: path },
     params: {
       path,
-      path_parts: partsOf(path),
+      path_parts: [...new Set([...partsOf(path), ...partsOf(glob ?? "")])],
       pattern: redact(nonEmptyText(input.pattern) ?? ""),
       input_sha256: fingerprint(input),
     },
@@ -357,8 +429,9 @@ export function describeToolCall(
       case "Read":
         return fileCall("file.read", "file_path", input, cwd, input);
       case "Grep":
+        return searchCall(input, cwd, input.glob);
       case "Glob":
-        return searchCall(input, cwd);
+        return searchCall(input, cwd, input.pattern);
       case "NotebookEdit":
         return fileCall("notebook.edit", "notebook_path", input, cwd, input);
       case "apply_patch":
