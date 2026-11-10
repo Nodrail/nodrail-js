@@ -62,7 +62,7 @@ every change:
 | LlamaIndex | | a tool or array of tools |
 | Anthropic SDK tool runner | | your `tools` array |
 | Claude Agent SDK | | the tools from `tool()` |
-| MCP SDK (`registerTool`) | | the registered tools |
+| MCP SDK | [`mcp-server.ts`](examples/frameworks/mcp-server.ts) | what `registerTool` returns, [see below](#mcp-servers) |
 | OpenAI SDK `runTools` | | your `tools` array |
 
 A framework's tools keep their exact type, so the result goes wherever the
@@ -134,6 +134,27 @@ guard(tools, {
   },
 });
 ```
+
+### MCP servers
+
+Pass what `registerTool` returns, keyed by the tool's name. The server keeps
+calling that object, so `guard` puts the check inside it, through the SDK's own
+`update()`, and gives back the same object:
+
+```ts
+const server = new McpServer({ name: "github", version: "1.0.0" });
+
+guard({
+  delete_repo: server.registerTool(
+    "delete_repo",
+    { inputSchema: { repo: z.string() } },
+    async ({ repo }) => deleteRepo(repo),
+  ),
+});
+```
+
+A blocked call answers the MCP client with `isError: true` and the reason.
+Tested against the real `@modelcontextprotocol/sdk` client and server.
 
 ### Options
 
@@ -213,6 +234,8 @@ The agent reads a sentence saying why, and `NodrailBlockedError.code` (or
   function here to check. `guard` leaves only these as they are: anything with
   code of its own (`execute`, `handler`, `invoke`, `run`, `call`, `callback`,
   `func`…) is wrapped, or refused with an error if its shape isn't recognised.
+  A tool with two ways to run, such as both `execute` and `run`, is refused
+  rather than half checked, and so is an MCP task tool.
 - MCP servers attached directly to an agent aren't wrapped. Use the tools from
   your MCP client, or the LangChain middleware.
 - Tools that never pass through `guard`, and code outside the agent.
@@ -260,7 +283,8 @@ A simulation never approves anything or issues a permit.
 | LangChain            | 1.x                                      | 1.6 agent loop    |
 | Vercel AI SDK        | 7                                        | 7.0 agent loop    |
 | OpenAI Agents SDK    | 0.21                                     | 0.21 agent loop   |
-| Mastra, LlamaIndex, Anthropic and OpenAI SDKs, Claude Agent SDK, MCP SDK | Recognised by shape | Shape only |
+| MCP SDK              | 1.x                                      | 1.32 client and server |
+| Mastra, LlamaIndex, Anthropic and OpenAI SDKs, Claude Agent SDK | Recognised by shape | Shape only |
 | Node.js              | 22 or later                              | 22 and 24         |
 | Linux                | Blocking paths checked on Alpine, arm64  | Node 22 in Docker |
 | Windows              | Supported                                | Node 22 in CI; the agents' hooks not yet in the real CLIs |

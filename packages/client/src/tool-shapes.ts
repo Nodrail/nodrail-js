@@ -22,6 +22,8 @@ type Fn = (...args: unknown[]) => unknown;
 
 export type ToolAdapter = {
   matches: (tool: Tool) => boolean;
+  /** Every runnable member this adapter accounts for. Any other is refused. */
+  covers: readonly string[];
   name: (tool: Tool) => string | undefined;
   wrap: (tool: Tool, hooks: ToolHooks) => unknown;
 };
@@ -89,11 +91,47 @@ function guardMethod(
   });
 }
 
+/** What a tool that answers with content blocks says when it is blocked. */
+const contentRefusal = (reason: string) => ({
+  content: [{ type: "text", text: reason }],
+  isError: true,
+});
+
 const adapters: ToolAdapter[] = [
+  {
+    // MCP SDK registered tools. The server keeps calling the very object
+    // registerTool returned, so the check goes into that object, through the
+    // SDK's own update(). Older versions called the function `callback`.
+    matches: (tool) =>
+      isFn(tool.update) && (isFn(tool.handler) || isFn(tool.callback)),
+    covers: ["handler", "callback"],
+    name: (tool) => text(tool.name),
+    wrap: (tool, hooks) => {
+      const key = isFn(tool.handler) ? "handler" : "callback";
+      const original = tool[key] as Fn;
+      // Without an input schema the first argument is the request context.
+      const hasInput = tool.inputSchema !== undefined;
+      const checked = function (this: unknown, ...args: unknown[]) {
+        return hooks.around(
+          hasInput ? args[0] : {},
+          () => original.apply(this, args),
+          contentRefusal,
+        );
+      };
+      (tool.update as (changes: Tool) => void)({ callback: checked });
+      if (tool[key] !== checked)
+        throw new TypeError(
+          "Nodrail: this MCP tool didn't take the check, so it can't be guarded.",
+        );
+      return marked(tool);
+    },
+  },
   {
     // LangChain and LangGraph. `_call` is what runs after validation, and it is
     // the same path whether the tool is called directly or by an agent.
     matches: (tool) => isFn(tool._call) && isFn(tool.invoke),
+    // invoke, call and func all run through _call.
+    covers: ["_call", "invoke", "call", "func"],
     name: (tool) => text(tool.name),
     wrap: (tool, hooks) =>
       guardMethod(tool, "_call", hooks, firstArgument, (reason) =>
@@ -105,19 +143,18 @@ const adapters: ToolAdapter[] = [
   {
     // OpenAI Agents SDK.
     matches: (tool) => tool.type === "function" && isFn(tool.invoke),
+    covers: ["invoke"],
     name: (tool) => text(tool.name),
     wrap: (tool, hooks) =>
       guardMethod(tool, "invoke", hooks, (args) => parsedJson(args[1])),
   },
   {
-    // Claude Agent SDK and MCP-style handlers, which answer with content blocks.
+    // Claude Agent SDK, which answers with content blocks.
     matches: (tool) => isFn(tool.handler),
+    covers: ["handler"],
     name: (tool) => text(tool.name),
     wrap: (tool, hooks) =>
-      guardMethod(tool, "handler", hooks, firstArgument, (reason) => ({
-        content: [{ type: "text", text: reason }],
-        isError: true,
-      })),
+      guardMethod(tool, "handler", hooks, firstArgument, contentRefusal),
   },
   {
     // OpenAI SDK `runTools`.
@@ -125,6 +162,7 @@ const adapters: ToolAdapter[] = [
       typeof tool.function === "object" &&
       tool.function !== null &&
       isFn((tool.function as Tool).function),
+    covers: ["function"],
     name: (tool) => text((tool.function as Tool).name),
     wrap: (tool, hooks) =>
       marked({
@@ -140,6 +178,7 @@ const adapters: ToolAdapter[] = [
   {
     // Vercel AI SDK, Mastra, and anything else with `execute`.
     matches: (tool) => isFn(tool.execute),
+    covers: ["execute"],
     name: (tool) => text(tool.name) ?? text(tool.id),
     wrap: (tool, hooks) => {
       const original = tool.execute as Fn;
@@ -156,24 +195,16 @@ const adapters: ToolAdapter[] = [
     },
   },
   {
-    // MCP SDK registered tools, which answer with content blocks.
-    matches: (tool) => isFn(tool.callback),
-    name: (tool) => text(tool.name),
-    wrap: (tool, hooks) =>
-      guardMethod(tool, "callback", hooks, firstArgument, (reason) => ({
-        content: [{ type: "text", text: reason }],
-        isError: true,
-      })),
-  },
-  {
     // Anthropic SDK tool runner.
     matches: (tool) => isFn(tool.run),
+    covers: ["run"],
     name: (tool) => text(tool.name),
     wrap: (tool, hooks) => guardMethod(tool, "run", hooks),
   },
   {
     // LlamaIndex.
     matches: (tool) => isFn(tool.call) && isNamedMetadata(tool.metadata),
+    covers: ["call"],
     name: (tool) => text((tool.metadata as Tool).name),
     wrap: (tool, hooks) => guardMethod(tool, "call", hooks),
   },
@@ -203,20 +234,36 @@ const RUNNABLE = [
   "function",
 ] as const;
 
+/** The runnable members a tool has, by name. */
+export const runnableMembers = (tool: Tool) =>
+  RUNNABLE.filter((method) => runs(tool, method));
+
 /** Whether this object has code of its own that could run as a tool. */
-export function canRun(tool: Tool) {
-  return RUNNABLE.some((method) => {
-    const value = tool[method];
-    if (isFn(value)) return true;
-    // OpenAI SDK `runTools` nests the function one level down.
-    return (
-      method === "function" &&
-      typeof value === "object" &&
-      value !== null &&
-      isFn((value as Tool).function)
-    );
-  });
+export const canRun = (tool: Tool) => runnableMembers(tool).length > 0;
+
+function runs(tool: Tool, method: (typeof RUNNABLE)[number]) {
+  const value = tool[method];
+  if (isFn(value)) return true;
+  // MCP task tools keep their code in handler.createTask.
+  if (
+    method === "handler" &&
+    typeof value === "object" &&
+    value !== null &&
+    isFn((value as Tool).createTask)
+  )
+    return true;
+  // OpenAI SDK `runTools` nests the function one level down.
+  return (
+    method === "function" &&
+    typeof value === "object" &&
+    value !== null &&
+    isFn((value as Tool).function)
+  );
 }
+
+/** Runnable members the matching adapter doesn't put behind the check. */
+export const uncovered = (tool: Tool, adapter: ToolAdapter) =>
+  runnableMembers(tool).filter((method) => !adapter.covers.includes(method));
 
 /**
  * A tool definition with no code here: one that runs on a provider's servers,

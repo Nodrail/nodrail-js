@@ -84,7 +84,18 @@ To name a folder or file anywhere in a path, use `path_parts`:
   effect: deny
 ```
 
-A file rule covers calls to file tools. It can't stop an allowed shell command from printing the same file, and a search is judged by the folder it starts in.
+A dot file with a suffix also answers to its base, so `.env.staging` and `.env.local` contain `.env`.
+
+File calls carry these params:
+
+| Param | What it is |
+| --- | --- |
+| `path` | The resolved path. Paths over 4,096 characters or 256 levels deep, and patches of more than 1,000 files, can't be described, so they're blocked |
+| `path_parts` | Every folder and file name in the path, as above |
+| `inside_cwd` | `true` when the path is inside the folder the agent works in. Missing when that folder isn't known, and a missing value never helps an allow |
+| `reaches_secrets` | Searches only: `true` when the file pattern could pick out a place where credentials live, such as `.env*`, `*env` or `{.env,x}` |
+
+A file rule covers calls to file tools. It can't stop an allowed shell command from printing the same file, which is why a command that names a place where credentials live, such as `git log -p -- .env` or `git show HEAD:.env`, is never a simple command: an allowed prefix doesn't cover it.
 
 ## Secrets
 

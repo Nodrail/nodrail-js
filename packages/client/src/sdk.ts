@@ -14,10 +14,11 @@ import {
   isAsyncGenerator,
   isGuarded,
   isToolWithoutCode,
+  uncovered,
   type ToolHooks,
 } from "./tool-shapes.ts";
 
-export const SDK_VERSION = "0.1.2";
+export const SDK_VERSION = "0.1.3";
 
 type Blocked = Extract<Decision, { allowed: false }>;
 
@@ -332,6 +333,12 @@ export class Nodrail {
     if (isGuarded(target)) return target;
     const adapter = adapterFor(target);
     if (adapter) {
+      // A second way to run it would be left unchecked.
+      const others = uncovered(target, adapter);
+      if (others.length)
+        throw new TypeError(
+          `Nodrail: ${key ? `"${key}"` : "this tool"} can also run through ${others.join(", ")}, which this shape doesn't cover. Pass one function instead.`,
+        );
       const name = adapter.name(target) ?? key;
       if (!name)
         throw new TypeError(

@@ -1,3 +1,5 @@
+import { isSecretName } from "./secrets.ts";
+
 /** How a shell command is judged. No Node APIs, so it runs anywhere. */
 export type CommandShape = {
   operation: "command.run" | "command.compound";
@@ -61,7 +63,16 @@ const riskySubcommands = new Map<string, RegExp>(Object.entries({
   yarn: /^(?:exec|dlx)$/,
 }));
 
+/**
+ * Whether an argument points at a place credentials live, such as .env,
+ * ~/.ssh/id_rsa or HEAD:.env. An allowed prefix like `git log` must not stretch
+ * to `git log -p -- .env`.
+ */
+const namesASecret = (words: string[]) =>
+  words.slice(1).some((word) => word.split(/[\\/:=]/).some(isSecretName));
+
 function runsAnotherCommand(words: string[]) {
+  if (namesASecret(words)) return true;
   const first = words[0] ?? "";
   if (computedProgram.test(first)) return true;
   // Case-insensitive disks run BASH as bash.
