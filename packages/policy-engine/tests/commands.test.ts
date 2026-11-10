@@ -461,6 +461,30 @@ describe("starter packs", () => {
     ["repo-work", "Write", { file_path: ".mcp.json", content: "" }, "deny"],
     ["repo-work", "Write", { file_path: "/tmp/run.sh", content: "" }, "none"],
     ["repo-work", "Edit", { file_path: "src/b.ts" }, "allow"],
+    // Ways around the packs found in 0.1.3.
+    ["repo-work", "Write", { file_path: ".CLAUDE/settings.local.json", content: "" }, "deny"],
+    ["repo-work", "Write", { file_path: ".Mcp.json", content: "" }, "deny"],
+    ["repo-work", "Write", { file_path: ".VSCODE/tasks.json", content: "" }, "deny"],
+    ["repo-work", "Write", { file_path: ".Husky/pre-commit", content: "" }, "deny"],
+    ["repo-work", "Write", { file_path: ".Codex/config.toml", content: "" }, "deny"],
+    ["repo-work", "Edit", { file_path: "package.json" }, "require_approval"],
+    ["repo-work", "Write", { file_path: "Makefile", content: "" }, "require_approval"],
+    ["repo-work", ...bash("npm test --script-shell=/tmp/evil.sh"), "none"],
+    ["repo-work", ...bash("pnpm --config.x=y test"), "none"],
+    ["repo-work", ...bash("npm test"), "allow"],
+    ["read-only", ...bash("git log -p --all -- '.e*'"), "none"],
+    ["read-only", ...bash("ls .en?"), "none"],
+    ["read-only", ...bash("ls ./.ENV"), "none"],
+    ["read-only", "Read", { file_path: "/proc/self/environ" }, "deny"],
+    ["read-only", "Read", { file_path: ".env-prod" }, "deny"],
+    ["read-only", "Read", { file_path: "prod.env" }, "deny"],
+    ["read-only", "Read", { file_path: "certs/server.pem" }, "deny"],
+    ["read-only", "Read", { file_path: "/home/a/.codex/auth.json" }, "deny"],
+    ["read-only", "Read", { file_path: "/home/a/.claude/.credentials.json" }, "deny"],
+    ["read-only", "Read", { file_path: "/home/a/.nodrail/credential" }, "deny"],
+    ["read-only", "Read", { file_path: ".git/config" }, "deny"],
+    ["read-only", "Grep", { pattern: "KEY", glob: ".E*" }, "deny"],
+    ["read-only", "Read", { file_path: "src/environment.ts" }, "allow"],
   ] as const)("%s: %s %j is %s", (name, tool, input, outcome) => {
     expect(under(name, tool, input)).toBe(outcome);
   });
@@ -555,6 +579,27 @@ describe("tool calls", () => {
   test("a patch of more than 1,000 files can't be described, so a person reviews it", () => {
     const command = `*** Begin Patch\n${"*** Add File: a.ts\n".repeat(1_001)}*** End Patch`;
     expect(describeToolCall("apply_patch", { command }, repo)).toBeNull();
+  });
+
+  test("a search of the home folder reaches its secrets", () => {
+    const action = describeToolCall("Grep", { pattern: "KEY", path: homedir() }, repo);
+    expect(action?.params.reaches_secrets).toBe(true);
+    expect(describeToolCall("Grep", { pattern: "KEY" }, repo)?.params.reaches_secrets).toBe(false);
+  });
+
+  // Built here, so the repository's secret check doesn't see a key.
+  test.each([
+    ["Stripe", ["sk", "live", "abc123456789abcdef"].join("_")],
+    ["GitLab", `glpat-${"a1B2c3D4e5F6g7H8i9J0k"}`],
+    ["Google", `AIza${"A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r"}`],
+  ])("a %s key never leaves the machine", (_label, key) => {
+    const sent = JSON.stringify(describeToolCall("Bash", { command: `deploy ${key}` }));
+    expect(sent).not.toContain(key);
+  });
+
+  test("a value named like OPENAI_KEY is hidden", () => {
+    const sent = JSON.stringify(describeToolCall("Bash", { command: "export OPENAI_KEY=abc123" }));
+    expect(sent).not.toContain("abc123");
   });
 
   test("shortening a long command can't leave part of a secret behind", () => {

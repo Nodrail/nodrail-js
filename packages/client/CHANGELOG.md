@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.4
+
+- Claude Code's reads (Read, Grep, Glob) are checked on the machine: one that
+  reaches a place credentials live is blocked. Reads still aren't sent to
+  Nodrail.
+- The fixes in `@nodrail/policy-engine` 0.1.4.
+
 ## 0.1.3
 
 Fixes from a second independent review.

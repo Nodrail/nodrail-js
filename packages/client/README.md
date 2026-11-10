@@ -330,10 +330,11 @@ and `github` can never share a rule.
 
 ## Limits
 
-- In Claude Code and Codex, tools that only read, such as Read and Grep, are not
-  checked, and the check covers only the tools matched in the hook settings.
-  Anyone who can edit those settings, or a process outside the agent, can go
-  around it. This is not a sandbox.
+- In Claude Code, reads (Read, Grep, Glob) aren't sent to Nodrail. The hook
+  checks them on the machine and blocks any that reach a place credentials
+  live, such as `.env*`, `~/.ssh` or `*.pem`. The check covers only the tools
+  matched in the hook settings: anyone who can edit those settings, or a
+  process outside the agent, can go around it. This is not a sandbox.
 - File paths are resolved and URLs normalised before rules see them, in the
   machine's own form (`C:\repo\` on Windows). Shell prefix rules are a
   convenience, not a sandbox: prefer exact rules for commands.

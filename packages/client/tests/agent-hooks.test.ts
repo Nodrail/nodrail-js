@@ -302,3 +302,30 @@ describe("the credential never travels in the clear", () => {
     expect(reasonOf(result.stdout)).toContain("https");
   });
 });
+
+describe("reads are checked on the machine", () => {
+  // No credential and no server: a read never needs Nodrail to answer.
+  const offline = { NODRAIL_HOME: "/nonexistent" };
+  const noServer = (() => {
+    throw new Error("a read must not contact Nodrail");
+  }) as unknown as typeof fetch;
+
+  test.each([
+    ["Read", { file_path: ".env.production" }],
+    ["Read", { file_path: "/home/a/.ssh/id_rsa" }],
+    ["Read", { file_path: "/home/a/.codex/auth.json" }],
+    ["Grep", { pattern: "KEY", glob: ".env*" }],
+    ["Glob", { pattern: "**/.aws/*" }],
+  ])("%s %j is denied", async (tool, input) => {
+    const result = await runHook(event(tool, input), offline, { fetch: noServer });
+    expect(reasonOf(result.stdout)).toContain("credentials");
+  });
+
+  test.each([
+    ["Read", { file_path: "src/a.ts" }],
+    ["Grep", { pattern: "TODO", glob: "*.ts" }],
+  ])("%s %j goes ahead quietly", async (tool, input) => {
+    const result = await runHook(event(tool, input), offline, { fetch: noServer });
+    expect(result).toEqual({ exitCode: 0, stdout: "", stderr: "" });
+  });
+});

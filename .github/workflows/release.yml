@@ -44,8 +44,8 @@ jobs:
       - uses: changesets/action@ae32849d5ba541f9ae29e40e22a623bc13562f51 # v2.1.2
         with:
           version-script: pnpm version-packages
-          commit-message: Version packages
-          pr-title: Version packages
+          commit-message: "chore(release): version packages"
+          pr-title: "chore(release): version packages"
           # Publishing stays off until the repository variable is set.
           publish-script: ${{ vars.NPM_PUBLISH_ENABLED == 'true' && 'pnpm release' || '' }}
           # scripts/stage-release.mjs tags each version and writes its release.

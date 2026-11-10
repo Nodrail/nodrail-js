@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.1.4
+
+Fixes from a third independent review.
+
+- Names are compared without regard to case, even for folders that don't exist
+  yet: on many disks `.CLAUDE` is `.claude`, so a deny on `.claude` now holds.
+- The `.env` family is recognised whatever its form (`.env-prod`, `prod.env`),
+  and key files by extension (`*.pem`, `*.key`, `*.p12`, `*.pfx`).
+- More places credentials live: `/proc/*/environ`, Claude Code's and Codex's
+  sign-in files, Nodrail's own credential, and `.git/config`.
+- A command argument with a wildcard or different case that could name a
+  secret (`'.e*'`, `.en?`, `./.ENV`) makes the command never simple.
+- A search of the home folder, or above it, counts as reaching secrets.
+- `repo-work`: changes to `package.json`, makefiles and similar go to a person,
+  and npm, pnpm and yarn flags that swap the shell or config make a command
+  never simple. Its summary says plainly that tests run code the agent wrote.
+- Redaction catches Stripe, GitLab, Google and npm keys, and names such as
+  `OPENAI_KEY`.
+- New: `reachesSecret()` and `SECRET_PLACES` decide secret reads the way the
+  starter packs do.
+
 ## 0.1.3
 
 Fixes from a second independent review. Upgrade if you use the starter packs.

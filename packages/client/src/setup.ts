@@ -11,6 +11,16 @@
 export const governedTools =
   "^(?!(Read|Glob|Grep|LS|TodoWrite|TodoRead|AskUserQuestion|Agent|Task|ToolSearch|ExitPlanMode|EnterPlanMode)$).*$";
 
+/**
+ * Tools that only read. They aren't sent to Nodrail, but the hook checks them
+ * on the machine, so they can't reach a place where credentials live.
+ */
+export const localReadTools = ["Read", "Glob", "Grep"] as const;
+const localReadMatcher = `^(${localReadTools.join("|")})$`;
+
+/** A read is checked on the machine, so this needs no time for a person. */
+const READ_TIMEOUT_SECONDS = 30;
+
 /** Codex's matcher has no lookahead, so here the governed tools are named. */
 export const codexGovernedTools = "^(Bash|apply_patch|mcp__.*)$";
 
@@ -28,6 +38,10 @@ export function claudeCodeHooks(run: Command) {
       {
         matcher: governedTools,
         hooks: [{ ...hook, timeout: HOOK_TIMEOUT_SECONDS, onFailure: "block" }],
+      },
+      {
+        matcher: localReadMatcher,
+        hooks: [{ ...hook, timeout: READ_TIMEOUT_SECONDS, onFailure: "block" }],
       },
     ],
     PostToolUse: [report],

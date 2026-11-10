@@ -1,4 +1,4 @@
-import { isSecretName } from "./secrets.ts";
+import { globCouldReachSecret, isSecretName } from "./secrets.ts";
 
 /** How a shell command is judged. No Node APIs, so it runs anywhere. */
 export type CommandShape = {
@@ -41,6 +41,9 @@ const python = /^python[0-9.]*$/;
 const riskyArgument =
   /^(?:-c|-e|-exec|-execdir|-ok|-okdir|-delete|-fprint.*|-fls|--eval|--expression(?:=.*)?|--(?:exec|output|rsh|to-command|checkpoint-action|use-compress-program|upload-pack|receive-pack|open-files-in-pager|pre|config-env|compress-program|unzip-command|pager)(?:=.*)?)$/;
 
+const packageManagerFlags =
+  /^--(?:script-shell|shell|config\..+|prefix|dir|userconfig|globalconfig|node-options|call|workspace-root)(?:=.*)?$/;
+
 // Maps, not objects: a program called __proto__ or constructor must find nothing.
 const riskyByProgram = new Map<string, RegExp>(Object.entries({
   // -u is clone's --upload-pack; --config and --template can set a command or
@@ -54,6 +57,10 @@ const riskyByProgram = new Map<string, RegExp>(Object.entries({
   wget: /^(?:-[oO].*|--(?:output-document|output-file|post-file)(?:=.*)?)$/,
   dd: /^of=/,
   make: /^(?:-[fC].*|--(?:file|makefile|directory|eval)(?:=.*)?)$/,
+  // Settings that swap the shell scripts run in, or where config comes from.
+  npm: packageManagerFlags,
+  pnpm: packageManagerFlags,
+  yarn: packageManagerFlags,
 }));
 
 const riskySubcommands = new Map<string, RegExp>(Object.entries({
@@ -65,11 +72,20 @@ const riskySubcommands = new Map<string, RegExp>(Object.entries({
 
 /**
  * Whether an argument points at a place credentials live, such as .env,
- * ~/.ssh/id_rsa or HEAD:.env. An allowed prefix like `git log` must not stretch
- * to `git log -p -- .env`.
+ * ~/.ssh/id_rsa, HEAD:.env, './.ENV' or '.e*'. An allowed prefix like `git log`
+ * must not stretch to `git log -p -- .env`.
  */
 const namesASecret = (words: string[]) =>
-  words.slice(1).some((word) => word.split(/[\\/:=]/).some(isSecretName));
+  words
+    .slice(1)
+    .some((word) => word.split(/[:=]/).some(fragmentReachesSecret));
+
+/** A literal name, or a wildcard such as '.e*' or .en? that could match one. */
+function fragmentReachesSecret(fragment: string) {
+  if (fragment.length <= 256) return globCouldReachSecret(fragment);
+  // Too long to match patterns against quickly: its plain names still count.
+  return fragment.split(/[\\/]/).some(isSecretName);
+}
 
 function runsAnotherCommand(words: string[]) {
   if (namesASecret(words)) return true;

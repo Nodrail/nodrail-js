@@ -8,6 +8,8 @@ import {
 } from "./commands.ts";
 import { fingerprint } from "./protocol.ts";
 import { globCouldReachSecret, nameForms } from "./secrets.ts";
+
+export { reachesSecret } from "./secrets.ts";
 import type { ActionDescriptor, JsonValue } from "./protocol.ts";
 
 const MAX_RESOURCE = 512;
@@ -19,8 +21,9 @@ export const nonEmptyText = (value: unknown) =>
 export type ToolInput = Record<string, unknown>;
 
 const REDACTED = "[redacted]";
+// A bare "key" is too common to hide, but OPENAI_KEY or private-key isn't.
 const sensitiveWord =
-  /token|secret|passw(?:or)?d|pwd|api[_-]?key|credential|authorization/i;
+  /token|secret|passw(?:or)?d|pwd|api[_-]?key|[_-]keys?$|credential|authorization/i;
 
 /**
  * A value worth hiding. Something computed in place is code, not a secret, and
@@ -45,9 +48,12 @@ const secretPatterns: [RegExp, string][] = [
     /(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|xox[abprs]-[A-Za-z0-9-]{10,}|AKIA[0-9A-Z]{16}|eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]+)/g,
     REDACTED,
   ],
-  // sk- is common inside ordinary words (task-…), so it needs no letter or
-  // digit just before it.
+  // sk- and sk_ are common inside ordinary words (task-…), so they need no
+  // letter or digit just before them.
   [/(?<![A-Za-z0-9])sk-[A-Za-z0-9_-]{20,}/g, REDACTED],
+  // Stripe, GitLab, Google and npm.
+  [/(?<![A-Za-z0-9])[sr]k_(?:live|test)_[A-Za-z0-9]{10,}/g, REDACTED],
+  [/glpat-[A-Za-z0-9_-]{20,}|AIza[0-9A-Za-z_-]{35}|npm_[A-Za-z0-9]{36}/g, REDACTED],
 ];
 
 const nameChars = /[A-Za-z0-9_-]+/g;
@@ -293,6 +299,12 @@ function fileCall(
   };
 }
 
+/** Whether searching this folder takes in the whole home folder. */
+function containsHome(path: string) {
+  const home = canonicalPath(homedir());
+  return isWithin(home, path);
+}
+
 /** The folders a glob names before its first wildcard. */
 function globRoot(pattern: string) {
   const fixed: string[] = [];
@@ -324,8 +336,10 @@ function searchCall(input: ToolInput, cwd: string | null, filePattern: unknown) 
       path,
       path_parts: [...new Set([...partsOf(path), ...partsOf(glob ?? "")])],
       ...insideCwd(path, cwd),
-      // A wildcard such as .env* can pick out a secret without naming it.
-      reaches_secrets: glob ? globCouldReachSecret(glob) : false,
+      // A wildcard such as .env* can pick out a secret without naming it, and a
+      // search of the home folder, or above it, reaches every secret there.
+      reaches_secrets:
+        (glob ? globCouldReachSecret(glob) : false) || containsHome(path),
       pattern: redact(nonEmptyText(input.pattern) ?? ""),
       input_sha256: fingerprint(input),
     },

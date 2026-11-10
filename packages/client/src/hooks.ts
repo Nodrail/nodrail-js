@@ -3,11 +3,13 @@ import {
   deny,
   describeToolCall,
   nonEmptyText as text,
+  reachesSecret,
   type HookResult,
   type ToolInput as Input,
 } from "@nodrail/policy-engine/actions";
 import { blockedText } from "./blocked-text.ts";
 import { resolveConnection, waitMsFrom, type Environment } from "./connection.ts";
+import { localReadTools } from "./setup.ts";
 import { authorize, NodrailClient, type Decision } from "./index.ts";
 
 export {
@@ -16,7 +18,7 @@ export {
   type HookResult,
 } from "@nodrail/policy-engine/actions";
 
-export const HOOK_VERSION = "0.1.3";
+export const HOOK_VERSION = "0.1.4";
 
 /** Longer than the wait for a person, shorter than the hook's own time limit. */
 const HOOK_DEADLINE_MS = 345_000;
@@ -52,11 +54,36 @@ type HookEvent = {
   tool_response?: unknown;
 };
 
+const readTools = new Set<string>(localReadTools);
+
+/**
+ * Reads are decided here, with no server: a read of a place credentials live
+ * is denied, as the starter packs would, and anything else goes ahead quietly.
+ * A read that can't be described is blocked.
+ */
+function checkReadLocally(name: string, event: HookEvent): HookResult {
+  const input = event.tool_input;
+  const action =
+    typeof input === "object" && input !== null
+      ? describeToolCall(name, input as Input, text(event.cwd))
+      : null;
+  if (!action)
+    return deny("Nodrail: this read could not be described, so it is blocked.");
+  if (reachesSecret(action.params))
+    return deny(
+      "Nodrail: this reads a place where credentials live, so it is blocked.",
+    );
+  return { exitCode: 0, stdout: "", stderr: "" };
+}
+
 async function beforeTool(
   event: HookEvent,
   env: Environment,
   deps: HookDeps,
 ): Promise<HookResult> {
+  const toolName = text(event.tool_name);
+  if (toolName && readTools.has(toolName))
+    return checkReadLocally(toolName, event);
   const client = clientFrom(env, deps);
   if (!client)
     return deny(
