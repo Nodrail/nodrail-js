@@ -1,4 +1,4 @@
-import type { Condition, Effect, ResourceScope } from "./policies";
+import type { Condition, Effect, ResourceScope } from "./policies.ts";
 
 export type Descriptor = {
   agentId: string;

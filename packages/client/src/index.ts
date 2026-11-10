@@ -7,9 +7,9 @@ import {
   type ActionStatus,
   type PermitAllow,
   type ReportOutcome,
-} from "./protocol";
+} from "./protocol.ts";
 
-export type { ActionDescriptor } from "./protocol";
+export type { ActionDescriptor } from "./protocol.ts";
 export {
   createNodrail,
   guard,
@@ -22,7 +22,7 @@ export {
   type GuardOptions,
   type NodrailOptions,
   type OnBlocked,
-} from "./sdk";
+} from "./sdk.ts";
 
 export type ClientOptions = {
   url: string;
@@ -74,21 +74,48 @@ function asStatus(body: unknown): ActionStatus {
   return body as ActionStatus;
 }
 
+/**
+ * HTTPS, or plain HTTP to this machine only, which local development needs.
+ * Anything else would send the credential where others can read it.
+ */
+export function isSafeUrl(url: string) {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return false;
+  }
+  if (parsed.protocol === "https:") return true;
+  if (parsed.protocol !== "http:") return false;
+  const host = parsed.hostname.replace(/^\[|\]$/g, "");
+  return (
+    host === "localhost" ||
+    host.endsWith(".localhost") ||
+    host === "::1" ||
+    /^127(?:\.\d{1,3}){3}$/.test(host)
+  );
+}
+
 export class NodrailClient {
   private readonly base: string;
   private readonly timeoutMs: number;
   private readonly send: typeof fetch;
 
+  private readonly secure: boolean;
+
   constructor(private readonly options: ClientOptions) {
     this.base = `${options.url.replace(/\/$/, "")}/api/v1/runtime`;
     this.timeoutMs = options.timeoutMs ?? 10_000;
     this.send = options.fetch ?? fetch;
+    this.secure = isSafeUrl(options.url);
   }
 
   private async request(
     path: string,
     init: { body?: object; headers?: Record<string, string> } = {},
   ): Promise<unknown> {
+    // The credential never travels in the clear.
+    if (!this.secure) throw new Blocked("INSECURE_URL");
     let response: Response;
     try {
       response = await this.send(`${this.base}${path}`, {

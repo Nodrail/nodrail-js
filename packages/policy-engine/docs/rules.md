@@ -80,6 +80,23 @@ Where a field lives depends on how the call was described. With `nodrail.run()` 
 
 An entry can also be `{ macro: name }`, or `{ field: currency, op: in, list: name }`.
 
+`{ field: path_parts, op: contains, list: name }` matches when the array holds any item of the list. It compiles to one rule per item, so a rule can use it once. It needs `required_engine_version: 2`:
+
+```yaml
+- required_engine_version: 2
+
+- list: secret_places
+  items: [.env, .ssh, .aws]
+
+- rule: Never read secrets
+  tool: files
+  operation: file.read
+  resource: { kind: file, match: any }
+  condition:
+    - { field: path_parts, op: contains, list: secret_places }
+  effect: deny
+```
+
 Conditions compare what the caller declares. A parameter that is missing or of the wrong type never helps an allow rule, while deny and review rules still apply. So `"5"` can't pass a rule that wants a number under 1000.
 
 ## Lists and macros
@@ -108,7 +125,7 @@ Lists, conditions and tags can be appended to. Everything else is replaced.
 
 Unlike Falco, redefining a name without `override` is an error, so a later file can't silently weaken a rule.
 
-Conditions are structured YAML rather than an expression language, which makes them simple to validate and leaves nothing to inject into. There is no `or`: write two rules.
+Conditions are structured YAML rather than an expression language, which makes them simple to validate and leaves nothing to inject into. There is no general `or`: write two rules, or use `contains` with a list.
 
 ## Limits
 

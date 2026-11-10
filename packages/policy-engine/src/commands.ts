@@ -31,30 +31,35 @@ const wrappers = new Set(
    tmux screen busybox sh bash zsh dash fish ksh pwsh powershell cmd awk gawk
    mawk nawk sed node deno bun tsx ts-node npx pnpx bunx perl ruby php lua
    tclsh rscript osascript pypy pypy3 vi vim nvim emacs ssh scp sftp docker
-   podman kubectl`.split(/\s+/),
+   podman kubectl pkexec runuser sg`.split(/\s+/),
 );
 const python = /^python[0-9.]*$/;
 
 /** Arguments that run code or write files, on whichever program takes them. */
 const riskyArgument =
-  /^(?:-c|-e|-exec|-execdir|-ok|-okdir|-delete|-fprint.*|-fls|--eval|--expression(?:=.*)?|--(?:exec|output|rsh|to-command|checkpoint-action|use-compress-program|upload-pack|receive-pack|open-files-in-pager|pre|config-env)(?:=.*)?)$/;
+  /^(?:-c|-e|-exec|-execdir|-ok|-okdir|-delete|-fprint.*|-fls|--eval|--expression(?:=.*)?|--(?:exec|output|rsh|to-command|checkpoint-action|use-compress-program|upload-pack|receive-pack|open-files-in-pager|pre|config-env|compress-program|unzip-command|pager)(?:=.*)?)$/;
 
-const riskyByProgram: Record<string, RegExp> = {
-  git: /^(?:-x|-O.*)$/,
+// Maps, not objects: a program called __proto__ or constructor must find nothing.
+const riskyByProgram = new Map<string, RegExp>(Object.entries({
+  // -u is clone's --upload-pack; --config and --template can set a command or
+  // install hooks that run on the next git command.
+  git: /^(?:-x|-O.*|-u.*|--config(?:=.*)?|--template(?:=.*)?)$/,
+  zip: /^(?:-TT.*|--unzip-command(?:=.*)?)$/,
+  man: /^(?:-P.*|--pager(?:=.*)?|-H.*|--html(?:=.*)?)$/,
   tar: /^(?:-I.*|-[a-zA-Z]*I)$/,
   rsync: /^-e.*$/,
   curl: /^(?:-[oOKTdF].*|--(?:output|remote-name|config|upload-file|data.*|form.*|json)(?:=.*)?)$/,
   wget: /^(?:-[oO].*|--(?:output-document|output-file|post-file)(?:=.*)?)$/,
   dd: /^of=/,
   make: /^(?:-[fC].*|--(?:file|makefile|directory|eval)(?:=.*)?)$/,
-};
+}));
 
-const riskySubcommands: Record<string, RegExp> = {
+const riskySubcommands = new Map<string, RegExp>(Object.entries({
   git: /^(?:bisect|submodule|filter-branch|difftool|mergetool|config|alias|credential|hook)$/,
   npm: /^(?:exec|x)$/,
   pnpm: /^(?:exec|dlx)$/,
   yarn: /^(?:exec|dlx)$/,
-};
+}));
 
 function runsAnotherCommand(words: string[]) {
   const first = words[0] ?? "";
@@ -65,8 +70,8 @@ function runsAnotherCommand(words: string[]) {
   const args = words.slice(1);
   // Options before a git subcommand hide which subcommand it is.
   if (program === "git" && args[0]?.startsWith("-")) return true;
-  if (riskySubcommands[program]?.test(args[0] ?? "")) return true;
-  const specific = riskyByProgram[program];
+  if (riskySubcommands.get(program)?.test(args[0] ?? "")) return true;
+  const specific = riskyByProgram.get(program);
   return args.some(
     (word) => riskyArgument.test(word) || specific?.test(word) === true,
   );

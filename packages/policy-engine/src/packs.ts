@@ -1,5 +1,40 @@
 /** Starting points, written the way a team would write its own rules. */
-const readOnlyRules = `- required_engine_version: 1
+const readOnlyRules = `- required_engine_version: 2
+
+# Where credentials live. Reading or searching any of these is denied, and
+# deny beats allow, so this holds whatever else is added.
+- list: secret_places
+  items:
+    - .env
+    - .env.local
+    - .env.development
+    - .env.production
+    - .env.test
+    - .ssh
+    - .aws
+    - .gnupg
+    - .kube
+    - .docker
+    - gcloud
+    - .netrc
+    - .npmrc
+    - .pypirc
+
+- rule: Never read secrets
+  tool: files
+  operation: file.read
+  resource: { kind: file, match: any }
+  condition:
+    - { field: path_parts, op: contains, list: secret_places }
+  effect: deny
+
+- rule: Never search secrets
+  tool: files
+  operation: file.search
+  resource: { kind: file, match: any }
+  condition:
+    - { field: path_parts, op: contains, list: secret_places }
+  effect: deny
 
 # Reading and searching the project.
 - rule: Read files
@@ -14,49 +49,17 @@ const readOnlyRules = `- required_engine_version: 1
   resource: { kind: file, match: any }
   effect: allow
 
-# Deny beats allow, so these hold whatever else is added.
-- rule: Never read .env
-  tool: files
-  operation: file.read
-  resource: { kind: file, match: any }
-  condition:
-    - { field: path_parts, op: contains, value: .env }
-  effect: deny
-
-- rule: Never read .env.local
-  tool: files
-  operation: file.read
-  resource: { kind: file, match: any }
-  condition:
-    - { field: path_parts, op: contains, value: .env.local }
-  effect: deny
-
-- rule: Never read SSH keys
-  tool: files
-  operation: file.read
-  resource: { kind: file, match: any }
-  condition:
-    - { field: path_parts, op: contains, value: .ssh }
-  effect: deny
-
-- rule: Never read cloud credentials
-  tool: files
-  operation: file.read
-  resource: { kind: file, match: any }
-  condition:
-    - { field: path_parts, op: contains, value: .aws }
-  effect: deny
-
-# Commands that only look at things.
+# Commands that only look at things. Not git diff or git show: given a path or
+# a revision they print any file, secrets included.
 - list: looking_commands
-  items: [cd, ls, git status, git diff, git log, git show]
+  items: [cd, ls, git status, git log]
 
 - rule: Look around
   command: { list: looking_commands, match: prefix }
   effect: allow
 
 - list: exact_looking_commands
-  items: [pwd, git branch]
+  items: [pwd, git branch, git diff, git diff --staged]
 
 - rule: Where am I
   command: { list: exact_looking_commands }
@@ -102,21 +105,34 @@ const repoWorkRules = `
   resource: { kind: file, match: any }
   effect: allow
 
-# The hook lives here, so an agent must not be able to turn it off.
-- rule: Never write Claude Code settings
+# Files that change what runs next, or that turn the checks off: git's own
+# hooks and config, the agents' settings, and shell start-up files.
+- list: control_places
+  items:
+    - .git
+    - .claude
+    - .codex
+    - .bashrc
+    - .bash_profile
+    - .profile
+    - .zshrc
+    - .zprofile
+    - .zshenv
+
+- rule: Never write control files
   tool: files
   operation: file.write
   resource: { kind: file, match: any }
   condition:
-    - { field: path_parts, op: contains, value: .claude }
+    - { field: path_parts, op: contains, list: control_places }
   effect: deny
 
-- rule: Never edit Claude Code settings
+- rule: Never edit control files
   tool: files
   operation: file.edit
   resource: { kind: file, match: any }
   condition:
-    - { field: path_parts, op: contains, value: .claude }
+    - { field: path_parts, op: contains, list: control_places }
   effect: deny
 
 - rule: A person reviews workflow writes
@@ -135,7 +151,10 @@ const repoWorkRules = `
     - { field: path_parts, op: contains, value: .github }
   effect: require_approval
 
-# Everyday work. These run the project's own scripts, so they trust them.
+# Everyday work. These run the project's own code, which the agent can also
+# write, so allowing them trusts the agent with running code in this project.
+# The denies below stop the agent doing these things directly, not through a
+# script it wrote. See the security model.
 - list: working_commands
   items:
     - git add

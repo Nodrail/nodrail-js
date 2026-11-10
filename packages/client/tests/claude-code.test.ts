@@ -2,7 +2,7 @@ import { resolve } from "node:path";
 import { describe, expect, test, vi } from "vitest";
 import { describeToolCall, runHook } from "../src/hooks";
 
-const env = { NODRAIL_URL: "http://x", NODRAIL_CREDENTIAL: "c" };
+const env = { NODRAIL_URL: "https://x", NODRAIL_CREDENTIAL: "c" };
 
 const pre = (overrides: object = {}) =>
   JSON.stringify({
@@ -253,7 +253,7 @@ describe("before a tool runs", () => {
     ["no url", { NODRAIL_CREDENTIAL: "c" }, pre()],
     [
       "no credential",
-      { NODRAIL_URL: "http://x", NODRAIL_HOME: "/nonexistent" },
+      { NODRAIL_URL: "https://x", NODRAIL_HOME: "/nonexistent" },
       pre(),
     ],
     ["no tool id", env, pre({ tool_use_id: undefined })],

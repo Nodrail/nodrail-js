@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { describe, expect, test } from "vitest";
 import { resolveConnection, waitMsFrom } from "../src/connection";
+import { isSafeUrl } from "../src/index";
 import { describeToolCall, HOOK_VERSION, runHook } from "../src/hooks";
 import { SDK_VERSION } from "../src/sdk";
 import { claudeCodeHooks, codexGovernedTools, codexHooks } from "../src/setup";
@@ -269,4 +270,35 @@ test("the versions sent to Nodrail are the package's version", () => {
     readFileSync(new URL("../package.json", import.meta.url), "utf8"),
   ) as { version: string };
   expect([SDK_VERSION, HOOK_VERSION]).toEqual([version, version]);
+});
+
+describe("the credential never travels in the clear", () => {
+  test.each([
+    ["http://nodrail.example.com", false],
+    ["http://10.0.0.5:3000", false],
+    ["ftp://x", false],
+    ["not a url", false],
+    ["https://app.nodrail.com", true],
+    ["http://localhost:3000", true],
+    ["http://127.0.0.1:3000", true],
+    ["http://[::1]:3000", true],
+  ])("%s is %s", (url, safe) => {
+    expect(isSafeUrl(url)).toBe(safe);
+  });
+
+  test("an http address elsewhere blocks without sending anything", async () => {
+    const sent: string[] = [];
+    const result = await runHook(event("Bash", { command: "ls" }), {
+      NODRAIL_CREDENTIAL: "secret-credential",
+      NODRAIL_URL: "http://nodrail.example.com",
+      NODRAIL_WAIT_SECONDS: "0",
+    }, {
+      fetch: (async (url: string) => {
+        sent.push(url);
+        return new Response("{}");
+      }) as unknown as typeof fetch,
+    });
+    expect(sent).toEqual([]);
+    expect(reasonOf(result.stdout)).toContain("https");
+  });
 });

@@ -62,6 +62,7 @@ every change:
 | LlamaIndex | | a tool or array of tools |
 | Anthropic SDK tool runner | | your `tools` array |
 | Claude Agent SDK | | the tools from `tool()` |
+| MCP SDK (`registerTool`) | | the registered tools |
 | OpenAI SDK `runTools` | | your `tools` array |
 
 A framework's tools keep their exact type, so the result goes wherever the
@@ -181,7 +182,9 @@ A plain string `resource` is resource type `resource`. `run()` and `check()` sen
 
 Nearest first: options you pass, then `NODRAIL_URL` and `NODRAIL_CREDENTIAL`,
 then the file `credential` in `NODRAIL_HOME` (by default `~/.nodrail`). The URL
-defaults to `https://app.nodrail.com`. Only the credential is required.
+defaults to `https://app.nodrail.com`. Only the credential is required. The
+address must use `https`; plain `http` is accepted only for this machine
+(`localhost`, `127.0.0.1`, `::1`), so the credential is never sent in the clear.
 
 With no credential nothing throws at startup: each guarded call is blocked and
 says what is missing, and the next call looks again. So an application that loads
@@ -201,12 +204,15 @@ The agent reads a sentence saying why, and `NodrailBlockedError.code` (or
 | `UNAUTHENTICATED` | The credential was refused | Check it, and that `NODRAIL_URL` points at your Nodrail |
 | `RATE_LIMITED`, `QUOTA_EXCEEDED` | Too many calls, or the month's allowance is used | Wait, or raise the plan |
 | `UNAVAILABLE` | Nodrail couldn't be reached | Check the network; nothing ran |
+| `INSECURE_URL` | `NODRAIL_URL` is plain `http` to another machine, so the credential wasn't sent | Use `https`. Plain `http` works only for `localhost` |
 | `INVALID_ACTION` | The call couldn't be described, for example a circular input | Pass plain JSON arguments |
 
 ### What guard can't cover
 
 - Tools that run on a provider's servers, such as hosted web search, have no
-  function here to check. `guard` leaves them as they are.
+  function here to check. `guard` leaves only these as they are: anything with
+  code of its own (`execute`, `handler`, `invoke`, `run`, `call`, `callback`,
+  `func`…) is wrapped, or refused with an error if its shape isn't recognised.
 - MCP servers attached directly to an agent aren't wrapped. Use the tools from
   your MCP client, or the LangChain middleware.
 - Tools that never pass through `guard`, and code outside the agent.
@@ -254,7 +260,7 @@ A simulation never approves anything or issues a permit.
 | LangChain            | 1.x                                      | 1.6 agent loop    |
 | Vercel AI SDK        | 7                                        | 7.0 agent loop    |
 | OpenAI Agents SDK    | 0.21                                     | 0.21 agent loop   |
-| Mastra, LlamaIndex, Anthropic and OpenAI SDKs, Claude Agent SDK | Recognised by shape | Shape only |
+| Mastra, LlamaIndex, Anthropic and OpenAI SDKs, Claude Agent SDK, MCP SDK | Recognised by shape | Shape only |
 | Node.js              | 22 or later                              | 22 and 24         |
 | Linux                | Blocking paths checked on Alpine, arm64  | Node 22 in Docker |
 | Windows              | Supported                                | Node 22 in CI; the agents' hooks not yet in the real CLIs |

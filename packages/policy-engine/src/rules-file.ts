@@ -7,15 +7,16 @@ import {
   type Document,
 } from "yaml";
 import { z } from "zod";
-import { classifyCommand } from "./commands";
+import { classifyCommand } from "./commands.ts";
 import {
   policyDocument,
   type Condition,
   type PolicyDocument,
-} from "./policies";
+} from "./policies.ts";
 
 /** Rule files declare the highest format they need, as Falco files do. */
-export const ENGINE_VERSION = 1;
+/** 2 adds `op: contains` with a list. The compiled document is still version 1. */
+export const ENGINE_VERSION = 2;
 
 const MAX_FILE_BYTES = 1024 * 1024;
 
@@ -48,7 +49,11 @@ const refName = z.string().regex(/^[A-Za-z0-9_.-]{1,64}$/);
 
 const conditionEntry = z.union([
   z.strictObject({ macro: refName }),
-  z.strictObject({ field: z.string(), op: z.literal("in"), list: refName }),
+  z.strictObject({
+    field: z.string(),
+    op: z.enum(["in", "contains"]),
+    list: refName,
+  }),
   z.strictObject({ field: z.string(), op: z.string(), value: z.unknown() }),
 ]);
 type ConditionEntry = z.infer<typeof conditionEntry>;
@@ -395,6 +400,17 @@ function expandConditions(
         collector.error(at, `Unknown list "${entry.list}".`);
         return [];
       }
+      if (entry.op === "contains") {
+        if (!list.items.length) {
+          collector.error(
+            at,
+            `List "${entry.list}" is empty, so this rule would do nothing.`,
+          );
+          return [];
+        }
+        // Any of the items: one compiled rule per item, see anyOfVariants.
+        return [{ field: entry.field, op: "contains", anyOf: list.items }];
+      }
       return [{ field: entry.field, op: "in", value: list.items }];
     }
     return [entry];
@@ -521,6 +537,34 @@ function commandExpansions(
   return expansions;
 }
 
+type AnyOf = { field: string; op: "contains"; anyOf: unknown[] };
+const isAnyOf = (condition: unknown): condition is AnyOf =>
+  typeof condition === "object" && condition !== null && "anyOf" in condition;
+
+/**
+ * There is no `or` in the evaluator, so "contains any of a list" becomes one
+ * rule per item. One such condition per rule keeps the count predictable.
+ */
+function anyOfVariants(
+  conditions: unknown[],
+  name: string,
+  at: Place,
+  collector: Collector,
+): { conditions: Condition[]; item: string | null }[] | null {
+  const lists = conditions.filter(isAnyOf);
+  const rest = conditions.filter((condition) => !isAnyOf(condition)) as Condition[];
+  if (lists.length > 1) {
+    collector.error(at, `Rule "${name}" can use "contains" with a list only once.`);
+    return null;
+  }
+  const [anyOf] = lists;
+  if (!anyOf) return [{ conditions: rest, item: null }];
+  return anyOf.anyOf.map((item) => ({
+    item: String(item),
+    conditions: [...rest, { field: anyOf.field, op: "contains", value: item } as Condition],
+  }));
+}
+
 /**
  * Turns rule files into one policy document for the one evaluator. Later files
  * layer over earlier ones; every problem is reported at its own file and line.
@@ -566,13 +610,13 @@ export function compilePolicies(sources: PolicySource[]): CompileResult {
       );
       continue;
     }
-    const conditions = expandConditions(
-      rule.condition ?? [],
-      state,
-      used,
+    const variants = anyOfVariants(
+      expandConditions(rule.condition ?? [], state, used, at, collector),
+      name,
       at,
       collector,
-    ) as Condition[];
+    );
+    if (!variants) continue;
     const base = rule.id ?? slug(name).slice(0, 63);
     const shownName = rule.title ?? name;
     const expansions =
@@ -589,8 +633,17 @@ export function compilePolicies(sources: PolicySource[]): CompileResult {
           );
     if (!expansions) continue;
 
-    for (const expansion of expansions) {
-      output.push({
+    for (const plain of expansions)
+      for (const { conditions, item } of variants) {
+        const expansion =
+          item === null
+            ? plain
+            : {
+                ...plain,
+                id: `${plain.id.slice(0, 54)}-${shortHash(item)}`,
+                label: `${plain.label} (${item})`.slice(0, 120),
+              };
+        output.push({
         id: expansion.id,
         name: expansion.label,
         effect: rule.effect,
@@ -609,7 +662,7 @@ export function compilePolicies(sources: PolicySource[]): CompileResult {
         tags: rule.tags ?? [],
         source: { file: rule.file, line: rule.line },
       });
-    }
+      }
   }
 
   for (const [name, list] of state.lists)

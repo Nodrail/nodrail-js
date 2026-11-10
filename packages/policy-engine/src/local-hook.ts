@@ -6,11 +6,11 @@ import {
   nonEmptyText,
   type HookResult,
   type ToolInput,
-} from "./actions";
-import type { Descriptor } from "./evaluator";
-import type { PolicyDocument } from "./policies";
-import type { ActionDescriptor } from "./protocol";
-import { simulate } from "./simulator";
+} from "./actions.ts";
+import type { Descriptor } from "./evaluator.ts";
+import type { PolicyDocument } from "./policies.ts";
+import type { ActionDescriptor } from "./protocol.ts";
+import { simulate } from "./simulator.ts";
 
 export type Identity = { agent?: string; installation?: string };
 

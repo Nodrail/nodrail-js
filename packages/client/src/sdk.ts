@@ -1,21 +1,23 @@
 import { randomUUID } from "node:crypto";
 import { describeNamedTool } from "@nodrail/policy-engine/actions";
-import { blockedText } from "./blocked-text";
-import { resolveConnection, waitMsFrom, type Environment } from "./connection";
+import { blockedText } from "./blocked-text.ts";
+import { resolveConnection, waitMsFrom, type Environment } from "./connection.ts";
 import {
   authorize,
   NodrailClient,
   type ActionDescriptor,
   type Decision,
-} from "./index";
+} from "./index.ts";
 import {
   adapterFor,
+  canRun,
   isAsyncGenerator,
-  passesThrough,
+  isGuarded,
+  isToolWithoutCode,
   type ToolHooks,
-} from "./tool-shapes";
+} from "./tool-shapes.ts";
 
-export const SDK_VERSION = "0.1.1";
+export const SDK_VERSION = "0.1.2";
 
 type Blocked = Extract<Decision, { allowed: false }>;
 
@@ -232,10 +234,7 @@ export class Nodrail {
 
   private hooksFor(name: string, options: GuardOptions): ToolHooks {
     const onBlocked = options.onBlocked ?? this.onBlocked;
-    const describe =
-      typeof options.describe === "function"
-        ? options.describe
-        : options.describe?.[name];
+    const describe = describerFor(options.describe, name);
 
     const decideFor = (input: unknown): Promise<Decision> => {
       let descriptor: ActionDescriptor | null;
@@ -330,7 +329,7 @@ export class Nodrail {
       throw new TypeError(
         "Nodrail: this is not a tool, so it can't be guarded.",
       );
-    if (passesThrough(target)) return target;
+    if (isGuarded(target)) return target;
     const adapter = adapterFor(target);
     if (adapter) {
       const name = adapter.name(target) ?? key;
@@ -340,10 +339,16 @@ export class Nodrail {
         );
       return adapter.wrap(target, this.hooksFor(name, options));
     }
-    if (key !== undefined || !isCollection(target))
-      // Silently leaving a tool unguarded would look like it was protected.
+    // Silently leaving a tool unguarded would look like it was protected.
+    const which = key ? `"${key}"` : "this object";
+    if (canRun(target))
       throw new TypeError(
-        `Nodrail: don't know how to guard ${key ? `"${key}"` : "this object"}. Pass its function instead, or use nodrail.run().`,
+        `Nodrail: ${which} has code that runs, in a shape this version doesn't recognise. Pass its function instead, or use nodrail.run().`,
+      );
+    if (isToolWithoutCode(target)) return target;
+    if (key !== undefined || !isCollection(target))
+      throw new TypeError(
+        `Nodrail: don't know how to guard ${which}. Pass its function instead, or use nodrail.run().`,
       );
     return Object.fromEntries(
       Object.entries(target).map(([name, tool]) => [
@@ -352,6 +357,21 @@ export class Nodrail {
       ]),
     );
   }
+}
+
+/**
+ * The describe function for one tool. Only the caller's own entries count: a
+ * tool named "constructor" must not find Object's, which would hand back the
+ * model's own arguments as the description.
+ */
+export function describerFor(
+  describe: GuardOptions["describe"],
+  name: string,
+): Describe | undefined {
+  if (typeof describe === "function") return describe;
+  if (!describe || !Object.hasOwn(describe, name)) return undefined;
+  const entry = describe[name];
+  return typeof entry === "function" ? entry : undefined;
 }
 
 const invalidAction: Decision = {

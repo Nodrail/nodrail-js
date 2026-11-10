@@ -1,6 +1,6 @@
 # Shell commands and built-in tools, as seen by `nodrail-policy hook`.
 - list: safe_commands
-  items: [git status, git diff, git log]
+  items: [git status, git log]
 
 - rule: Safe git reads
   command: { list: safe_commands, match: prefix }

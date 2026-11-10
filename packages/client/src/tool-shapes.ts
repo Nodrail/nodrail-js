@@ -35,13 +35,24 @@ const isPlain = (value: object) => {
   return proto === Object.prototype || proto === null;
 };
 
-/** Marks a tool as checked, so wiring it twice can't ask twice. */
-export const GUARDED = Symbol.for("nodrail.guarded");
+/**
+ * Tools this module put behind the check, so wiring one twice can't ask twice.
+ * Private on purpose: a tool can't mark itself as checked.
+ */
+const guarded = new WeakSet<object>();
+
+export const isGuarded = (tool: unknown) =>
+  typeof tool === "object" && tool !== null && guarded.has(tool);
+
+const marked = <T extends object>(tool: T) => {
+  guarded.add(tool);
+  return tool;
+};
 
 /** A copy that still is what it was: classes stay instances of their class. */
 function replacing(tool: Tool, patch: Tool) {
-  if (isPlain(tool)) return { ...tool, ...patch, [GUARDED]: true };
-  return Object.assign(Object.create(tool) as Tool, patch, { [GUARDED]: true });
+  if (isPlain(tool)) return marked({ ...tool, ...patch });
+  return marked(Object.assign(Object.create(tool) as Tool, patch));
 }
 
 const parsedJson = (value: unknown) => {
@@ -115,13 +126,16 @@ const adapters: ToolAdapter[] = [
       tool.function !== null &&
       isFn((tool.function as Tool).function),
     name: (tool) => text((tool.function as Tool).name),
-    wrap: (tool, hooks) => ({
-      ...tool,
-      function: guardMethod(tool.function as Tool, "function", hooks, (args) =>
-        parsedJson(args[0]),
-      ),
-      [GUARDED]: true,
-    }),
+    wrap: (tool, hooks) =>
+      marked({
+        ...tool,
+        function: guardMethod(
+          tool.function as Tool,
+          "function",
+          hooks,
+          (args) => parsedJson(args[0]),
+        ),
+      }),
   },
   {
     // Vercel AI SDK, Mastra, and anything else with `execute`.
@@ -142,8 +156,18 @@ const adapters: ToolAdapter[] = [
     },
   },
   {
+    // MCP SDK registered tools, which answer with content blocks.
+    matches: (tool) => isFn(tool.callback),
+    name: (tool) => text(tool.name),
+    wrap: (tool, hooks) =>
+      guardMethod(tool, "callback", hooks, firstArgument, (reason) => ({
+        content: [{ type: "text", text: reason }],
+        isError: true,
+      })),
+  },
+  {
     // Anthropic SDK tool runner.
-    matches: (tool) => isFn(tool.run) && text(tool.name) !== undefined,
+    matches: (tool) => isFn(tool.run),
     name: (tool) => text(tool.name),
     wrap: (tool, hooks) => guardMethod(tool, "run", hooks),
   },
@@ -166,17 +190,38 @@ function isNamedMetadata(value: unknown) {
 export const adapterFor = (tool: Tool) =>
   adapters.find((adapter) => adapter.matches(tool));
 
-/**
- * Tools that run on a provider's servers, or that the application answers
- * itself, have no function here to put a check in front of.
- */
-export function passesThrough(tool: Tool) {
-  if ((tool as { [GUARDED]?: boolean })[GUARDED]) return true;
-  if (tool.type === "hosted_tool" || tool.type === "provider") return true;
-  return (
-    tool.inputSchema !== undefined &&
-    !isFn(tool.execute) &&
-    !isFn(tool.handler) &&
-    !isFn(tool.invoke)
-  );
+/** Every name a framework uses for the code a tool runs. */
+const RUNNABLE = [
+  "execute",
+  "handler",
+  "invoke",
+  "_call",
+  "func",
+  "run",
+  "call",
+  "callback",
+  "function",
+] as const;
+
+/** Whether this object has code of its own that could run as a tool. */
+export function canRun(tool: Tool) {
+  return RUNNABLE.some((method) => {
+    const value = tool[method];
+    if (isFn(value)) return true;
+    // OpenAI SDK `runTools` nests the function one level down.
+    return (
+      method === "function" &&
+      typeof value === "object" &&
+      value !== null &&
+      isFn((value as Tool).function)
+    );
+  });
 }
+
+/**
+ * A tool definition with no code here: one that runs on a provider's servers,
+ * or a schema the application answers itself. Only these pass through.
+ */
+export const isToolWithoutCode = (tool: Tool) =>
+  !canRun(tool) &&
+  ["inputSchema", "parameters", "schema", "type"].some((key) => key in tool);

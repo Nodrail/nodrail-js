@@ -37,9 +37,16 @@ supported version.
 
 ## How releases are protected
 
-- Packages are published from GitHub Actions with
-  [npm provenance](https://docs.npmjs.com/generating-provenance-statements), so
-  each version can be traced to the commit and workflow that built it.
-- Every change reaches `main` through a reviewed pull request that passed CI.
-- Workflows pin each action to a full commit, and dependencies are checked for
-  known vulnerabilities on every pull request.
+- **Staged and approved.** GitHub Actions stages each version on npm with
+  [provenance](https://docs.npmjs.com/generating-provenance-statements), using
+  npm trusted publishing, so no npm token exists. Nothing is installable until
+  a maintainer approves it with two-factor authentication.
+- **Traceable.** From 0.1.1 on, every version's provenance links it to the
+  commit and workflow run that built it; check it with `npm audit signatures`.
+  0.1.0 was published from a maintainer's machine and has no provenance.
+- **One maintainer, for now.** Changes reach `main` only through pull requests
+  that passed CI, CodeQL, dependency review and a workflow audit, on Linux,
+  macOS and Windows. With a single maintainer there is no second reviewer: pull
+  requests don't wait for an approval, and organization admins can bypass the
+  branch rules. See [GOVERNANCE.md](GOVERNANCE.md).
+- Workflows pin each action to a full commit and start with read-only tokens.

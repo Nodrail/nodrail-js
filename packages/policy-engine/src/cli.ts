@@ -4,18 +4,18 @@ import { extname, join } from "node:path";
 import { parseArgs } from "node:util";
 import { parse } from "yaml";
 import { z } from "zod";
-import { describeArguments, describeToolCall } from "./actions";
-import { decideToolCall, toDescriptor, type Identity } from "./local-hook";
-import type { ActionDescriptor } from "./protocol";
+import { describeArguments, describeToolCall } from "./actions.ts";
+import { decideToolCall, toDescriptor, type Identity } from "./local-hook.ts";
+import type { ActionDescriptor } from "./protocol.ts";
 import {
   compilePolicies,
   type PolicyIssue,
   type PolicySource,
-} from "./rules-file";
-import { starterPacks, type StarterPack, type StarterPackName } from "./packs";
-import { simulate } from "./simulator";
-import type { Descriptor } from "./evaluator";
-import type { PolicyDocument } from "./policies";
+} from "./rules-file.ts";
+import { starterPacks, type StarterPack, type StarterPackName } from "./packs.ts";
+import { simulate } from "./simulator.ts";
+import type { Descriptor } from "./evaluator.ts";
+import type { PolicyDocument } from "./policies.ts";
 
 const usage = `Usage: nodrail-policy <command> <rules file or folder>...
 

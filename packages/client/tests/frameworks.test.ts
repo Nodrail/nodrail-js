@@ -4,6 +4,7 @@ import { tool as langchainTool } from "langchain";
 import { describe, expect, expectTypeOf, test, vi } from "vitest";
 import { z } from "zod";
 import { createNodrail, NodrailBlockedError } from "../src/index";
+import { describerFor } from "../src/sdk";
 import { nodrailMiddleware } from "../src/langchain";
 import { runAiSdk, runLangChain, runOpenAiAgents } from "./support/agents";
 import { fakeNodrail } from "./support/fake-nodrail";
@@ -11,7 +12,7 @@ import { fakeNodrail } from "./support/fake-nodrail";
 const connected = (answer?: Parameters<typeof fakeNodrail>[0]) => {
   const server = fakeNodrail(answer);
   const nodrail = createNodrail({
-    url: "http://nodrail.test",
+    url: "https://nodrail.test",
     credential: "c",
     waitMs: 0,
     fetch: server.fetch,
@@ -78,7 +79,7 @@ describe.each([
 
 const middlewareOn = (server: ReturnType<typeof fakeNodrail>) =>
   nodrailMiddleware({
-    url: "http://nodrail.test",
+    url: "https://nodrail.test",
     credential: "c",
     waitMs: 0,
     fetch: server.fetch,
@@ -317,7 +318,7 @@ describe("guard", () => {
   test("a credential loaded after the tools were wrapped is picked up", async () => {
     const server = fakeNodrail();
     const env: Record<string, string | undefined> = {};
-    const nodrail = createNodrail({ url: "http://nodrail.test", waitMs: 0, fetch: server.fetch, env });
+    const nodrail = createNodrail({ url: "https://nodrail.test", waitMs: 0, fetch: server.fetch, env });
     const work = vi.fn((_input: object) => "ran");
     const send = nodrail.guard(work, { name: "send" });
     await expect(send({})).resolves.toContain("not configured");
@@ -475,4 +476,51 @@ describe("what guard's type promises", () => {
     ];
     expectTypeOf(nodrail.guard(agentsTools)).toEqualTypeOf<typeof agentsTools>();
   });
+});
+
+// Each of these ran unchecked in 0.1.0: guard returned the tool untouched.
+describe("nothing with code of its own slips through", () => {
+  const unconfigured = () =>
+    createNodrail({ env: { NODRAIL_HOME: "/nonexistent" }, waitMs: 0 });
+  const ran = vi.fn(() => "RAN");
+
+  test.each([
+    ["a provider tool that still runs locally", { type: "provider", id: "anthropic.bash", inputSchema: {}, execute: ran }, "execute"],
+    ["an MCP SDK registered tool", { inputSchema: {}, callback: ran }, "callback"],
+    ["a tool that runs through run()", { inputSchema: {}, run: ran }, "run"],
+  ])("%s is checked", async (_label, tool, method) => {
+    ran.mockClear();
+    const guardedTool = unconfigured().guard({ shell: tool }).shell as Record<string, unknown>;
+    expect(guardedTool).not.toBe(tool);
+    const result = await (guardedTool[method] as (input: object) => unknown).call(guardedTool, { command: "rm -rf ~" });
+    expect(ran).not.toHaveBeenCalled();
+    expect(JSON.stringify(result)).toContain("not configured");
+  });
+
+  test("a tool can't mark itself as already checked", async () => {
+    ran.mockClear();
+    const forged = { [Symbol.for("nodrail.guarded")]: true, name: "shell", execute: ran };
+    const guardedTool = unconfigured().guard(forged);
+    // A tool object keeps its own type; the guarded call returns a promise.
+    await (guardedTool.execute as unknown as () => Promise<unknown>)();
+    expect(ran).not.toHaveBeenCalled();
+  });
+
+  test("code in a shape it doesn't know is refused, not left unguarded", () => {
+    expect(() =>
+      unconfigured().guard({ shell: { inputSchema: {}, call: ran } }),
+    ).toThrow(/doesn't recognise/);
+  });
+
+  test("a tool with no code here, such as hosted search, passes through", () => {
+    const hosted = { type: "provider", id: "openai.web_search", args: {} };
+    expect(unconfigured().guard({ search: hosted }).search).toBe(hosted);
+  });
+});
+
+test("a tool named like an Object property gets no description from Object", () => {
+  const describe = { create_issue: () => ({ tool: "github", operation: "issues.create" }) };
+  for (const name of ["constructor", "__proto__", "toString", "hasOwnProperty"])
+    expect(describerFor(describe, name)).toBeUndefined();
+  expect(describerFor(describe, "create_issue")).toBe(describe.create_issue);
 });

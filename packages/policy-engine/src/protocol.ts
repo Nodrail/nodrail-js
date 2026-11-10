@@ -1,8 +1,8 @@
 import { createHash } from "node:crypto";
 import canonicalize from "canonicalize";
-import type { JsonValue } from "./json";
+import type { JsonValue } from "./json.ts";
 
-export { isPlainJson, type JsonValue } from "./json";
+export { isPlainJson, type JsonValue } from "./json.ts";
 
 export const SCHEMA_VERSION = 1;
 export const CANONICALIZER_VERSION = 1;

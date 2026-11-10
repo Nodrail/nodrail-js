@@ -1,6 +1,11 @@
 import { createMiddleware, ToolMessage, type AgentMiddleware } from "langchain";
-import { Nodrail, type GuardOptions, type NodrailOptions } from "./sdk";
-import { GUARDED } from "./tool-shapes";
+import {
+  describerFor,
+  Nodrail,
+  type GuardOptions,
+  type NodrailOptions,
+} from "./sdk.ts";
+import { isGuarded } from "./tool-shapes.ts";
 
 /**
  * Checks every tool call a `createAgent` agent makes, including tools added
@@ -15,7 +20,7 @@ export function nodrailMiddleware(
     wrapToolCall: async (request, handler) => {
       const { toolCall } = request;
       const name = toolCall.name;
-      if ((request.tool as { [GUARDED]?: boolean } | undefined)?.[GUARDED])
+      if (isGuarded(request.tool))
         return handler(request);
 
       const reply = (content: string) =>
@@ -27,10 +32,7 @@ export function nodrailMiddleware(
         });
       const run = nodrail.guard(() => handler(request), {
         name,
-        describe: () =>
-          typeof options.describe === "function"
-            ? options.describe(toolCall.args, name)
-            : options.describe?.[name]?.(toolCall.args, name),
+        describe: () => describerFor(options.describe, name)?.(toolCall.args, name),
         onBlocked: (error) => reply(error.message),
       });
       return (await (run as (input: unknown) => unknown)(
