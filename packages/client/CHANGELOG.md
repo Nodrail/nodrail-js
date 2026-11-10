@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.5
+
+- New: `guardMcpServer(server)`. Every tool the server registers from then on
+  is checked under the name it registers with, so a tool can't be guarded
+  under the wrong name. Guarding a server that already has tools throws.
+- A later `tool.update({ callback })` on a guarded MCP tool is checked too;
+  before, it removed the check.
+- Tests now fail if coverage drops.
+
 ## 0.1.4
 
 - Claude Code's reads (Read, Grep, Glob) are checked on the machine: one that

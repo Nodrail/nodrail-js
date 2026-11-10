@@ -1,6 +1,6 @@
 {
   "name": "@nodrail/policy-engine",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "Decide what an AI agent may do before it does it. Deterministic rules in YAML for tools and shell commands.",
   "keywords": [
     "ai",
@@ -37,10 +37,10 @@
   },
   "scripts": {
     "check": "tsc --noEmit",
-    "lint": "oxlint --type-aware src tests examples",
+    "lint": "oxlint -c ../../.oxlintrc.json --type-aware src tests examples",
     "build": "node scripts/build.mjs && tsc -p tsconfig.build.json && node scripts/declarations.mjs dist",
     "simulate": "tsx examples/simulate.ts examples/policy.json",
-    "test": "vitest run",
+    "test": "vitest run --coverage",
     "verify": "pnpm check && pnpm lint && pnpm test && pnpm test:pack",
     "test:pack": "node scripts/verify-pack.mjs",
     "rules": "tsx src/cli.ts"
@@ -52,6 +52,7 @@
   },
   "devDependencies": {
     "@types/node": "^26.6.6",
+    "@vitest/coverage-v8": "5.1.0",
     "esbuild": "^0.28.2",
     "fast-check": "^4.10.2",
     "oxlint": "^1.92.0",

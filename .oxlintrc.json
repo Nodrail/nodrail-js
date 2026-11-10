@@ -1,0 +1,65 @@
+// Size and complexity limits, so the code grows in small pieces. Files in
+// overrides were over a limit when it was set: they may shrink, never grow.
+// Lower or remove an entry when you refactor that code.
+{
+  "rules": {
+    "max-lines": [
+      "error",
+      {
+        "max": 400,
+        "skipBlankLines": true,
+        "skipComments": true
+      }
+    ],
+    "max-lines-per-function": [
+      "error",
+      {
+        "max": 80,
+        "skipBlankLines": true,
+        "skipComments": true
+      }
+    ],
+    "complexity": [
+      "error",
+      {
+        "max": 15
+      }
+    ],
+    "max-depth": [
+      "error",
+      {
+        "max": 4
+      }
+    ],
+    "max-params": [
+      "error",
+      {
+        "max": 4
+      }
+    ],
+    "max-nested-callbacks": [
+      "error",
+      {
+        "max": 4
+      }
+    ]
+  },
+  "overrides": [
+    {
+      "files": [
+        "**/tests/**",
+        "**/e2e/**",
+        "**/e2e-app/**",
+        "**/*.test.ts",
+        "**/*.test.tsx",
+        "**/*.spec.ts"
+      ],
+      "rules": {
+        "max-lines": "off",
+        "max-lines-per-function": "off",
+        "max-nested-callbacks": "off",
+        "max-params": "off"
+      }
+    }
+  ]
+}

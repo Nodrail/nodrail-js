@@ -22,10 +22,10 @@ whose tools are functions. Using Claude Code or Codex? Install the
 
 ## Packages
 
-| Package                                              | What it does                                                                                        |
-| ---------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
-| [`@nodrail/client`](packages/client)                 | The SDK: `guard()` for any framework, a LangChain middleware, and the hook for Claude Code and Codex |
-| [`@nodrail/policy-engine`](packages/policy-engine)   | The open evaluator: rules in YAML, a command line, and simulation with no server or account          |
+| Package                                            | What it does                                                                                         |
+| -------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| [`@nodrail/client`](packages/client)               | The SDK: `guard()` for any framework, a LangChain middleware, and the hook for Claude Code and Codex |
+| [`@nodrail/policy-engine`](packages/policy-engine) | The open evaluator: rules in YAML, a command line, and simulation with no server or account          |
 
 The policy engine is useful on its own. The client connects an agent to a
 [Nodrail](https://nodrail.com) workspace, where people review requests, rules are

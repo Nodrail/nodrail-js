@@ -12,10 +12,10 @@ pnpm install
 pnpm verify   # types, lint, tests, and a clean install of each built package
 ```
 
-| Folder                    | What it is                                                     |
-| ------------------------- | -------------------------------------------------------------- |
-| `packages/policy-engine`  | The evaluator, YAML rules and the `nodrail-policy` command line |
-| `packages/client`         | The SDK, `guard()`, the LangChain middleware and the agent hook |
+| Folder                   | What it is                                                      |
+| ------------------------ | --------------------------------------------------------------- |
+| `packages/policy-engine` | The evaluator, YAML rules and the `nodrail-policy` command line |
+| `packages/client`        | The SDK, `guard()`, the LangChain middleware and the agent hook |
 
 `pnpm --filter @nodrail/policy-engine rules validate examples/rules` runs the
 command line from source.

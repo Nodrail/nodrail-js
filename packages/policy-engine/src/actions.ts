@@ -1,161 +1,36 @@
-import { realpathSync } from "node:fs";
-import { homedir } from "node:os";
-import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
 import {
   classifyArguments,
   classifyCommand,
   type CommandShape,
 } from "./commands.ts";
 import { fingerprint } from "./protocol.ts";
-import { globCouldReachSecret, nameForms } from "./secrets.ts";
+import {
+  bounded,
+  MAX_INLINE_INPUT,
+  redact,
+  redactCommand,
+  redactJson,
+} from "./redact.ts";
+import { globCouldReachSecret } from "./secrets.ts";
+import {
+  containsHome,
+  fullPath,
+  insideAll,
+  insideCwd,
+  partsOf,
+} from "./paths.ts";
 
 export { reachesSecret } from "./secrets.ts";
+// Part of this module's public API since 0.1.0.
+export { redact } from "./redact.ts";
 import type { ActionDescriptor, JsonValue } from "./protocol.ts";
 
 const MAX_RESOURCE = 512;
-const MAX_INLINE_INPUT = 16 * 1024;
 const MAX_COMMAND_ID = MAX_RESOURCE - 42;
 export const nonEmptyText = (value: unknown) =>
   typeof value === "string" && value ? value : null;
 
 export type ToolInput = Record<string, unknown>;
-
-const REDACTED = "[redacted]";
-// A bare "key" is too common to hide, but OPENAI_KEY or private-key isn't.
-const sensitiveWord =
-  /token|secret|passw(?:or)?d|pwd|api[_-]?key|[_-]keys?$|credential|authorization/i;
-
-/**
- * A value worth hiding. Something computed in place is code, not a secret, and
- * hiding it would hide what the command does.
- */
-const secretValue = `"(?![^"]*[$\`])[^"]*"|'[^']*'|(?![^\\s&;|]*[$\`])[^\\s&;|]+`;
-
-const secretPatterns: [RegExp, string][] = [
-  // A whole header value, whatever scheme it uses.
-  [
-    /\b(authorization|proxy-authorization|cookie|set-cookie|x-api-key)(\s*:\s*)[^'"\n]+/gi,
-    `$1$2${REDACTED}`,
-  ],
-  [/\b(Bearer|Basic)\s+[A-Za-z0-9._~+/=-]+/gi, `$1 ${REDACTED}`],
-  [/([?&](?:key|sig|signature|auth|code)=)[^&\s'"]+/gi, `$1${REDACTED}`],
-  [/(\s-u\s+)[^\s:]+:\S+/g, `$1${REDACTED}`],
-  [/\b(mysql|mysqldump|mariadb)\b([^|;&\n]*\s-p)[^\s]+/g, `$1$2${REDACTED}`],
-  [/(\/\/)[^/\s:@]+:[^/\s@]+@/g, `$1${REDACTED}@`],
-  // Known token shapes, found anywhere: a shell joins 0'ghp_…'_ into one word,
-  // and the token must still be found inside it.
-  [
-    /(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|xox[abprs]-[A-Za-z0-9-]{10,}|AKIA[0-9A-Z]{16}|eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]+)/g,
-    REDACTED,
-  ],
-  // sk- and sk_ are common inside ordinary words (task-…), so they need no
-  // letter or digit just before them.
-  [/(?<![A-Za-z0-9])sk-[A-Za-z0-9_-]{20,}/g, REDACTED],
-  // Stripe, GitLab, Google and npm.
-  [/(?<![A-Za-z0-9])[sr]k_(?:live|test)_[A-Za-z0-9]{10,}/g, REDACTED],
-  [/glpat-[A-Za-z0-9_-]{20,}|AIza[0-9A-Za-z_-]{35}|npm_[A-Za-z0-9]{36}/g, REDACTED],
-];
-
-const nameChars = /[A-Za-z0-9_-]+/g;
-const assignmentAt = /=|:\s*/y;
-const spaceAt = /\s+/y;
-const valueAt = new RegExp(`(?:${secretValue})`, "y");
-
-/**
- * NAME=value, name: value, and --name value, found word by word. A pattern
- * that searched for the name anywhere took quadratic time on a long word, and
- * an agent writes the text.
- */
-function redactNamedValues(text: string) {
-  let shown = "";
-  let copied = 0;
-  for (const word of text.matchAll(nameChars)) {
-    const start = word.index;
-    if (start < copied || !sensitiveWord.test(word[0])) continue;
-    let at = start + word[0].length;
-    assignmentAt.lastIndex = at;
-    const assignment = assignmentAt.exec(text);
-    if (assignment) at += assignment[0].length;
-    else {
-      // A value after a space only counts when the name is really a flag, so a
-      // path like ./tokens can't hide the argument that follows it.
-      const isFlag =
-        word[0].startsWith("-") && (start === 0 || /\s/.test(text[start - 1] ?? ""));
-      spaceAt.lastIndex = at;
-      const space = isFlag ? spaceAt.exec(text) : null;
-      if (!space) continue;
-      at += space[0].length;
-    }
-    valueAt.lastIndex = at;
-    const value = valueAt.exec(text);
-    if (!value) continue;
-    shown += text.slice(copied, at) + REDACTED;
-    copied = at + value[0].length;
-  }
-  return shown + text.slice(copied);
-}
-
-/** Text longer than this is shortened before it is read, so reading stays fast. */
-const MAX_REDACTED = MAX_INLINE_INPUT;
-
-/**
- * At most MAX_REDACTED characters, cut at a space where there is one, so the
- * end of a secret can't survive as a fragment too short to recognise.
- */
-function bounded(value: string) {
-  if (value.length <= MAX_REDACTED) return value;
-  const head = value.slice(0, MAX_REDACTED);
-  const space = head.search(/\s\S*$/);
-  return `${space > 0 ? head.slice(0, space) : ""} … [shortened]`;
-}
-
-/**
- * Best effort: it removes what looks like a secret before anything leaves this
- * machine. The fingerprint sent beside it still binds the exact original.
- * Shortening a long value changes it too, so it counts as hidden.
- */
-export const redact = (value: string) =>
-  secretPatterns.reduce(
-    (current, [pattern, replacement]) => current.replace(pattern, replacement),
-    redactNamedValues(bounded(value)),
-  );
-
-/**
- * Each part of a command on its own, so a hidden header can't swallow what
- * comes after it. Separators inside quotes are part of the value.
- */
-function redactCommand(line: string) {
-  let shown = "";
-  let part = "";
-  let quote: string | null = null;
-  for (const char of line) {
-    if (quote) {
-      if (char === quote) quote = null;
-    } else if (char === '"' || char === "'") quote = char;
-    if (!quote && ";&|\n".includes(char)) {
-      shown += redact(part) + char;
-      part = "";
-    } else part += char;
-  }
-  return shown + redact(part);
-}
-
-/** A key that names a secret, such as api_key or GITHUB_TOKEN. Linear on any key. */
-const isSensitiveKey = (key: string) =>
-  /^[A-Za-z0-9_-]+$/.test(key) && sensitiveWord.test(key);
-
-function redactJson(value: unknown): JsonValue {
-  if (typeof value === "string") return redact(value);
-  if (Array.isArray(value)) return value.map(redactJson);
-  if (typeof value === "object" && value !== null)
-    return Object.fromEntries(
-      Object.entries(value).map(([key, item]) => [
-        key,
-        isSensitiveKey(key) ? REDACTED : redactJson(item),
-      ]),
-    );
-  return value as JsonValue;
-}
 
 const clip = (value: string, max: number) =>
   value.length <= max ? value : `${value.slice(0, max)}… [shortened]`;
@@ -210,76 +85,20 @@ export function describeArguments(words: string[]): ActionDescriptor {
   return commandAction(classifyArguments(words), words, { shell: "none" });
 }
 
-/**
- * The real path where it can be known: symlinks followed, and the disk's own
- * casing, so .CLAUDE can't pass for something other than .claude.
- */
-function canonicalPath(path: string) {
-  const missing: string[] = [];
-  let existing = path;
-  for (;;) {
-    try {
-      return join(realpathSync.native(existing), ...missing.reverse());
-    } catch {
-      const parent = dirname(existing);
-      if (parent === existing) return path;
-      missing.push(basename(existing));
-      existing = parent;
-    }
-  }
-}
-
-/**
- * Lets a rule name one folder or file anywhere in a path. A dot file with a
- * suffix also answers to its base, so .env.staging contains .env.
- */
-const partsOf = (path: string) => [
-  ...new Set(path.split(/[\\/]/).filter(Boolean).flatMap(nameForms)),
-];
-
-/** Longer or deeper paths aren't real, and would only make checking slow. */
-const MAX_PATH = 4096;
-const MAX_DEPTH = 256;
-
-function fullPath(raw: string, cwd: string | null) {
-  if (raw.length > MAX_PATH) return null;
-  const expanded = /^~(?=$|\/)/.test(raw) ? `${homedir()}${raw.slice(1)}` : raw;
-  // Resolved, so src/../.claude can't pass as a path inside src/.
-  if (!isAbsolute(expanded) && !cwd) return null;
-  const absolute = resolve(cwd ?? "/", expanded);
-  if (absolute.split(/[\\/]/).length > MAX_DEPTH) return null;
-  return canonicalPath(absolute);
-}
-
-/**
- * Whether a path is inside the folder the agent works in. Unknown without a
- * working folder, and a missing value never helps a rule allow anything.
- */
-function insideCwd(path: string, cwd: string | null): Record<string, boolean> {
-  const root = cwd ? fullPath(cwd, null) : null;
-  return root ? { inside_cwd: isWithin(path, root) } : {};
-}
-
-function isWithin(path: string, root: string) {
-  const prefix = root.endsWith(sep) ? root : `${root}${sep}`;
-  return path === root || path.startsWith(prefix);
-}
-
-/** Whether every path is inside the working folder, resolved once. */
-function insideAll(paths: string[], cwd: string | null): Record<string, boolean> {
-  const root = cwd ? fullPath(cwd, null) : null;
-  return root ? { inside_cwd: paths.every((path) => isWithin(path, root)) } : {};
-}
-
 /** A patch touching more files can't be described, so a person reviews it. */
 const MAX_PATCH_FILES = 1000;
 
+/** A file tool: its operation, where its path is, and what it writes. */
+type FileTool = {
+  operation: string;
+  pathField: string;
+  content: (input: ToolInput) => unknown;
+};
+
 function fileCall(
-  operation: string,
-  pathField: string,
+  { operation, pathField, content }: FileTool,
   input: ToolInput,
   cwd: string | null,
-  content: unknown,
 ): ActionDescriptor | null {
   const raw = nonEmptyText(input[pathField]);
   if (!raw) return null;
@@ -294,15 +113,9 @@ function fileCall(
       path,
       path_parts: partsOf(path),
       ...insideCwd(path, cwd),
-      content_sha256: fingerprint(content),
+      content_sha256: fingerprint(content(input)),
     },
   };
-}
-
-/** Whether searching this folder takes in the whole home folder. */
-function containsHome(path: string) {
-  const home = canonicalPath(homedir());
-  return isWithin(home, path);
 }
 
 /** The folders a glob names before its first wildcard. */
@@ -320,7 +133,11 @@ function globRoot(pattern: string) {
  * file pattern names, so a pattern like /home/me/.ssh/* or **\/.env can't
  * search where a rule forbids reading.
  */
-function searchCall(input: ToolInput, cwd: string | null, filePattern: unknown) {
+function searchCall(
+  input: ToolInput,
+  cwd: string | null,
+  filePattern: unknown,
+) {
   const within = nonEmptyText(input.path) ?? cwd;
   const base = within ? fullPath(within, cwd) : null;
   if (!base) return null;
@@ -418,8 +235,7 @@ function patchHeaders(patch: string) {
     const verb = PATCH_VERBS.find((name) => rest.startsWith(`${name} File: `));
     if (verb)
       changes.push({ verb, path: rest.slice(verb.length + 7).trimEnd() });
-    else if (rest.startsWith("Move to: "))
-      moves.push(rest.slice(9).trimEnd());
+    else if (rest.startsWith("Move to: ")) moves.push(rest.slice(9).trimEnd());
   }
   return { changes, moves };
 }
@@ -471,69 +287,133 @@ function patchCall(
 }
 
 /** Null means the call cannot be described reliably, so it is blocked. */
+function webFetchCall(input: ToolInput): ActionDescriptor | null {
+  const url = nonEmptyText(input.url);
+  if (!url || !URL.canParse(url)) return null;
+  // Without user info, so a@evil.net can't pass as a prefix of a.
+  const { protocol, host, pathname, search } = new URL(url);
+  const normal = `${protocol}//${host}${pathname}${search}`;
+  const shown = redact(normal);
+  return {
+    tool: "web",
+    operation: shown === normal ? "fetch" : "fetch.redacted",
+    resource: { kind: "url", id: shown },
+    params: { url: shown, url_sha256: fingerprint(url) },
+  };
+}
+
+function webSearchCall(input: ToolInput): ActionDescriptor | null {
+  const query = nonEmptyText(input.query);
+  if (!query) return null;
+  const shown = redact(query);
+  return {
+    tool: "web",
+    operation: shown === query ? "search" : "search.redacted",
+    resource: { kind: "query", id: shown },
+    params: { query: shown, query_sha256: fingerprint(query) },
+  };
+}
+
+/** A tool this module has no shape for: an MCP tool, or Claude Code's own. */
+function otherToolCall(
+  name: string,
+  input: ToolInput,
+): ActionDescriptor | null {
+  if (name.startsWith("mcp__")) return mcpCall(name, input);
+  return {
+    tool: "claude-code",
+    // Claude Code's own names, which differ by more than their case.
+    operation: /^[A-Za-z0-9_-]{1,128}$/.test(name)
+      ? name.toLowerCase()
+      : ruleKey(name, 128),
+    resource: { kind: "tool", id: name },
+    params: { input_sha256: fingerprint(input) },
+  };
+}
+
+const whatIsWritten = (input: ToolInput) => input.content;
+const wholeInput = (input: ToolInput) => input;
+
+type Describe = (
+  input: ToolInput,
+  cwd: string | null,
+  name: string,
+) => ActionDescriptor | null;
+
+// A Map, so a tool named like an Object property finds nothing.
+const describers = new Map<string, Describe>([
+  ["Bash", (input, _cwd, name) => shellCall(name, input)],
+  ["PowerShell", (input, _cwd, name) => shellCall(name, input)],
+  [
+    "Write",
+    (input, cwd) =>
+      fileCall(
+        {
+          operation: "file.write",
+          pathField: "file_path",
+          content: whatIsWritten,
+        },
+        input,
+        cwd,
+      ),
+  ],
+  [
+    "Edit",
+    (input, cwd) =>
+      fileCall(
+        { operation: "file.edit", pathField: "file_path", content: wholeInput },
+        input,
+        cwd,
+      ),
+  ],
+  [
+    "MultiEdit",
+    (input, cwd) =>
+      fileCall(
+        { operation: "file.edit", pathField: "file_path", content: wholeInput },
+        input,
+        cwd,
+      ),
+  ],
+  [
+    "Read",
+    (input, cwd) =>
+      fileCall(
+        { operation: "file.read", pathField: "file_path", content: wholeInput },
+        input,
+        cwd,
+      ),
+  ],
+  [
+    "NotebookEdit",
+    (input, cwd) =>
+      fileCall(
+        {
+          operation: "notebook.edit",
+          pathField: "notebook_path",
+          content: wholeInput,
+        },
+        input,
+        cwd,
+      ),
+  ],
+  ["Grep", (input, cwd) => searchCall(input, cwd, input.glob)],
+  ["Glob", (input, cwd) => searchCall(input, cwd, input.pattern)],
+  ["apply_patch", (input, cwd) => patchCall(input, cwd)],
+  ["WebFetch", (input) => webFetchCall(input)],
+  ["WebSearch", (input) => webSearchCall(input)],
+]);
+
+/** Null means the call cannot be described reliably, so it is blocked. */
 export function describeToolCall(
   name: string,
   input: ToolInput,
   cwd: string | null = null,
 ): ActionDescriptor | null {
-  const described = ((): ActionDescriptor | null => {
-    switch (name) {
-      case "Bash":
-      case "PowerShell":
-        return shellCall(name, input);
-      case "Write":
-        return fileCall("file.write", "file_path", input, cwd, input.content);
-      case "Edit":
-      case "MultiEdit":
-        return fileCall("file.edit", "file_path", input, cwd, input);
-      case "Read":
-        return fileCall("file.read", "file_path", input, cwd, input);
-      case "Grep":
-        return searchCall(input, cwd, input.glob);
-      case "Glob":
-        return searchCall(input, cwd, input.pattern);
-      case "NotebookEdit":
-        return fileCall("notebook.edit", "notebook_path", input, cwd, input);
-      case "apply_patch":
-        return patchCall(input, cwd);
-      case "WebFetch": {
-        const url = nonEmptyText(input.url);
-        if (!url || !URL.canParse(url)) return null;
-        // Without user info, so a@evil.net can't pass as a prefix of a.
-        const { protocol, host, pathname, search } = new URL(url);
-        const normal = `${protocol}//${host}${pathname}${search}`;
-        const shown = redact(normal);
-        return {
-          tool: "web",
-          operation: shown === normal ? "fetch" : "fetch.redacted",
-          resource: { kind: "url", id: shown },
-          params: { url: shown, url_sha256: fingerprint(url) },
-        };
-      }
-      case "WebSearch": {
-        const query = nonEmptyText(input.query);
-        if (!query) return null;
-        const shown = redact(query);
-        return {
-          tool: "web",
-          operation: shown === query ? "search" : "search.redacted",
-          resource: { kind: "query", id: shown },
-          params: { query: shown, query_sha256: fingerprint(query) },
-        };
-      }
-      default:
-        if (name.startsWith("mcp__")) return mcpCall(name, input);
-        return {
-          tool: "claude-code",
-          // Claude Code's own names, which differ by more than their case.
-          operation: /^[A-Za-z0-9_-]{1,128}$/.test(name)
-            ? name.toLowerCase()
-            : ruleKey(name, 128),
-          resource: { kind: "tool", id: name },
-          params: { input_sha256: fingerprint(input) },
-        };
-    }
-  })();
+  const describe = describers.get(name);
+  const described = describe
+    ? describe(input, cwd, name)
+    : otherToolCall(name, input);
   return described && described.resource.id.length <= MAX_RESOURCE
     ? described
     : null;

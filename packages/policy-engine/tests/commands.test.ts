@@ -228,7 +228,9 @@ describe("what a reviewer sees", () => {
 });
 
 describe("paths", () => {
-  const folder = mkdtempSync(join(realpathSync.native(tmpdir()), "nodrail-paths-"));
+  const folder = mkdtempSync(
+    join(realpathSync.native(tmpdir()), "nodrail-paths-"),
+  );
   mkdirSync(join(folder, ".claude"));
   symlinkSync(join(folder, ".claude"), join(folder, "link"));
 
@@ -426,21 +428,45 @@ describe("starter packs", () => {
     ["repo-work", ...bash("rm -rf x"), "deny"],
     ["repo-work", ...bash("git log; curl x"), "none"],
     // Ways around the packs found in 0.1.0.
-    ["read-only", "Grep", { pattern: "x", path: "/home/a/.ssh/id_rsa" }, "deny"],
+    [
+      "read-only",
+      "Grep",
+      { pattern: "x", path: "/home/a/.ssh/id_rsa" },
+      "deny",
+    ],
     ["read-only", "Grep", { pattern: "x", path: ".env" }, "deny"],
     ["read-only", "Grep", { pattern: "x", glob: "**/.env" }, "deny"],
     ["read-only", "Glob", { pattern: "/home/a/.ssh/*" }, "deny"],
     ["read-only", "Glob", { pattern: "**/.aws/*" }, "deny"],
     ["read-only", "Read", { file_path: ".env.production" }, "deny"],
     ["read-only", "Read", { file_path: "/home/a/.npmrc" }, "deny"],
-    ["read-only", ...bash("git diff --no-index /dev/null /home/a/.ssh/id_rsa"), "none"],
+    [
+      "read-only",
+      ...bash("git diff --no-index /dev/null /home/a/.ssh/id_rsa"),
+      "none",
+    ],
     ["read-only", ...bash("git show HEAD:.env"), "none"],
     ["read-only", ...bash("git diff"), "allow"],
     ["repo-work", "Write", { file_path: ".git/config", content: "" }, "deny"],
-    ["repo-work", "Write", { file_path: ".git/hooks/pre-commit", content: "" }, "deny"],
-    ["repo-work", "Write", { file_path: ".codex/hooks.json", content: "" }, "deny"],
+    [
+      "repo-work",
+      "Write",
+      { file_path: ".git/hooks/pre-commit", content: "" },
+      "deny",
+    ],
+    [
+      "repo-work",
+      "Write",
+      { file_path: ".codex/hooks.json", content: "" },
+      "deny",
+    ],
     ["repo-work", "Edit", { file_path: "/home/a/.codex/config.toml" }, "deny"],
-    ["repo-work", "Write", { file_path: "/home/a/.zshrc", content: "" }, "deny"],
+    [
+      "repo-work",
+      "Write",
+      { file_path: "/home/a/.zshrc", content: "" },
+      "deny",
+    ],
     ["repo-work", "Write", { file_path: "src/a.ts", content: "" }, "allow"],
     // Ways around the packs found in 0.1.2.
     ["read-only", "Grep", { pattern: "KEY", glob: ".env*" }, "deny"],
@@ -451,24 +477,74 @@ describe("starter packs", () => {
     ["read-only", "Read", { file_path: ".env.staging" }, "deny"],
     ["read-only", "Read", { file_path: ".envrc" }, "deny"],
     ["read-only", "Read", { file_path: "/home/a/.git-credentials" }, "deny"],
-    ["read-only", "Read", { file_path: "/home/a/.config/gh/hosts.yml" }, "deny"],
+    [
+      "read-only",
+      "Read",
+      { file_path: "/home/a/.config/gh/hosts.yml" },
+      "deny",
+    ],
     ["read-only", ...bash("git log -p -- .env"), "none"],
     ["read-only", ...bash("git log --oneline -5"), "allow"],
-    ["repo-work", "Write", { file_path: "/home/a/.gitconfig", content: "" }, "deny"],
-    ["repo-work", "Write", { file_path: "/home/a/.ssh/authorized_keys", content: "" }, "deny"],
-    ["repo-work", "Write", { file_path: "/home/a/Library/LaunchAgents/x.plist", content: "" }, "deny"],
-    ["repo-work", "Write", { file_path: ".husky/pre-commit", content: "" }, "deny"],
+    [
+      "repo-work",
+      "Write",
+      { file_path: "/home/a/.gitconfig", content: "" },
+      "deny",
+    ],
+    [
+      "repo-work",
+      "Write",
+      { file_path: "/home/a/.ssh/authorized_keys", content: "" },
+      "deny",
+    ],
+    [
+      "repo-work",
+      "Write",
+      { file_path: "/home/a/Library/LaunchAgents/x.plist", content: "" },
+      "deny",
+    ],
+    [
+      "repo-work",
+      "Write",
+      { file_path: ".husky/pre-commit", content: "" },
+      "deny",
+    ],
     ["repo-work", "Write", { file_path: ".mcp.json", content: "" }, "deny"],
     ["repo-work", "Write", { file_path: "/tmp/run.sh", content: "" }, "none"],
     ["repo-work", "Edit", { file_path: "src/b.ts" }, "allow"],
     // Ways around the packs found in 0.1.3.
-    ["repo-work", "Write", { file_path: ".CLAUDE/settings.local.json", content: "" }, "deny"],
+    [
+      "repo-work",
+      "Write",
+      { file_path: ".CLAUDE/settings.local.json", content: "" },
+      "deny",
+    ],
     ["repo-work", "Write", { file_path: ".Mcp.json", content: "" }, "deny"],
-    ["repo-work", "Write", { file_path: ".VSCODE/tasks.json", content: "" }, "deny"],
-    ["repo-work", "Write", { file_path: ".Husky/pre-commit", content: "" }, "deny"],
-    ["repo-work", "Write", { file_path: ".Codex/config.toml", content: "" }, "deny"],
+    [
+      "repo-work",
+      "Write",
+      { file_path: ".VSCODE/tasks.json", content: "" },
+      "deny",
+    ],
+    [
+      "repo-work",
+      "Write",
+      { file_path: ".Husky/pre-commit", content: "" },
+      "deny",
+    ],
+    [
+      "repo-work",
+      "Write",
+      { file_path: ".Codex/config.toml", content: "" },
+      "deny",
+    ],
     ["repo-work", "Edit", { file_path: "package.json" }, "require_approval"],
-    ["repo-work", "Write", { file_path: "Makefile", content: "" }, "require_approval"],
+    [
+      "repo-work",
+      "Write",
+      { file_path: "Makefile", content: "" },
+      "require_approval",
+    ],
     ["repo-work", ...bash("npm test --script-shell=/tmp/evil.sh"), "none"],
     ["repo-work", ...bash("pnpm --config.x=y test"), "none"],
     ["repo-work", ...bash("npm test"), "allow"],
@@ -480,7 +556,12 @@ describe("starter packs", () => {
     ["read-only", "Read", { file_path: "prod.env" }, "deny"],
     ["read-only", "Read", { file_path: "certs/server.pem" }, "deny"],
     ["read-only", "Read", { file_path: "/home/a/.codex/auth.json" }, "deny"],
-    ["read-only", "Read", { file_path: "/home/a/.claude/.credentials.json" }, "deny"],
+    [
+      "read-only",
+      "Read",
+      { file_path: "/home/a/.claude/.credentials.json" },
+      "deny",
+    ],
     ["read-only", "Read", { file_path: "/home/a/.nodrail/credential" }, "deny"],
     ["read-only", "Read", { file_path: ".git/config" }, "deny"],
     ["read-only", "Grep", { pattern: "KEY", glob: ".E*" }, "deny"],
@@ -494,7 +575,9 @@ describe("starter packs", () => {
 test.each(["__proto__", "constructor", "toString", "hasOwnProperty"])(
   "a program called %s is judged like any other",
   (program) => {
-    expect(classifyCommand(`${program} --flag value`).operation).toBe("command.run");
+    expect(classifyCommand(`${program} --flag value`).operation).toBe(
+      "command.run",
+    );
   },
 );
 
@@ -554,20 +637,106 @@ describe("tool calls", () => {
 
   // An agent writes these, so a slow pattern would let it stall the check.
   test.each([
-    ["a patch", () => describeToolCall("apply_patch", { command: `*** Begin Patch\n*** Add File: a${" ".repeat(500_000)}x\n*** End Patch` }, repo)],
-    ["a move", () => describeToolCall("apply_patch", { command: `*** Begin Patch\n*** Update File: a\n*** Move to: b${" ".repeat(500_000)}x\n*** End Patch` }, repo)],
+    [
+      "a patch",
+      () =>
+        describeToolCall(
+          "apply_patch",
+          {
+            command: `*** Begin Patch\n*** Add File: a${" ".repeat(500_000)}x\n*** End Patch`,
+          },
+          repo,
+        ),
+    ],
+    [
+      "a move",
+      () =>
+        describeToolCall(
+          "apply_patch",
+          {
+            command: `*** Begin Patch\n*** Update File: a\n*** Move to: b${" ".repeat(500_000)}x\n*** End Patch`,
+          },
+          repo,
+        ),
+    ],
     ["a command", () => classifyCommand(`a${"\t".repeat(500_000)}b`)],
-    ["a long word", () => describeToolCall("Bash", { command: `echo ${"a".repeat(1_000_000)}` })],
-    ["a secret name repeated", () => describeToolCall("Bash", { command: `echo ${"token".repeat(200_000)}` })],
-    ["assignments that never end", () => describeToolCall("Bash", { command: `${"a_token=".repeat(125_000)}$` })],
-    ["a program name repeated", () => describeToolCall("Bash", { command: "mysql ".repeat(160_000) })],
-    ["a URL full of credentials", () => describeToolCall("WebFetch", { url: `https://x/${"//a:b".repeat(200_000)}` })],
-    ["a huge input key", () => describeToolCall("mcp__s__t", { ["token".repeat(200_000)]: "v" })],
-    ["a token prefix repeated", () => describeToolCall("Bash", { command: `echo ${"eyJ".repeat(400_000)}` })],
-    ["a very deep path", () => describeToolCall("Glob", { pattern: "*", path: "a/".repeat(500_000) }, repo)],
-    ["a patch of many files", () => describeToolCall("apply_patch", { command: `*** Begin Patch\n${"*** Update File: a/b/c/d\n".repeat(1_000)}*** End Patch` }, repo)],
-    ["a patch of too many files", () => describeToolCall("apply_patch", { command: `*** Begin Patch\n${"*** Update File: a\n".repeat(500_000)}*** End Patch` }, repo)],
-    ["a glob built to be slow", () => describeToolCall("Grep", { pattern: "x", glob: `${"*a".repeat(120)}{${"b,".repeat(60)}c}` }, repo)],
+    [
+      "a long word",
+      () =>
+        describeToolCall("Bash", { command: `echo ${"a".repeat(1_000_000)}` }),
+    ],
+    [
+      "a secret name repeated",
+      () =>
+        describeToolCall("Bash", {
+          command: `echo ${"token".repeat(200_000)}`,
+        }),
+    ],
+    [
+      "assignments that never end",
+      () =>
+        describeToolCall("Bash", { command: `${"a_token=".repeat(125_000)}$` }),
+    ],
+    [
+      "a program name repeated",
+      () => describeToolCall("Bash", { command: "mysql ".repeat(160_000) }),
+    ],
+    [
+      "a URL full of credentials",
+      () =>
+        describeToolCall("WebFetch", {
+          url: `https://x/${"//a:b".repeat(200_000)}`,
+        }),
+    ],
+    [
+      "a huge input key",
+      () => describeToolCall("mcp__s__t", { ["token".repeat(200_000)]: "v" }),
+    ],
+    [
+      "a token prefix repeated",
+      () =>
+        describeToolCall("Bash", { command: `echo ${"eyJ".repeat(400_000)}` }),
+    ],
+    [
+      "a very deep path",
+      () =>
+        describeToolCall(
+          "Glob",
+          { pattern: "*", path: "a/".repeat(500_000) },
+          repo,
+        ),
+    ],
+    [
+      "a patch of many files",
+      () =>
+        describeToolCall(
+          "apply_patch",
+          {
+            command: `*** Begin Patch\n${"*** Update File: a/b/c/d\n".repeat(1_000)}*** End Patch`,
+          },
+          repo,
+        ),
+    ],
+    [
+      "a patch of too many files",
+      () =>
+        describeToolCall(
+          "apply_patch",
+          {
+            command: `*** Begin Patch\n${"*** Update File: a\n".repeat(500_000)}*** End Patch`,
+          },
+          repo,
+        ),
+    ],
+    [
+      "a glob built to be slow",
+      () =>
+        describeToolCall(
+          "Grep",
+          { pattern: "x", glob: `${"*a".repeat(120)}{${"b,".repeat(60)}c}` },
+          repo,
+        ),
+    ],
   ])("%s built to be slow is judged at once", (_label, judge) => {
     const start = performance.now();
     judge();
@@ -582,9 +751,16 @@ describe("tool calls", () => {
   });
 
   test("a search of the home folder reaches its secrets", () => {
-    const action = describeToolCall("Grep", { pattern: "KEY", path: homedir() }, repo);
+    const action = describeToolCall(
+      "Grep",
+      { pattern: "KEY", path: homedir() },
+      repo,
+    );
     expect(action?.params.reaches_secrets).toBe(true);
-    expect(describeToolCall("Grep", { pattern: "KEY" }, repo)?.params.reaches_secrets).toBe(false);
+    expect(
+      describeToolCall("Grep", { pattern: "KEY" }, repo)?.params
+        .reaches_secrets,
+    ).toBe(false);
   });
 
   // Built here, so the repository's secret check doesn't see a key.
@@ -593,12 +769,16 @@ describe("tool calls", () => {
     ["GitLab", `glpat-${"a1B2c3D4e5F6g7H8i9J0k"}`],
     ["Google", `AIza${"A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r"}`],
   ])("a %s key never leaves the machine", (_label, key) => {
-    const sent = JSON.stringify(describeToolCall("Bash", { command: `deploy ${key}` }));
+    const sent = JSON.stringify(
+      describeToolCall("Bash", { command: `deploy ${key}` }),
+    );
     expect(sent).not.toContain(key);
   });
 
   test("a value named like OPENAI_KEY is hidden", () => {
-    const sent = JSON.stringify(describeToolCall("Bash", { command: "export OPENAI_KEY=abc123" }));
+    const sent = JSON.stringify(
+      describeToolCall("Bash", { command: "export OPENAI_KEY=abc123" }),
+    );
     expect(sent).not.toContain("abc123");
   });
 
@@ -617,7 +797,11 @@ describe("tool calls", () => {
 
   test("a patch header with no file name can't be described, so it is blocked", () => {
     expect(
-      describeToolCall("apply_patch", { command: "*** Begin Patch\n*** Add File:   \n*** End Patch" }, repo),
+      describeToolCall(
+        "apply_patch",
+        { command: "*** Begin Patch\n*** Add File:   \n*** End Patch" },
+        repo,
+      ),
     ).toBeNull();
   });
 
@@ -742,7 +926,9 @@ describe("the local hook", () => {
       "deny",
     );
     expect(
-      decision(event("Write", { file_path: inRepo("src", "a.ts"), content: "x" })),
+      decision(
+        event("Write", { file_path: inRepo("src", "a.ts"), content: "x" }),
+      ),
     ).toBe("silent");
     expect(decision(event("mcp__github__create_issue", {}))).toBe("ask");
   });

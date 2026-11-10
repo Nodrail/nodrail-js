@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.5
+
+No changes to the engine; released with `@nodrail/client` 0.1.5. Tests now
+fail if coverage drops.
+
 ## 0.1.4
 
 Fixes from a third independent review.
