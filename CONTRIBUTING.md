@@ -58,3 +58,10 @@ describes. There is no separate agreement to sign.
 
 Everyone taking part follows the [code of conduct](CODE_OF_CONDUCT.md). Please
 don't open a public issue for a vulnerability: see [SECURITY.md](SECURITY.md).
+
+## How your change ships
+
+This repository is generated from Nodrail's monorepo, so an accepted pull
+request is applied there with you as co-author and comes back here in the next
+sync, credited to you. Your pull request is then closed with a link to it. See
+[GOVERNANCE.md](GOVERNANCE.md).

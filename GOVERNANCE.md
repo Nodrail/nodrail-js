@@ -22,9 +22,18 @@ When a second maintainer joins, every pull request will need one approval from
 someone other than its author, and admin bypass will be removed. We'd welcome
 regular contributors becoming maintainers; open an issue to talk about it.
 
-## Where the code comes from
+## Where the code comes from, and how your change ships
 
-These repositories are generated from Nodrail's private monorepo, which is also
-where the hosted service lives. Accepted pull requests are applied there and
-come back here through a pull request from the sync. Your authorship is kept in
-the changelog and release notes.
+These repositories are generated from Nodrail's private monorepo, which also
+holds the hosted service. Pull requests are welcome all the same, and here is
+what happens to one:
+
+1. A maintainer reviews it here, in the open, like any pull request.
+2. When it's accepted, the maintainer applies it to the monorepo, with you as
+   co-author, and runs the full checks there.
+3. The next sync brings it back here as a commit that credits you with
+   `Co-authored-by`, so it shows on your GitHub profile.
+4. Your pull request is closed with a link to that commit, rather than merged.
+
+Your change keeps your name all the way through, and it appears in the
+changelog of the release that ships it.
