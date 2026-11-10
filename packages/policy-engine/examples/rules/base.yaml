@@ -1,0 +1,52 @@
+# Shared rules for every team. Layer team rules on top with a second file.
+- required_engine_version: 1
+
+- list: production_repositories
+  items: [acme/payments, acme/infra]
+
+- list: supported_currencies
+  items: [USD, EUR]
+
+- macro: large_amount
+  condition:
+    - { field: amount, op: gt, value: 1000 }
+
+- rule: Read issues
+  desc: Reading issues is safe everywhere.
+  tool: github
+  operation: issues.read
+  resource: { kind: repository, match: any }
+  effect: allow
+  tags: [read]
+
+- rule: Review production writes
+  desc: A person checks anything written to a production repository.
+  tool: github
+  operation: issues.update
+  resource: { kind: repository, list: production_repositories }
+  effect: require_approval
+  tags: [write]
+
+- rule: Never delete repositories
+  tool: github
+  operation: repositories.delete
+  resource: { kind: repository, match: any }
+  effect: deny
+  tags: [destructive]
+
+- rule: Small refunds
+  tool: stripe
+  operation: refunds.create
+  resource: { kind: invoice, match: any }
+  condition:
+    - { field: amount, op: lte, value: 1000 }
+    - { field: currency, op: in, list: supported_currencies }
+  effect: allow
+
+- rule: Review large refunds
+  tool: stripe
+  operation: refunds.create
+  resource: { kind: invoice, match: any }
+  condition:
+    - macro: large_amount
+  effect: require_approval

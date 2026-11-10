@@ -1,0 +1,5 @@
+- rule: Never delete a repository
+  tool: github
+  operation: repositories.delete
+  resource: { kind: repository, match: any }
+  effect: deny

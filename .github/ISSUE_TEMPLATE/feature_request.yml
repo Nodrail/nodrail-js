@@ -1,0 +1,19 @@
+name: Feature request
+description: A framework to support, a rule you can't write, or something to make easier
+labels: ["type: feature"]
+body:
+  - type: textarea
+    id: goal
+    attributes:
+      label: What are you trying to protect or allow?
+    validations:
+      required: true
+  - type: textarea
+    id: today
+    attributes:
+      label: How do you handle it today?
+  - type: textarea
+    id: wish
+    attributes:
+      label: What would you like to write instead?
+      render: typescript

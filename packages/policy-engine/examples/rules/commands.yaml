@@ -1,0 +1,19 @@
+# Shell commands and built-in tools, as seen by `nodrail-policy hook`.
+- list: safe_commands
+  items: [git status, git diff, git log]
+
+- rule: Safe git reads
+  command: { list: safe_commands, match: prefix }
+  effect: allow
+  tags: [shell]
+
+- rule: Never force push
+  command: { prefix: git push --force }
+  effect: deny
+  tags: [shell, destructive]
+
+- rule: A person reviews CI changes
+  tool: files
+  operation: file.write
+  resource: { kind: file, match: prefix, value: /repo/.github/ }
+  effect: require_approval

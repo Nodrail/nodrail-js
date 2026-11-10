@@ -1,0 +1,5 @@
+- rule: Read issues in one repository
+  tool: github
+  operation: issues.read
+  resource: { kind: repository, match: exact, value: acme/support }
+  effect: allow

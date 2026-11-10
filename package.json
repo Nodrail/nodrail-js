@@ -1,0 +1,20 @@
+{
+  "name": "nodrail-js",
+  "private": true,
+  "type": "module",
+  "license": "Apache-2.0",
+  "packageManager": "pnpm@11.21.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "pnpm -r build",
+    "verify": "pnpm -r --workspace-concurrency=1 verify",
+    "changeset": "changeset",
+    "version-packages": "changeset version && pnpm install --lockfile-only",
+    "release": "pnpm -r build && changeset publish"
+  },
+  "devDependencies": {
+    "@changesets/cli": "^3.0.3"
+  }
+}

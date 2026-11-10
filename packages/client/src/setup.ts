@@ -1,0 +1,50 @@
+/**
+ * Which tools each agent checks, and how its hooks are declared. The plugins and
+ * the manual setup shown in Nodrail are all generated from this one place.
+ */
+
+/**
+ * Everything except tools that only read or organise, so new tools are governed
+ * by default. Without onFailure, Claude Code treats a crashed or timed-out hook
+ * as no objection and runs the tool.
+ */
+export const governedTools =
+  "^(?!(Read|Glob|Grep|LS|TodoWrite|TodoRead|AskUserQuestion|Agent|Task|ToolSearch|ExitPlanMode|EnterPlanMode)$).*$";
+
+/** Codex's matcher has no lookahead, so here the governed tools are named. */
+export const codexGovernedTools = "^(Bash|apply_patch|mcp__.*)$";
+
+/** Slightly longer than the hook waits for a person. */
+const HOOK_TIMEOUT_SECONDS = 360;
+
+type Command = { command: string; args?: string[] };
+
+export function claudeCodeHooks(run: Command) {
+  const hook = { type: "command", ...run };
+  const report = { matcher: governedTools, hooks: [hook] };
+  return {
+    SessionStart: [{ hooks: [hook] }],
+    PreToolUse: [
+      {
+        matcher: governedTools,
+        hooks: [{ ...hook, timeout: HOOK_TIMEOUT_SECONDS, onFailure: "block" }],
+      },
+    ],
+    PostToolUse: [report],
+    PostToolUseFailure: [report],
+  };
+}
+
+export function codexHooks(command: string) {
+  const hook = { type: "command", command };
+  return {
+    SessionStart: [{ hooks: [hook] }],
+    PreToolUse: [
+      {
+        matcher: codexGovernedTools,
+        hooks: [{ ...hook, timeout: HOOK_TIMEOUT_SECONDS }],
+      },
+    ],
+    PostToolUse: [{ matcher: codexGovernedTools, hooks: [hook] }],
+  };
+}

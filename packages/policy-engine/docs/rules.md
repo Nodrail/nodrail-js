@@ -1,0 +1,115 @@
+# Rules
+
+A rules file is a YAML list of `rule`, `list` and `macro` entries. Several files can be loaded in order, and later ones can change earlier ones.
+
+```yaml
+- required_engine_version: 1
+
+- list: production_repositories
+  items: [acme/payments, acme/infra]
+
+- macro: large_amount
+  condition:
+    - { field: amount, op: gt, value: 1000 }
+
+- rule: Review production writes
+  desc: A person checks anything written to production.
+  tool: github
+  operation: issues.update
+  resource: { kind: repository, list: production_repositories }
+  effect: require_approval
+  tags: [write]
+
+- rule: Review large refunds
+  tool: stripe
+  operation: refunds.create
+  resource: { kind: invoice, match: any }
+  condition:
+    - macro: large_amount
+  effect: require_approval
+```
+
+## How a decision is made
+
+Every matching rule counts, in any order. Deny beats `require_approval`, which beats allow. If no rule matches, the outcome is `none`, and whatever calls the engine must treat that as blocked.
+
+## Rule fields
+
+| Field                   | Meaning                                                                                        |
+| ----------------------- | ---------------------------------------------------------------------------------------------- |
+| `rule`                  | Unique name                                                                                    |
+| `effect`                | `allow`, `require_approval` or `deny`                                                          |
+| `tool`, `operation`     | The action, such as `github` and `issues.update`                                               |
+| `resource`              | `kind` plus one of the forms below                                                             |
+| `command`               | Instead of `tool`, `operation` and `resource`. See [Commands and tools](commands-and-tools.md) |
+| `condition`             | Conditions that must all hold                                                                  |
+| `agent`, `installation` | Limit the rule to one agent, or one installation of it                                         |
+| `expires`               | ISO time when the rule stops applying                                                          |
+| `enabled`               | `false` switches the rule off                                                                  |
+| `id`                    | Keeps the rule's identity if it is renamed                                                     |
+| `title`                 | A display name, when two rules need to share one                                               |
+| `desc`, `tags`          | For people reading the file                                                                    |
+
+### Resources
+
+| Form                                                  | Matches                                                        |
+| ----------------------------------------------------- | -------------------------------------------------------------- |
+| `{ kind: repository, match: any }`                    | Anything of that kind                                          |
+| `{ kind: repository, match: exact, value: acme/app }` | That value only                                                |
+| `{ kind: repository, match: prefix, value: acme/ }`   | Values starting with that text                                 |
+| `{ kind: repository, list: names }`                   | One exact rule per list item. Add `match: prefix` for prefixes |
+
+A prefix is literal text, so `acme/support` also matches `acme/support-extra`. End it with `/` when you mean a folder.
+
+### Conditions
+
+```yaml
+- rule: Small refunds
+  tool: stripe
+  operation: refunds.create
+  resource: { kind: invoice, match: any }
+  condition:
+    - { field: amount, op: lte, value: 1000 }
+    - { field: currency, op: in, value: [USD, EUR] }
+  effect: allow
+```
+
+Operators: `eq`, `neq`, `gt`, `gte`, `lt`, `lte`, `in` and `contains`. `contains` tests whether an array has a value. `field` can reach into objects with dots.
+
+An entry can also be `{ macro: name }`, or `{ field: currency, op: in, list: name }`.
+
+Conditions compare what the caller declares. A parameter that is missing or of the wrong type never helps an allow rule, while deny and review rules still apply. So `"5"` can't pass a rule that wants a number under 1000.
+
+## Lists and macros
+
+A list is reusable values. A macro is reusable conditions, and can use other macros. They can be defined after the rules that use them. An empty list used by a rule is an error, so a list can't quietly remove a deny.
+
+## Layering files
+
+Files load in the order given, and a folder loads its `.yaml` and `.yml` files by name. To change something from an earlier file, use `override` and say how each field changes:
+
+```yaml fragment
+- list: production_repositories
+  items: [acme/billing]
+  override: { items: append }
+
+- rule: Review large refunds
+  effect: deny
+  override: { effect: replace }
+
+- rule: Small refunds
+  enabled: false
+  override: { enabled: replace }
+```
+
+Lists, conditions and tags can be appended to. Everything else is replaced.
+
+Unlike Falco, redefining a name without `override` is an error, so a later file can't silently weaken a rule.
+
+Conditions are structured YAML rather than an expression language, which makes them simple to validate and leaves nothing to inject into. There is no `or`: write two rules.
+
+## Limits
+
+500 compiled rules, 20 conditions per rule, 1 MB per file. YAML aliases are limited, and duplicate keys are errors.
+
+Files declare the format they need with `required_engine_version`. A file that needs a newer engine is refused.

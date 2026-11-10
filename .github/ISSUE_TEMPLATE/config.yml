@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a vulnerability
+    url: https://github.com/Nodrail/nodrail-js/security/advisories/new
+    about: Privately, so it can be fixed before anyone else knows.
+  - name: Questions about Nodrail Cloud or your account
+    url: mailto:hello@nodrail.com
+    about: Billing, workspaces and anything that isn't about this code.

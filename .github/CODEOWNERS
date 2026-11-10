@@ -1,0 +1,5 @@
+# Every change is reviewed by a maintainer. Workflows and release settings
+# decide what gets published, so they are listed on their own.
+*                   @Nodrail/maintainers
+/.github/           @Nodrail/maintainers
+/.github/workflows/ @Nodrail/maintainers

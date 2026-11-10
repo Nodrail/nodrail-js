@@ -1,0 +1,5 @@
+- rule: A person reviews issue writes
+  tool: github
+  operation: issues.update
+  resource: { kind: repository, match: any }
+  effect: require_approval

@@ -1,0 +1,165 @@
+{
+  "version": 1,
+  "evaluation_cases": [
+    {
+      "id": "deny-wins-over-review-and-allow",
+      "descriptor": {
+        "agentId": "support-agent",
+        "installationId": "support-dev",
+        "toolKey": "github",
+        "operationKey": "issues.delete",
+        "resourceKind": "repository",
+        "resourceId": "acme/support",
+        "params": {}
+      },
+      "rules": [
+        { "id": "allow-rule", "effect": "allow" },
+        { "id": "review-rule", "effect": "require_approval" },
+        { "id": "deny-rule", "effect": "deny" }
+      ],
+      "expected": { "outcome": "deny", "matchedRuleId": "deny-rule" }
+    },
+    {
+      "id": "review-wins-over-allow",
+      "descriptor": {
+        "agentId": "support-agent",
+        "installationId": "support-dev",
+        "toolKey": "github",
+        "operationKey": "issues.delete",
+        "resourceKind": "repository",
+        "resourceId": "acme/support",
+        "params": {}
+      },
+      "rules": [
+        { "id": "allow-rule", "effect": "allow" },
+        { "id": "review-rule", "effect": "require_approval" }
+      ],
+      "expected": {
+        "outcome": "require_approval",
+        "matchedRuleId": "review-rule"
+      }
+    },
+    {
+      "id": "exact-allow",
+      "descriptor": {
+        "agentId": "support-agent",
+        "installationId": "support-dev",
+        "toolKey": "github",
+        "operationKey": "issues.delete",
+        "resourceKind": "repository",
+        "resourceId": "acme/support",
+        "params": {}
+      },
+      "rules": [{ "id": "allow-rule", "effect": "allow" }],
+      "expected": { "outcome": "allow", "matchedRuleId": "allow-rule" }
+    },
+    {
+      "id": "no-match-default-deny",
+      "descriptor": {
+        "agentId": "support-agent",
+        "installationId": "support-dev",
+        "toolKey": "github",
+        "operationKey": "issues.delete",
+        "resourceKind": "repository",
+        "resourceId": "acme/docs",
+        "params": {}
+      },
+      "rules": [
+        {
+          "id": "other-resource",
+          "effect": "allow",
+          "resource": {
+            "kind": "repository",
+            "match": "exact",
+            "value": "acme/other"
+          }
+        }
+      ],
+      "expected": { "outcome": "none", "matchedRuleId": null }
+    },
+    {
+      "id": "missing-allow-parameter-does-not-match",
+      "descriptor": {
+        "agentId": "support-agent",
+        "installationId": "support-dev",
+        "toolKey": "github",
+        "operationKey": "issues.delete",
+        "resourceKind": "repository",
+        "resourceId": "acme/support",
+        "params": {}
+      },
+      "rules": [
+        {
+          "id": "amount-rule",
+          "effect": "allow",
+          "conditions": [{ "field": "amount", "op": "gt", "value": 100 }]
+        }
+      ],
+      "expected": { "outcome": "none", "matchedRuleId": null }
+    },
+    {
+      "id": "expired-rule-does-not-match",
+      "descriptor": {
+        "agentId": "support-agent",
+        "installationId": "support-dev",
+        "toolKey": "github",
+        "operationKey": "issues.delete",
+        "resourceKind": "repository",
+        "resourceId": "acme/support",
+        "params": {}
+      },
+      "rules": [
+        {
+          "id": "expired-rule",
+          "effect": "allow",
+          "expiresAt": "2026-11-09T12:00:00.000Z"
+        }
+      ],
+      "now": "2026-11-09T12:00:00.000Z",
+      "expected": { "outcome": "none", "matchedRuleId": null }
+    },
+    {
+      "id": "literal-prefix",
+      "descriptor": {
+        "agentId": "support-agent",
+        "installationId": "support-dev",
+        "toolKey": "github",
+        "operationKey": "issues.delete",
+        "resourceKind": "repository",
+        "resourceId": "acme/support-extra",
+        "params": {}
+      },
+      "rules": [
+        {
+          "id": "prefix-rule",
+          "effect": "allow",
+          "resource": {
+            "kind": "repository",
+            "match": "prefix",
+            "value": "acme/support"
+          }
+        }
+      ],
+      "expected": { "outcome": "allow", "matchedRuleId": "prefix-rule" }
+    }
+  ],
+  "digest_vectors": [
+    {
+      "id": "unicode-and-number-formatting",
+      "installationId": "11111111-1111-4111-8111-111111111111",
+      "actionId": "22222222-2222-4222-8222-222222222222",
+      "descriptor": {
+        "tool": "t",
+        "operation": "o.p",
+        "resource": { "kind": "k", "id": "é€😀" },
+        "params": { "n": 1e21, "f": 0.1, "b": true, "z": null, "u": " " }
+      },
+      "nonce": "nonce-1",
+      "expected": {
+        "descriptorDigest": "sha256:5c50c5a2706607519f1ca455cb5f178f6da6ecf8b5581df76ffbf18ebdb31480",
+        "actionDigest": "sha256:625c11a63fc339d68d65294767a68dc8b572f254932845f3f36372fed1c98794",
+        "nonceDigest": "sha256:d215610160c6df4e0c2092b9c4852257ac77e03518295bcbcf8641a26312017d"
+      }
+    }
+  ]
+}

@@ -1,0 +1,109 @@
+{
+  "name": "@nodrail/client",
+  "version": "0.1.0",
+  "description": "Check with Nodrail before an AI agent acts. Wrap the tools of LangChain, the Vercel AI SDK, OpenAI Agents or any agent in one line.",
+  "keywords": [
+    "ai",
+    "agents",
+    "ai-agents",
+    "guardrails",
+    "governance",
+    "approvals",
+    "human-in-the-loop",
+    "langchain",
+    "vercel-ai-sdk",
+    "openai-agents",
+    "mcp",
+    "claude-code",
+    "codex",
+    "sdk"
+  ],
+  "homepage": "https://github.com/Nodrail/nodrail-js/tree/main/packages/client#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Nodrail/nodrail-js.git",
+    "directory": "packages/client"
+  },
+  "bugs": {
+    "url": "https://github.com/Nodrail/nodrail-js/issues",
+    "email": "hello@nodrail.com"
+  },
+  "license": "Apache-2.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./protocol": "./src/protocol.ts",
+    "./langchain": "./src/langchain.ts",
+    "./setup": "./src/setup.ts"
+  },
+  "scripts": {
+    "build": "pnpm --filter @nodrail/policy-engine build && node scripts/build.mjs && tsc -p tsconfig.build.json",
+    "lint": "oxlint --type-aware -D typescript/no-floating-promises -D typescript/no-misused-promises src tests",
+    "check": "tsc --noEmit",
+    "test": "vitest run",
+    "test:pack": "node scripts/verify-pack.mjs",
+    "verify": "pnpm check && pnpm lint && pnpm test && pnpm test:pack"
+  },
+  "dependencies": {
+    "@nodrail/policy-engine": "workspace:^"
+  },
+  "peerDependencies": {
+    "langchain": ">=1.0.0"
+  },
+  "peerDependenciesMeta": {
+    "langchain": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@langchain/core": "^1.3.5",
+    "@langchain/langgraph": "^1.7.2",
+    "@openai/agents": "^0.21.0",
+    "@types/node": "^26.6.6",
+    "ai": "^7.0.165",
+    "esbuild": "^0.28.2",
+    "langchain": "^1.6.3",
+    "oxlint": "^1.92.0",
+    "oxlint-tsgolint": "^7.0.2006",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vitest": "^5.1.0",
+    "zod": "^4.6.7"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "CHANGELOG.md",
+    "examples",
+    "LICENSE",
+    "SECURITY.md"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "publishConfig": {
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "./protocol": {
+        "types": "./dist/protocol.d.ts",
+        "default": "./dist/protocol.js"
+      },
+      "./langchain": {
+        "types": "./dist/langchain.d.ts",
+        "default": "./dist/langchain.js"
+      },
+      "./setup": {
+        "types": "./dist/setup.d.ts",
+        "default": "./dist/setup.js"
+      }
+    },
+    "bin": {
+      "nodrail-claude-hook": "./dist/nodrail-hook.mjs"
+    },
+    "access": "public",
+    "provenance": true
+  }
+}

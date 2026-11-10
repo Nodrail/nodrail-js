@@ -1,0 +1,8 @@
+# Loaded after base.yaml, so it can extend what is defined there.
+- list: production_repositories
+  items: [acme/billing]
+  override: { items: append }
+
+- rule: Small refunds
+  enabled: false
+  override: { enabled: replace }

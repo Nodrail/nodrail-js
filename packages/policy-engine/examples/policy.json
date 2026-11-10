@@ -1,0 +1,49 @@
+{
+  "version": 1,
+  "rules": [
+    {
+      "id": "read-repository",
+      "name": "Read the support repository",
+      "effect": "allow",
+      "agentKey": "support-agent",
+      "installationName": "support-dev",
+      "toolKey": "github",
+      "operationKey": "issues.read",
+      "resource": {
+        "kind": "repository",
+        "match": "exact",
+        "value": "acme/support"
+      },
+      "conditions": [],
+      "expiresAt": null
+    },
+    {
+      "id": "write-repository-review",
+      "name": "Review issue writes",
+      "effect": "require_approval",
+      "agentKey": "support-agent",
+      "installationName": "support-dev",
+      "toolKey": "github",
+      "operationKey": "issues.update",
+      "resource": {
+        "kind": "repository",
+        "match": "exact",
+        "value": "acme/support"
+      },
+      "conditions": [],
+      "expiresAt": null
+    },
+    {
+      "id": "deny-repository-delete",
+      "name": "Block repository deletion",
+      "effect": "deny",
+      "agentKey": "support-agent",
+      "installationName": "support-dev",
+      "toolKey": "github",
+      "operationKey": "repository.delete",
+      "resource": { "kind": "repository", "match": "any" },
+      "conditions": [],
+      "expiresAt": null
+    }
+  ]
+}

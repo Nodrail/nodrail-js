@@ -1,0 +1,103 @@
+{
+  "name": "@nodrail/policy-engine",
+  "version": "0.1.0",
+  "description": "Decide what an AI agent may do before it does it. Deterministic rules in YAML for tools and shell commands.",
+  "keywords": [
+    "ai",
+    "agents",
+    "ai-agents",
+    "policy",
+    "policy-engine",
+    "guardrails",
+    "governance",
+    "approvals",
+    "claude-code",
+    "codex",
+    "mcp",
+    "yaml"
+  ],
+  "homepage": "https://github.com/Nodrail/nodrail-js/tree/main/packages/policy-engine#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Nodrail/nodrail-js.git",
+    "directory": "packages/policy-engine"
+  },
+  "bugs": {
+    "url": "https://github.com/Nodrail/nodrail-js/issues",
+    "email": "hello@nodrail.com"
+  },
+  "license": "Apache-2.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./protocol": "./src/protocol.ts",
+    "./simulator": "./src/simulator.ts",
+    "./yaml": "./src/yaml.ts",
+    "./actions": "./src/actions.ts"
+  },
+  "scripts": {
+    "check": "tsc --noEmit",
+    "lint": "oxlint --type-aware src tests examples",
+    "build": "node scripts/build.mjs && tsc -p tsconfig.build.json",
+    "simulate": "tsx examples/simulate.ts examples/policy.json",
+    "test": "vitest run",
+    "verify": "pnpm check && pnpm lint && pnpm test && pnpm test:pack",
+    "test:pack": "node scripts/verify-pack.mjs",
+    "rules": "tsx src/cli.ts"
+  },
+  "dependencies": {
+    "canonicalize": "^5.1.0",
+    "zod": "^4.6.7",
+    "yaml": "^2.9.1"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "esbuild": "^0.28.2",
+    "oxlint": "^1.92.0",
+    "oxlint-tsgolint": "^7.0.2006",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vitest": "^5.1.0"
+  },
+  "files": [
+    "dist",
+    "docs",
+    "README.md",
+    "CHANGELOG.md",
+    "examples",
+    "LICENSE",
+    "SECURITY.md"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "publishConfig": {
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "./protocol": {
+        "types": "./dist/protocol.d.ts",
+        "default": "./dist/protocol.js"
+      },
+      "./simulator": {
+        "types": "./dist/simulator.d.ts",
+        "default": "./dist/simulator.js"
+      },
+      "./yaml": {
+        "types": "./dist/yaml.d.ts",
+        "default": "./dist/yaml.js"
+      },
+      "./actions": {
+        "types": "./dist/actions.d.ts",
+        "default": "./dist/actions.js"
+      }
+    },
+    "bin": {
+      "nodrail-policy": "./dist/cli.js"
+    },
+    "access": "public",
+    "provenance": true
+  }
+}

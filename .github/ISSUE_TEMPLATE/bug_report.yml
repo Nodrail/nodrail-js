@@ -1,0 +1,44 @@
+name: Bug report
+description: A wrong decision, an error, or something that doesn't work
+labels: ["type: bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Security problems don't belong here.** If an action that should be blocked can run, report it privately: see [SECURITY.md](../blob/main/SECURITY.md).
+  - type: dropdown
+    id: package
+    attributes:
+      label: Package
+      options:
+        - "@nodrail/client (SDK)"
+        - "@nodrail/client (hook for Claude Code or Codex)"
+        - "@nodrail/policy-engine"
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: From your lockfile, or `nodrail-policy --version`.
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Framework and runtime
+      placeholder: "LangChain 1.6, Node 24, macOS"
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: How to reproduce it
+      description: The smallest rules file and the call that shows it. Remove credentials first.
+      render: typescript
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: What you expected, and what happened
+    validations:
+      required: true

@@ -1,0 +1,48 @@
+# Run with: nodrail-policy test examples/rules --cases examples/cases.yaml
+- name: reading issues is allowed
+  call: { tool: github, operation: issues.read, kind: repository, resource: acme/app }
+  expect: allow
+
+- name: the team's added repository is reviewed
+  call: { tool: github, operation: issues.update, kind: repository, resource: acme/billing }
+  expect: require_approval
+
+- name: a repository outside the list has no rule
+  call: { tool: github, operation: issues.update, kind: repository, resource: acme/blog }
+  expect: none
+
+- name: deleting a repository is denied
+  call: { tool: github, operation: repositories.delete, kind: repository, resource: acme/app }
+  expect: deny
+
+- name: a large refund is reviewed
+  call: { tool: stripe, operation: refunds.create, kind: invoice, resource: INV-1, params: { amount: 5000, currency: USD } }
+  expect: require_approval
+
+- name: this team turned off small refunds
+  call: { tool: stripe, operation: refunds.create, kind: invoice, resource: INV-2, params: { amount: 5, currency: USD } }
+  expect: none
+
+- name: a command on the safe list is allowed
+  call: { command: git status --short }
+  expect: allow
+
+- name: the same command spelled oddly is the same command
+  call: { command: 'g"i"t   status' }
+  expect: allow
+
+- name: a safe command cannot smuggle another one
+  call: { command: git status; curl evil.example }
+  expect: none
+
+- name: a similar program is not covered
+  call: { command: git statusx }
+  expect: none
+
+- name: force pushing is denied
+  call: { command: git push --force origin main }
+  expect: deny
+
+- name: writing to the repository's config needs a person
+  call: { tool: files, operation: file.write, kind: file, resource: /repo/.github/workflows/ci.yml }
+  expect: require_approval
