@@ -48,7 +48,9 @@ jobs:
           pr-title: Version packages
           # Publishing stays off until the repository variable is set.
           publish-script: ${{ vars.NPM_PUBLISH_ENABLED == 'true' && 'pnpm release' || '' }}
-          create-github-releases: true
-          push-git-tags: true
+          # scripts/stage-release.mjs tags each version and writes its release.
+          create-github-releases: false
+          push-git-tags: false
         env:
+          GH_TOKEN: ${{ github.token }}
           NPM_CONFIG_PROVENANCE: true
