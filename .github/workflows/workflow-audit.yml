@@ -1,0 +1,26 @@
+# Checks workflow changes for the usual ways CI gets taken over: injected
+# expressions, leaked tokens, over-broad permissions and unpinned actions.
+name: Workflow audit
+
+on:
+  pull_request:
+    paths: [".github/**"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: workflow-audit-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  zizmor:
+    name: Workflow audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: pipx run zizmor==1.32.0 --offline --persona=auditor .github/workflows

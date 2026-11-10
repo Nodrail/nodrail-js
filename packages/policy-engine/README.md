@@ -56,7 +56,7 @@ To put the rules in front of Claude Code, see [Getting started](docs/getting-sta
 - **Rules you can review.** Plain YAML with lists, macros and layered files, in the style of [Falco](https://falco.org/docs/concepts/rules/). Validate them and test expected outcomes in CI.
 - **Blocked by default.** Deny beats review, review beats allow, and no match means no.
 - **Hard to talk around.** `g"i"t  push` is judged as `git push`, and `git status; rm -rf /` doesn't match a rule for `git status`.
-- **Secrets stay out.** Likely credentials are removed from what the engine records and reports.
+- **Secrets stay out.** Likely credentials are removed from how a call is described, so rules and reviewers don't see them.
 - **Small.** Three runtime dependencies. The evaluator has no Node APIs, so it can run in other JavaScript runtimes.
 
 ## What it doesn't do

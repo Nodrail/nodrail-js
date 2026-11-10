@@ -55,4 +55,4 @@ It returns `null` for a call it can't describe, which you should treat as blocke
 
 ## Versioning
 
-The package follows semantic versioning. The rule file format and policy document are versioned separately, starting at 1. [`tests/fixtures/conformance-v1.json`](../tests/fixtures/conformance-v1.json) holds test vectors for anyone building a compatible evaluator.
+The package follows semantic versioning. The rule file format and policy document are versioned separately, starting at 1. [`tests/fixtures/conformance-v1.json`](https://github.com/Nodrail/nodrail-js/blob/main/packages/policy-engine/tests/fixtures/conformance-v1.json) holds test vectors for anyone building a compatible evaluator.

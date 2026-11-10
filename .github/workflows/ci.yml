@@ -18,8 +18,6 @@ jobs:
     name: ${{ matrix.os }}, Node ${{ matrix.node }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
-    # Windows has not passed yet. Blocking once it has.
-    continue-on-error: ${{ matrix.os == 'windows-latest' }}
     strategy:
       fail-fast: false
       matrix:

@@ -6,7 +6,7 @@ import {
   symlinkSync,
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve, sep } from "node:path";
 import { describe, expect, test } from "vitest";
 import { describeArguments, describeToolCall } from "../src/actions";
 import { classifyArguments, classifyCommand } from "../src/commands";
@@ -25,6 +25,10 @@ const documentOf = (result: CompileResult) => {
 
 const now = new Date("2026-11-09T12:00:00.000Z");
 
+// Paths take the machine's own form: /repo here, D:\repo on Windows.
+const repo = resolve("/repo");
+const inRepo = (...parts: string[]) => join(repo, ...parts);
+
 const rules = documentOf(
   compile(`
 - rule: Safe
@@ -42,7 +46,7 @@ const rules = documentOf(
 - rule: Source edits
   tool: files
   operation: file.write
-  resource: { kind: file, match: prefix, value: /repo/src/ }
+  resource: { kind: file, match: prefix, value: ${JSON.stringify(inRepo("src") + sep)} }
   effect: allow
 - rule: MCP
   tool: github
@@ -224,7 +228,7 @@ describe("what a reviewer sees", () => {
 });
 
 describe("paths", () => {
-  const folder = mkdtempSync(join(realpathSync(tmpdir()), "nodrail-paths-"));
+  const folder = mkdtempSync(join(realpathSync.native(tmpdir()), "nodrail-paths-"));
   mkdirSync(join(folder, ".claude"));
   symlinkSync(join(folder, ".claude"), join(folder, "link"));
 
@@ -247,7 +251,7 @@ describe("paths", () => {
 
   test("a home path is the home folder", () => {
     expect(pathOf("~/.ssh/authorized_keys")).toBe(
-      join(realpathSync(homedir()), ".ssh", "authorized_keys"),
+      join(realpathSync.native(homedir()), ".ssh", "authorized_keys"),
     );
   });
 });
@@ -386,7 +390,7 @@ describe("starter packs", () => {
     tool: string,
     input: object,
   ) => {
-    const action = describeToolCall(tool, input as never, "/repo");
+    const action = describeToolCall(tool, input as never, repo);
     if (!action) throw new Error("not described");
     return simulate({
       document: documentOf(compile(starterPacks[name].text)),
@@ -404,6 +408,9 @@ describe("starter packs", () => {
     ["read-only", ...bash("cd src && git status"), "allow"],
     ["read-only", ...bash("git add ."), "none"],
     ["read-only", "Write", { file_path: "a", content: "" }, "none"],
+    ["read-only", "AskUserQuestion", { questions: [] }, "allow"],
+    ["read-only", "ExitPlanMode", { plan: "x" }, "allow"],
+    ["read-only", "Agent", { prompt: "x" }, "none"],
     ["repo-work", "Write", { file_path: "a", content: "" }, "allow"],
     ["repo-work", "Edit", { file_path: ".claude/settings.json" }, "deny"],
     [
@@ -441,30 +448,47 @@ describe("tool calls", () => {
 
   test("reads and searches are ruled by path", () => {
     expect(
-      describeToolCall("Read", { file_path: "../.env" }, "/repo/src"),
+      describeToolCall("Read", { file_path: "../.env" }, inRepo("src")),
     ).toMatchObject({
       tool: "files",
       operation: "file.read",
-      resource: { kind: "file", id: "/repo/.env" },
+      resource: { kind: "file", id: inRepo(".env") },
     });
     expect(
-      describeToolCall("Grep", { pattern: "x", path: "lib" }, "/repo"),
+      describeToolCall("Grep", { pattern: "x", path: "lib" }, repo),
     ).toMatchObject({
       operation: "file.search",
-      resource: { id: "/repo/lib" },
+      resource: { id: inRepo("lib") },
       params: { pattern: "x" },
     });
-    expect(describeToolCall("Glob", { pattern: "*" }, "/repo")).toMatchObject({
-      resource: { id: "/repo" },
+    expect(describeToolCall("Glob", { pattern: "*" }, repo)).toMatchObject({
+      resource: { id: repo },
     });
     expect(describeToolCall("Grep", { pattern: "x" })).toBeNull();
+  });
+
+  // An agent writes these, so a slow pattern would let it stall the check.
+  test.each([
+    ["a patch", () => describeToolCall("apply_patch", { command: `*** Begin Patch\n*** Add File: a${" ".repeat(500_000)}x\n*** End Patch` }, repo)],
+    ["a move", () => describeToolCall("apply_patch", { command: `*** Begin Patch\n*** Update File: a\n*** Move to: b${" ".repeat(500_000)}x\n*** End Patch` }, repo)],
+    ["a command", () => classifyCommand(`a${"\t".repeat(500_000)}b`)],
+  ])("%s built to be slow is judged at once", (_label, judge) => {
+    const start = performance.now();
+    judge();
+    expect(performance.now() - start).toBeLessThan(500);
+  });
+
+  test("a patch header with no file name can't be described, so it is blocked", () => {
+    expect(
+      describeToolCall("apply_patch", { command: "*** Begin Patch\n*** Add File:   \n*** End Patch" }, repo),
+    ).toBeNull();
   });
 
   test("a search can't carry a secret out in its pattern", () => {
     const action = describeToolCall(
       "Grep",
       { pattern: "password=hunter2" },
-      "/repo",
+      repo,
     );
     expect(JSON.stringify(action)).not.toContain("hunter2");
   });
@@ -581,7 +605,7 @@ describe("the local hook", () => {
       "deny",
     );
     expect(
-      decision(event("Write", { file_path: "/repo/src/a.ts", content: "x" })),
+      decision(event("Write", { file_path: inRepo("src", "a.ts"), content: "x" })),
     ).toBe("silent");
     expect(decision(event("mcp__github__create_issue", {}))).toBe("ask");
   });
@@ -592,7 +616,7 @@ describe("the local hook", () => {
         event(
           "Write",
           { file_path: "src/../.env", content: "x" },
-          { cwd: "/repo" },
+          { cwd: repo },
         ),
       ),
     ).toBe("deny");

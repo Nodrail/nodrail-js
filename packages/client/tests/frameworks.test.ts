@@ -314,6 +314,18 @@ describe("guard", () => {
     });
   });
 
+  test("a credential loaded after the tools were wrapped is picked up", async () => {
+    const server = fakeNodrail();
+    const env: Record<string, string | undefined> = {};
+    const nodrail = createNodrail({ url: "http://nodrail.test", waitMs: 0, fetch: server.fetch, env });
+    const work = vi.fn((_input: object) => "ran");
+    const send = nodrail.guard(work, { name: "send" });
+    await expect(send({})).resolves.toContain("not configured");
+    env.NODRAIL_CREDENTIAL = "c";
+    await expect(send({})).resolves.toBe("ran");
+    expect(work).toHaveBeenCalledTimes(1);
+  });
+
   test("secrets in arguments never leave the process", async () => {
     const { nodrail, server } = connected();
     const send = nodrail.guard((_args: object) => "ok", { name: "send" });

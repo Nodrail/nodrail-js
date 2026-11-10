@@ -1,3 +1,4 @@
+import { fileURLToPath } from "node:url";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, test } from "vitest";
@@ -599,7 +600,7 @@ describe("the same engine", () => {
 });
 
 describe("the package boundary", () => {
-  const source = new URL("../src/", import.meta.url).pathname;
+  const source = fileURLToPath(new URL("../src/", import.meta.url));
   const allowed = /^(\.\/|node:|zod$|yaml$|canonicalize$)/;
 
   test.each(readdirSync(source))(

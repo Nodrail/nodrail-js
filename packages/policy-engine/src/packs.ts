@@ -62,10 +62,28 @@ const readOnlyRules = `- required_engine_version: 1
   command: { list: exact_looking_commands }
   effect: allow
 
-# Claude Code's own planning tools.
+# Claude Code's own tools that only plan or talk to the person.
 - rule: Keep a task list
   tool: claude-code
   operation: todowrite
+  resource: { kind: tool, match: any }
+  effect: allow
+
+- rule: Ask the person a question
+  tool: claude-code
+  operation: askuserquestion
+  resource: { kind: tool, match: any }
+  effect: allow
+
+- rule: Plan before acting
+  tool: claude-code
+  operation: enterplanmode
+  resource: { kind: tool, match: any }
+  effect: allow
+
+- rule: Present a plan
+  tool: claude-code
+  operation: exitplanmode
   resource: { kind: tool, match: any }
   effect: allow
 `;
