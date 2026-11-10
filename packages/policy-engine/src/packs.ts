@@ -1,24 +1,17 @@
+import { SECRET_PLACES } from "./secrets.ts";
+
+const yamlList = (items: readonly string[]) =>
+  items.map((item) => `    - ${item}`).join("\n");
+
 /** Starting points, written the way a team would write its own rules. */
 const readOnlyRules = `- required_engine_version: 2
 
 # Where credentials live. Reading or searching any of these is denied, and
-# deny beats allow, so this holds whatever else is added.
+# deny beats allow, so this holds whatever else is added. A dot file with a
+# suffix counts as its base: .env.staging is .env.
 - list: secret_places
   items:
-    - .env
-    - .env.local
-    - .env.development
-    - .env.production
-    - .env.test
-    - .ssh
-    - .aws
-    - .gnupg
-    - .kube
-    - .docker
-    - gcloud
-    - .netrc
-    - .npmrc
-    - .pypirc
+${yamlList(SECRET_PLACES)}
 
 - rule: Never read secrets
   tool: files
@@ -34,6 +27,24 @@ const readOnlyRules = `- required_engine_version: 2
   resource: { kind: file, match: any }
   condition:
     - { field: path_parts, op: contains, list: secret_places }
+  effect: deny
+
+# A file pattern such as .env* or *env picks out a secret without naming it.
+- rule: Never search with a pattern that reaches secrets
+  tool: files
+  operation: file.search
+  resource: { kind: file, match: any }
+  condition:
+    - { field: reaches_secrets, op: eq, value: true }
+  effect: deny
+
+- rule: Never read GitHub CLI tokens
+  tool: files
+  operation: file.read
+  resource: { kind: file, match: any }
+  condition:
+    - { field: path_parts, op: contains, value: .config }
+    - { field: path_parts, op: contains, value: gh }
   effect: deny
 
 # Reading and searching the project.
@@ -92,26 +103,38 @@ const readOnlyRules = `- required_engine_version: 2
 `;
 
 const repoWorkRules = `
-# Changing the project.
+# Changing the project, and only the project: a file outside the folder the
+# agent works in isn't allowed, so it goes to a person.
 - rule: Write files
   tool: files
   operation: file.write
   resource: { kind: file, match: any }
+  condition:
+    - { field: inside_cwd, op: eq, value: true }
   effect: allow
 
 - rule: Edit files
   tool: files
   operation: file.edit
   resource: { kind: file, match: any }
+  condition:
+    - { field: inside_cwd, op: eq, value: true }
   effect: allow
 
 # Files that change what runs next, or that turn the checks off: git's own
-# hooks and config, the agents' settings, and shell start-up files.
+# hooks and config, commit hooks, the agents' and editors' settings, SSH keys,
+# login agents, and shell start-up files.
 - list: control_places
   items:
     - .git
+    - .gitconfig
+    - .husky
     - .claude
     - .codex
+    - .mcp.json
+    - .vscode
+    - .ssh
+    - LaunchAgents
     - .bashrc
     - .bash_profile
     - .profile

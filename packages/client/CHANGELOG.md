@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.1.3
+
+Fixes from a second independent review.
+
+- MCP SDK tools are now really checked. The server keeps calling the object
+  `registerTool` returns, so `guard` now puts the check inside that object and
+  returns it; before, it returned a copy the server never used. Tested against
+  the real MCP SDK client and server.
+- A tool with two ways to run, such as `execute` and `run`, is refused instead
+  of having only one checked. MCP task tools are refused until supported.
+- The fixes in `@nodrail/policy-engine` 0.1.3.
+
 ## 0.1.2
 
 Security fixes found by an independent review. Upgrade.

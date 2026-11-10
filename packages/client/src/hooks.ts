@@ -16,7 +16,7 @@ export {
   type HookResult,
 } from "@nodrail/policy-engine/actions";
 
-export const HOOK_VERSION = "0.1.2";
+export const HOOK_VERSION = "0.1.3";
 
 /** Longer than the wait for a person, shorter than the hook's own time limit. */
 const HOOK_DEADLINE_MS = 345_000;

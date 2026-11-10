@@ -2,6 +2,9 @@ import { tool as agentsTool } from "@openai/agents";
 import { tool as aiTool } from "ai";
 import { tool as langchainTool } from "langchain";
 import { describe, expect, expectTypeOf, test, vi } from "vitest";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { z } from "zod";
 import { createNodrail, NodrailBlockedError } from "../src/index";
 import { describerFor } from "../src/sdk";
@@ -486,7 +489,6 @@ describe("nothing with code of its own slips through", () => {
 
   test.each([
     ["a provider tool that still runs locally", { type: "provider", id: "anthropic.bash", inputSchema: {}, execute: ran }, "execute"],
-    ["an MCP SDK registered tool", { inputSchema: {}, callback: ran }, "callback"],
     ["a tool that runs through run()", { inputSchema: {}, run: ran }, "run"],
   ])("%s is checked", async (_label, tool, method) => {
     ran.mockClear();
@@ -523,4 +525,59 @@ test("a tool named like an Object property gets no description from Object", () 
   for (const name of ["constructor", "__proto__", "toString", "hasOwnProperty"])
     expect(describerFor(describe, name)).toBeUndefined();
   expect(describerFor(describe, "create_issue")).toBe(describe.create_issue);
+});
+
+// The real MCP SDK, through a real client and server over its in-memory link.
+describe("MCP SDK tools", () => {
+  async function connectedServer(guardTools: (server: McpServer) => void) {
+    const server = new McpServer({ name: "test", version: "1.0.0" });
+    guardTools(server);
+    const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
+    const client = new Client({ name: "test", version: "1.0.0" });
+    await Promise.all([server.connect(serverSide), client.connect(clientSide)]);
+    return client;
+  }
+  const unconfigured = () =>
+    createNodrail({ env: { NODRAIL_HOME: "/nonexistent" }, waitMs: 0 });
+
+  test("a registered tool is checked where the server calls it", async () => {
+    const ran = vi.fn(() => ({ content: [{ type: "text" as const, text: "deleted" }] }));
+    const client = await connectedServer((server) => {
+      const registered = server.registerTool(
+        "delete_repo",
+        { inputSchema: { repo: z.string() } },
+        ran,
+      );
+      const guarded = unconfigured().guard({ delete_repo: registered });
+      expect(guarded.delete_repo).toBe(registered);
+    });
+    const result = await client.callTool({ name: "delete_repo", arguments: { repo: "a/b" } });
+    expect(ran).not.toHaveBeenCalled();
+    expect(result.isError).toBe(true);
+    expect(JSON.stringify(result.content)).toContain("not configured");
+  });
+
+  test("an allowed call reaches the tool with its arguments", async () => {
+    const server = fakeNodrail();
+    const nodrail = createNodrail({ url: "https://nodrail.test", credential: "c", waitMs: 0, fetch: server.fetch, env: {} });
+    const ran = vi.fn(({ repo }: { repo: string }) => ({ content: [{ type: "text" as const, text: `deleted ${repo}` }] }));
+    const client = await connectedServer((mcp) => {
+      nodrail.guard({ delete_repo: mcp.registerTool("delete_repo", { inputSchema: { repo: z.string() } }, ran) });
+    });
+    const result = await client.callTool({ name: "delete_repo", arguments: { repo: "a/b" } });
+    expect(JSON.stringify(result.content)).toContain("deleted a/b");
+    expect(server.seen()[0]).toMatchObject({ tool: "delete_repo", resource: { id: "delete_repo" } });
+  });
+
+  test("a tool that runs two ways is refused, not half guarded", () => {
+    expect(() =>
+      unconfigured().guard({ dual: { name: "dual", execute: () => "a", run: () => "b" } }),
+    ).toThrow(/also run through run/);
+  });
+
+  test("a task tool, whose code isn't a plain function, is refused", () => {
+    expect(() =>
+      unconfigured().guard({ job: { inputSchema: {}, handler: { createTask: () => ({}) } } }),
+    ).toThrow(/doesn't recognise/);
+  });
 });

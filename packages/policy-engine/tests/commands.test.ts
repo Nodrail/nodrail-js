@@ -381,7 +381,8 @@ describe("starter packs", () => {
 
   test.each(packs)("%s compiles with nothing unused", (_name, pack) => {
     const result = compile(pack.text);
-    expect(documentOf(result).rules.length).toBeLessThan(100);
+    // A list condition becomes one rule per item; the engine allows 500.
+    expect(documentOf(result).rules.length).toBeLessThan(200);
     expect(result.warnings).toEqual([]);
   });
 
@@ -441,6 +442,25 @@ describe("starter packs", () => {
     ["repo-work", "Edit", { file_path: "/home/a/.codex/config.toml" }, "deny"],
     ["repo-work", "Write", { file_path: "/home/a/.zshrc", content: "" }, "deny"],
     ["repo-work", "Write", { file_path: "src/a.ts", content: "" }, "allow"],
+    // Ways around the packs found in 0.1.2.
+    ["read-only", "Grep", { pattern: "KEY", glob: ".env*" }, "deny"],
+    ["read-only", "Grep", { pattern: "KEY", glob: "*env" }, "deny"],
+    ["read-only", "Grep", { pattern: "KEY", glob: "{.env,x}" }, "deny"],
+    ["read-only", "Grep", { pattern: "KEY", glob: ".e?v" }, "deny"],
+    ["read-only", "Grep", { pattern: "KEY", glob: "*.ts" }, "allow"],
+    ["read-only", "Read", { file_path: ".env.staging" }, "deny"],
+    ["read-only", "Read", { file_path: ".envrc" }, "deny"],
+    ["read-only", "Read", { file_path: "/home/a/.git-credentials" }, "deny"],
+    ["read-only", "Read", { file_path: "/home/a/.config/gh/hosts.yml" }, "deny"],
+    ["read-only", ...bash("git log -p -- .env"), "none"],
+    ["read-only", ...bash("git log --oneline -5"), "allow"],
+    ["repo-work", "Write", { file_path: "/home/a/.gitconfig", content: "" }, "deny"],
+    ["repo-work", "Write", { file_path: "/home/a/.ssh/authorized_keys", content: "" }, "deny"],
+    ["repo-work", "Write", { file_path: "/home/a/Library/LaunchAgents/x.plist", content: "" }, "deny"],
+    ["repo-work", "Write", { file_path: ".husky/pre-commit", content: "" }, "deny"],
+    ["repo-work", "Write", { file_path: ".mcp.json", content: "" }, "deny"],
+    ["repo-work", "Write", { file_path: "/tmp/run.sh", content: "" }, "none"],
+    ["repo-work", "Edit", { file_path: "src/b.ts" }, "allow"],
   ] as const)("%s: %s %j is %s", (name, tool, input, outcome) => {
     expect(under(name, tool, input)).toBe(outcome);
   });
@@ -520,12 +540,21 @@ describe("tool calls", () => {
     ["a URL full of credentials", () => describeToolCall("WebFetch", { url: `https://x/${"//a:b".repeat(200_000)}` })],
     ["a huge input key", () => describeToolCall("mcp__s__t", { ["token".repeat(200_000)]: "v" })],
     ["a token prefix repeated", () => describeToolCall("Bash", { command: `echo ${"eyJ".repeat(400_000)}` })],
+    ["a very deep path", () => describeToolCall("Glob", { pattern: "*", path: "a/".repeat(500_000) }, repo)],
+    ["a patch of many files", () => describeToolCall("apply_patch", { command: `*** Begin Patch\n${"*** Update File: a/b/c/d\n".repeat(1_000)}*** End Patch` }, repo)],
+    ["a patch of too many files", () => describeToolCall("apply_patch", { command: `*** Begin Patch\n${"*** Update File: a\n".repeat(500_000)}*** End Patch` }, repo)],
+    ["a glob built to be slow", () => describeToolCall("Grep", { pattern: "x", glob: `${"*a".repeat(120)}{${"b,".repeat(60)}c}` }, repo)],
   ])("%s built to be slow is judged at once", (_label, judge) => {
     const start = performance.now();
     judge();
     // Linear code takes milliseconds; a quadratic one would take minutes. The
     // margin keeps a slow CI machine from failing it.
     expect(performance.now() - start).toBeLessThan(2000);
+  });
+
+  test("a patch of more than 1,000 files can't be described, so a person reviews it", () => {
+    const command = `*** Begin Patch\n${"*** Add File: a.ts\n".repeat(1_001)}*** End Patch`;
+    expect(describeToolCall("apply_patch", { command }, repo)).toBeNull();
   });
 
   test("shortening a long command can't leave part of a secret behind", () => {

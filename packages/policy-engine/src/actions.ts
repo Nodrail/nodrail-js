@@ -1,12 +1,13 @@
 import { realpathSync } from "node:fs";
 import { homedir } from "node:os";
-import { basename, dirname, isAbsolute, join, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
 import {
   classifyArguments,
   classifyCommand,
   type CommandShape,
 } from "./commands.ts";
 import { fingerprint } from "./protocol.ts";
+import { globCouldReachSecret, nameForms } from "./secrets.ts";
 import type { ActionDescriptor, JsonValue } from "./protocol.ts";
 
 const MAX_RESOURCE = 512;
@@ -212,25 +213,60 @@ function canonicalPath(path: string) {
   let existing = path;
   for (;;) {
     try {
-      return join(realpathSync.native(existing), ...missing);
+      return join(realpathSync.native(existing), ...missing.reverse());
     } catch {
       const parent = dirname(existing);
       if (parent === existing) return path;
-      missing.unshift(basename(existing));
+      missing.push(basename(existing));
       existing = parent;
     }
   }
 }
 
-/** Lets a rule name one folder or file anywhere in a path. */
-const partsOf = (path: string) => path.split(/[\\/]/).filter(Boolean);
+/**
+ * Lets a rule name one folder or file anywhere in a path. A dot file with a
+ * suffix also answers to its base, so .env.staging contains .env.
+ */
+const partsOf = (path: string) => [
+  ...new Set(path.split(/[\\/]/).filter(Boolean).flatMap(nameForms)),
+];
+
+/** Longer or deeper paths aren't real, and would only make checking slow. */
+const MAX_PATH = 4096;
+const MAX_DEPTH = 256;
 
 function fullPath(raw: string, cwd: string | null) {
+  if (raw.length > MAX_PATH) return null;
   const expanded = /^~(?=$|\/)/.test(raw) ? `${homedir()}${raw.slice(1)}` : raw;
   // Resolved, so src/../.claude can't pass as a path inside src/.
   if (!isAbsolute(expanded) && !cwd) return null;
-  return canonicalPath(resolve(cwd ?? "/", expanded));
+  const absolute = resolve(cwd ?? "/", expanded);
+  if (absolute.split(/[\\/]/).length > MAX_DEPTH) return null;
+  return canonicalPath(absolute);
 }
+
+/**
+ * Whether a path is inside the folder the agent works in. Unknown without a
+ * working folder, and a missing value never helps a rule allow anything.
+ */
+function insideCwd(path: string, cwd: string | null): Record<string, boolean> {
+  const root = cwd ? fullPath(cwd, null) : null;
+  return root ? { inside_cwd: isWithin(path, root) } : {};
+}
+
+function isWithin(path: string, root: string) {
+  const prefix = root.endsWith(sep) ? root : `${root}${sep}`;
+  return path === root || path.startsWith(prefix);
+}
+
+/** Whether every path is inside the working folder, resolved once. */
+function insideAll(paths: string[], cwd: string | null): Record<string, boolean> {
+  const root = cwd ? fullPath(cwd, null) : null;
+  return root ? { inside_cwd: paths.every((path) => isWithin(path, root)) } : {};
+}
+
+/** A patch touching more files can't be described, so a person reviews it. */
+const MAX_PATCH_FILES = 1000;
 
 function fileCall(
   operation: string,
@@ -251,12 +287,12 @@ function fileCall(
     params: {
       path,
       path_parts: partsOf(path),
+      ...insideCwd(path, cwd),
       content_sha256: fingerprint(content),
     },
   };
 }
 
-/** Searches read files too, so they are ruled by where they look. */
 /** The folders a glob names before its first wildcard. */
 function globRoot(pattern: string) {
   const fixed: string[] = [];
@@ -287,6 +323,9 @@ function searchCall(input: ToolInput, cwd: string | null, filePattern: unknown) 
     params: {
       path,
       path_parts: [...new Set([...partsOf(path), ...partsOf(glob ?? "")])],
+      ...insideCwd(path, cwd),
+      // A wildcard such as .env* can pick out a secret without naming it.
+      reaches_secrets: glob ? globCouldReachSecret(glob) : false,
       pattern: redact(nonEmptyText(input.pattern) ?? ""),
       input_sha256: fingerprint(input),
     },
@@ -383,6 +422,7 @@ function patchCall(
   const patch = nonEmptyText(input.command) ?? nonEmptyText(input.patch);
   if (!patch) return null;
   const { changes, moves } = patchHeaders(patch);
+  if (changes.length + moves.length > MAX_PATCH_FILES) return null;
   const paths = [...changes.map((change) => change.path), ...moves].map(
     (raw) => (raw ? fullPath(raw, cwd) : null),
   );
@@ -396,7 +436,12 @@ function patchCall(
       tool: "files",
       operation,
       resource: { kind: "file", id: only },
-      params: { path: only, path_parts: partsOf(only), content_sha256 },
+      params: {
+        path: only,
+        path_parts: partsOf(only),
+        ...insideCwd(only, cwd),
+        content_sha256,
+      },
     };
   return {
     tool: "files",
@@ -405,6 +450,7 @@ function patchCall(
     params: {
       paths: known,
       path_parts: [...new Set(known.flatMap(partsOf))],
+      ...insideAll(known, cwd),
       content_sha256,
     },
   };
