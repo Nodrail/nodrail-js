@@ -1,3 +1,4 @@
+import { resolve } from "node:path";
 import { describe, expect, test, vi } from "vitest";
 import { describeToolCall, runHook } from "../src/hooks";
 
@@ -56,7 +57,7 @@ describe("describing a call", () => {
     expect(call).toMatchObject({
       tool: "files",
       operation: "file.write",
-      resource: { kind: "file", id: "/a.env" },
+      resource: { kind: "file", id: resolve("/a.env") },
     });
     expect(JSON.stringify(call)).not.toContain("hunter2");
   });
@@ -165,9 +166,9 @@ describe("describing a call", () => {
     ["notes/a.md", "/work/notes/a.md"],
   ])("the path %s is resolved to %s", (file_path, expected) => {
     expect(
-      describeToolCall("Write", { file_path, content: "x" }, "/work")?.resource
-        .id,
-    ).toBe(expected);
+      describeToolCall("Write", { file_path, content: "x" }, resolve("/work"))
+        ?.resource.id,
+    ).toBe(resolve(expected));
   });
 
   test("a relative path with no working directory is blocked", () => {

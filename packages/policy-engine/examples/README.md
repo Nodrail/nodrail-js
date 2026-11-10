@@ -7,8 +7,8 @@
 | `policy.json`, `simulate.ts` | Evaluating a compiled document from TypeScript                     |
 
 ```sh
-pnpm rules validate examples/rules
-pnpm rules test examples/rules --cases examples/cases.yaml
+nodrail-policy validate examples/rules
+nodrail-policy test examples/rules --cases examples/cases.yaml
 ```
 
-`pnpm simulate` returns `allow`. With `NODRAIL_OPERATION=issues.update` it returns `require_approval`, and with `NODRAIL_OPERATION=repository.delete` it returns `deny`. Nothing here calls a tool.
+From a clone of the repository, `pnpm simulate` returns `allow`. With `NODRAIL_OPERATION=issues.update` it returns `require_approval`, and with `NODRAIL_OPERATION=repository.delete` it returns `deny`. Nothing here calls a tool.

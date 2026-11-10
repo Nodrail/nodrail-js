@@ -32,7 +32,7 @@ nodrail-policy eval rules.yaml \
   --params '{"amount": 5000}'
 ```
 
-`--agent`, `--installation` and `--now` set the caller and the clock, and also work with `check`, `exec` and `test` where they apply.
+`--agent`, `--installation` and `--now` set the caller and the clock for `eval`, `check`, `exec` and `hook`. `test` uses `--now`, and takes the caller from each case.
 
 ## `hook`
 
@@ -44,4 +44,4 @@ Arguments after `--` are run directly with no shell, so `;` and `|` in them are 
 
 ## `test`
 
-A cases file is a list of a `name`, a `call` and an `expect` of `allow`, `deny`, `require_approval` or `none`. A `call` is `{ command }` or `{ tool, operation, kind, resource, params }`. See [`examples/cases.yaml`](../examples/cases.yaml).
+A cases file is a list of a `name`, a `call` and an `expect` of `allow`, `deny`, `require_approval` or `none`. A `call` is `{ command }` or `{ tool, operation, kind, resource, params }`, plus optional `agent` and `installation`. A hand-written call has only the params you give it: deny and review rules with conditions on a missing field still match, so give file calls `path` and `path_parts` as the hook would. See [`examples/cases.yaml`](../examples/cases.yaml).

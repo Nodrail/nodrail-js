@@ -59,7 +59,7 @@ Every matching rule counts, in any order. Deny beats `require_approval`, which b
 | `{ kind: repository, match: prefix, value: acme/ }`   | Values starting with that text                                 |
 | `{ kind: repository, list: names }`                   | One exact rule per list item. Add `match: prefix` for prefixes |
 
-A prefix is literal text, so `acme/support` also matches `acme/support-extra`. End it with `/` when you mean a folder.
+A prefix is literal text, so `acme/support` also matches `acme/support-extra`. End it with `/` when you mean a folder. File paths are in the machine's own form, so on Windows a folder is `C:\repo\src\`.
 
 ### Conditions
 
@@ -75,6 +75,8 @@ A prefix is literal text, so `acme/support` also matches `acme/support-extra`. E
 ```
 
 Operators: `eq`, `neq`, `gt`, `gte`, `lt`, `lte`, `in` and `contains`. `contains` tests whether an array has a value. `field` can reach into objects with dots.
+
+Where a field lives depends on how the call was described. With `nodrail.run()` or `check()` it is the `params` you pass. A tool wrapped by `guard()` in [`@nodrail/client`](https://github.com/Nodrail/nodrail-js/tree/main/packages/client), or an MCP tool, carries its arguments under `input`, so the condition above reads `{ field: input.amount, op: lte, value: 1000 }`. File calls carry `path` and `path_parts`; see [Commands and tools](commands-and-tools.md).
 
 An entry can also be `{ macro: name }`, or `{ field: currency, op: in, list: name }`.
 

@@ -10,8 +10,11 @@ const client = resolve(here, "..");
 const core = resolve(client, "../policy-engine");
 const typescript = resolve(client, "node_modules/typescript/bin/tsc");
 
+// On Windows npm, pnpm and installed commands are .cmd files, which only start
+// through a shell.
+const shell = process.platform === "win32";
 const run = (command, args, cwd) =>
-  execFileSync(command, args, { cwd, encoding: "utf8", stdio: "pipe" });
+  execFileSync(command, args, { cwd, encoding: "utf8", stdio: "pipe", shell });
 
 function fail(message) {
   console.error(`Package check failed: ${message}`);
@@ -133,7 +136,7 @@ export const typed: typeof simulate = simulate;
   );
   run("node", [typescript, "-p", "tsconfig.json"], folder);
 
-  const hook = "node_modules/.bin/nodrail-claude-hook";
+  const hook = join("node_modules", ".bin", "nodrail-claude-hook");
   const unconfigured = spawnSync(hook, [], {
     cwd: folder,
     input: JSON.stringify({
@@ -143,7 +146,8 @@ export const typed: typeof simulate = simulate;
       tool_use_id: "t",
     }),
     encoding: "utf8",
-    env: { PATH: process.env.PATH },
+    env: { PATH: process.env.PATH, SystemRoot: process.env.SystemRoot },
+    shell,
   });
   if (
     unconfigured.status !== 0 ||

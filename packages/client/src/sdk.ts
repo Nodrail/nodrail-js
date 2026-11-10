@@ -121,35 +121,44 @@ const asJson = (value: unknown) =>
 const REPORT_WAIT_MS = 1500;
 
 export class Nodrail {
-  private readonly client: NodrailClient | null;
-  private readonly waitMs: number;
+  private client: NodrailClient | null;
+  private readonly options: NodrailOptions;
+  private readonly env: Environment;
   private readonly onBlocked: OnBlocked;
   private readonly sleep: NodrailOptions["sleep"];
 
   constructor(options: NodrailOptions = {}) {
-    const env = options.env ?? process.env;
-    const found = resolveConnection(env);
-    const credential = options.credential ?? found.credential;
-    // A missing credential blocks each call rather than failing at startup, so
-    // nothing can run unchecked because of the order things were loaded in.
-    this.client = credential
-      ? new NodrailClient({
-          url: options.url ?? found.url,
-          credential,
-          adapterVersion:
-            options.adapterVersion ?? `typescript-sdk/${SDK_VERSION}`,
-          fetch: options.fetch,
-        })
-      : null;
-    this.waitMs = options.waitMs ?? waitMsFrom(env);
+    this.options = options;
+    this.env = options.env ?? process.env;
+    this.client = this.connect();
     this.onBlocked = options.onBlocked ?? "return";
     this.sleep = options.sleep;
   }
 
+  /**
+   * Without a credential each call is blocked rather than failing at startup,
+   * and the next call looks again: an application that loads its secrets after
+   * importing its tools still gets checked calls once they are there.
+   */
+  private connect() {
+    const found = resolveConnection(this.env);
+    const credential = this.options.credential ?? found.credential;
+    return credential
+      ? new NodrailClient({
+          url: this.options.url ?? found.url,
+          credential,
+          adapterVersion:
+            this.options.adapterVersion ?? `typescript-sdk/${SDK_VERSION}`,
+          fetch: this.options.fetch,
+        })
+      : null;
+  }
+
   private decide(
     descriptor: ActionDescriptor,
-    waitMs = this.waitMs,
+    waitMs = this.options.waitMs ?? waitMsFrom(this.env),
   ): Promise<Decision> {
+    this.client ??= this.connect();
     if (!this.client)
       return Promise.resolve({
         allowed: false,

@@ -17,12 +17,15 @@ jobs:
     name: Version and publish
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    # The npm token lives only in this environment, which only main can use.
+    environment: npm
     permissions:
-      contents: write
-      pull-requests: write
-      id-token: write
+      contents: write # push version commits and tags, write releases
+      pull-requests: write # open the "Version packages" pull request
+      id-token: write # npm provenance
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # Credentials stay: changesets pushes the version branch and tags.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 # zizmor: ignore[artipacked]
         with:
           fetch-depth: 0
       - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1

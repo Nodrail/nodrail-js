@@ -278,6 +278,27 @@ const patchOperations: Record<string, string> = {
   Delete: "file.delete",
 };
 
+const PATCH_VERBS = ["Add", "Update", "Delete"] as const;
+
+/**
+ * The file headers of a patch, read line by line. A regular expression here
+ * could take minutes on a crafted line, and an agent writes the patch.
+ */
+function patchHeaders(patch: string) {
+  const changes: { verb: (typeof PATCH_VERBS)[number]; path: string }[] = [];
+  const moves: string[] = [];
+  for (const line of patch.split(/\r\n|[\n\r\u2028\u2029]/)) {
+    if (!line.startsWith("*** ")) continue;
+    const rest = line.slice(4);
+    const verb = PATCH_VERBS.find((name) => rest.startsWith(`${name} File: `));
+    if (verb)
+      changes.push({ verb, path: rest.slice(verb.length + 7).trimEnd() });
+    else if (rest.startsWith("Move to: "))
+      moves.push(rest.slice(9).trimEnd());
+  }
+  return { changes, moves };
+}
+
 /**
  * Codex's apply_patch. One plain change is ruled like the same change from any
  * other agent. Anything larger is its own operation with a resource no path
@@ -289,19 +310,15 @@ function patchCall(
 ): ActionDescriptor | null {
   const patch = nonEmptyText(input.command) ?? nonEmptyText(input.patch);
   if (!patch) return null;
-  const changes = [
-    ...patch.matchAll(/^\*\*\* (Add|Update|Delete) File: (.+?)\s*$/gm),
-  ];
-  const moves = [...patch.matchAll(/^\*\*\* Move to: (.+?)\s*$/gm)];
-  const paths = [
-    ...changes.map((match) => match[2]),
-    ...moves.map((m) => m[1]),
-  ].map((raw) => fullPath(raw ?? "", cwd));
+  const { changes, moves } = patchHeaders(patch);
+  const paths = [...changes.map((change) => change.path), ...moves].map(
+    (raw) => (raw ? fullPath(raw, cwd) : null),
+  );
   if (paths.length === 0 || paths.some((path) => !path)) return null;
   const known = paths as string[];
   const content_sha256 = fingerprint(patch);
   const [only] = known;
-  const operation = patchOperations[changes[0]?.[1] ?? ""];
+  const operation = patchOperations[changes[0]?.verb ?? ""];
   if (known.length === 1 && only && operation)
     return {
       tool: "files",

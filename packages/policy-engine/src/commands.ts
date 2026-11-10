@@ -158,10 +158,25 @@ function chainParts(text: string) {
     : null;
 }
 
+const isShellSpace = (char: string | undefined) =>
+  char === " " || char === "\t" || char === "\r" || char === "\n";
+
+/**
+ * Not trim(): that would also remove characters a shell keeps in the name. And
+ * not a regular expression: one anchored at both ends takes quadratic time on a
+ * long run of spaces, and an agent writes the command.
+ */
+function trimShellSpace(line: string) {
+  let start = 0;
+  let end = line.length;
+  while (start < end && isShellSpace(line[start])) start += 1;
+  while (end > start && isShellSpace(line[end - 1])) end -= 1;
+  return line.slice(start, end);
+}
+
 /** Judges a line a shell would run. */
 export function classifyCommand(line: string): CommandShape {
-  // Not trim(): that would also remove characters a shell keeps in the name.
-  const text = line.replace(/^[ \t\r\n]+|[ \t\r\n]+$/g, "");
+  const text = trimShellSpace(line);
   const parts = chainParts(text);
   return parts
     ? { operation: "command.compound", text, parts }

@@ -61,6 +61,8 @@ Keep `onFailure: "block"`, which needs Claude Code 2.1.295 or later, so a broken
 
 If the rules can't be loaded, every call is blocked.
 
+The packs allow Claude Code's own tools that only plan or talk to you, such as asking a question or presenting a plan. Its other own tools are `tool: claude-code` with the tool's name in lowercase as the operation, for example `agent` for starting a sub-agent: allow the ones you use. This hook answers in Claude Code's format; for Codex, use the [Nodrail plugin](https://github.com/Nodrail/agent-plugins).
+
 Protect the configuration itself. An agent that can edit `.claude/settings.json` can remove the hook, and the `repo-work` pack denies that for this reason.
 
 ## Test your rules in CI
@@ -70,7 +72,11 @@ List calls and what you expect. A failing case exits with 1.
 ```yaml
 - name: reads are fine
   call:
-    { tool: files, operation: file.read, kind: file, resource: /repo/src/a.ts }
+    tool: files
+    operation: file.read
+    kind: file
+    resource: /repo/src/a.ts
+    params: { path: /repo/src/a.ts, path_parts: [repo, src, a.ts] }
   expect: allow
 
 - name: never force push

@@ -1,11 +1,14 @@
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { describe, expect, test } from "vitest";
 import { resolveConnection, waitMsFrom } from "../src/connection";
 import { describeToolCall, runHook } from "../src/hooks";
 import { claudeCodeHooks, codexGovernedTools, codexHooks } from "../src/setup";
 import { fakeNodrail } from "./support/fake-nodrail";
+
+// Paths take the machine's own form: /work here, D:\work on Windows.
+const work = resolve("/work");
 
 const event = (tool_name: string, tool_input: object) =>
   JSON.stringify({
@@ -13,7 +16,7 @@ const event = (tool_name: string, tool_input: object) =>
     tool_name,
     tool_input,
     tool_use_id: "call_1",
-    cwd: "/work",
+    cwd: work,
   });
 
 const env = { NODRAIL_CREDENTIAL: "c", NODRAIL_WAIT_SECONDS: "0" };
@@ -40,13 +43,13 @@ describe("Codex's apply_patch", () => {
         {
           command: patch(`*** ${verb} File: src/a.ts`, "+hello"),
         },
-        "/work",
+        work,
       );
       expect(described).toMatchObject({
         tool: "files",
         operation,
-        resource: { kind: "file", id: "/work/src/a.ts" },
-        params: { path: "/work/src/a.ts" },
+        resource: { kind: "file", id: join(work, "src", "a.ts") },
+        params: { path: join(work, "src", "a.ts") },
       });
     },
   );
@@ -57,7 +60,7 @@ describe("Codex's apply_patch", () => {
       {
         command: patch("*** Update File: a.ts", "-SECRETOLD", "+SECRETNEW"),
       },
-      "/work",
+      work,
     );
     expect(JSON.stringify(described)).not.toContain("SECRET");
   });
@@ -69,7 +72,7 @@ describe("Codex's apply_patch", () => {
     ],
     ["a rename", patch("*** Update File: src/a.ts", "*** Move to: /etc/a.ts")],
   ])("%s can't ride on a rule for one path", (_label, command) => {
-    const described = describeToolCall("apply_patch", { command }, "/work");
+    const described = describeToolCall("apply_patch", { command }, work);
     expect(described?.operation).toBe("file.patch");
     expect(described?.resource.id).toMatch(/^patch:sha256:/);
     expect(described?.params.path_parts).toContain("etc");
@@ -79,7 +82,7 @@ describe("Codex's apply_patch", () => {
     ["nothing", {}],
     ["no files in it", { command: "*** Begin Patch\n*** End Patch" }],
   ])("with %s it can't be described, so it is blocked", (_label, input) => {
-    expect(describeToolCall("apply_patch", input, "/work")).toBeNull();
+    expect(describeToolCall("apply_patch", input, work)).toBeNull();
   });
 
   test("a relative path with no working folder is not guessed", () => {
