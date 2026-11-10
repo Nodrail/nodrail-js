@@ -14,7 +14,10 @@ jobs:
     name: Scorecard
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # Job permissions replace the ones above, so reading is listed again.
     permissions:
+      contents: read
+      actions: read
       security-events: write
       id-token: write
     steps:
