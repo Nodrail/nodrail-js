@@ -52,11 +52,15 @@ export const SECRET_PAIRS = [
 export function reachesSecret(params: Record<string, unknown>) {
   if (params.reaches_secrets === true) return true;
   const parts = Array.isArray(params.path_parts)
-    ? params.path_parts.filter((part): part is string => typeof part === "string")
+    ? params.path_parts.filter(
+        (part): part is string => typeof part === "string",
+      )
     : [];
   return (
     parts.some(isSecretName) ||
-    SECRET_PAIRS.some((pair) => pair.parts.every((part) => parts.includes(part)))
+    SECRET_PAIRS.some((pair) =>
+      pair.parts.every((part) => parts.includes(part)),
+    )
   );
 }
 
@@ -108,7 +112,11 @@ function expandBraces(pattern: string): string[] | null {
   return results;
 }
 
-type Token = { any: true } | { one: true } | { set: string; negate: boolean } | { char: string };
+type Token =
+  | { any: true }
+  | { one: true }
+  | { set: string; negate: boolean }
+  | { char: string };
 
 function tokens(pattern: string): Token[] {
   const result: Token[] = [];
@@ -143,25 +151,28 @@ function inSet(set: string, char: string) {
   return false;
 }
 
-/** Glob matching for one path part, in time proportional to both lengths. */
+/** Whether one pattern token, other than *, matches one character. */
+function fits(token: Token, char: string) {
+  if ("one" in token) return true;
+  if ("set" in token) return inSet(token.set, char) !== token.negate;
+  return "char" in token && token.char === char;
+}
+
+/**
+ * Glob matching for one path part, in time proportional to both lengths:
+ * row[at] says whether the tokens so far match the name's first `at` chars.
+ */
 function matchesPart(pattern: Token[], name: string) {
-  let row = Array.from({ length: name.length + 1 }, () => false);
-  row[0] = true;
+  let row = Array.from({ length: name.length + 1 }, (_, at) => at === 0);
   for (const token of pattern) {
     const next = Array.from({ length: name.length + 1 }, () => false);
-    if ("any" in token) {
-      next[0] = row[0] ?? false;
+    // * can match nothing, or one more character than it already did.
+    if ("any" in token)
+      for (let at = 0; at <= name.length; at += 1)
+        next[at] = (row[at] ?? false) || (at > 0 && (next[at - 1] ?? false));
+    else
       for (let at = 1; at <= name.length; at += 1)
-        next[at] = (row[at] ?? false) || (next[at - 1] ?? false);
-    } else
-      for (let at = 1; at <= name.length; at += 1) {
-        const char = name[at - 1] ?? "";
-        const fits =
-          "one" in token ||
-          ("set" in token && inSet(token.set, char) !== token.negate) ||
-          ("char" in token && token.char === char);
-        next[at] = fits && (row[at - 1] ?? false);
-      }
+        next[at] = (row[at - 1] ?? false) && fits(token, name[at - 1] ?? "");
     row = next;
   }
   return row[name.length] ?? false;

@@ -20,7 +20,10 @@ const PACKAGES = ["packages/policy-engine", "packages/client"];
 const dryRun = process.argv.includes("--dry-run");
 
 const npm = (args, options = {}) =>
-  execFileSync("npx", ["--yes", NPM, ...args], { encoding: "utf8", ...options });
+  execFileSync("npx", ["--yes", NPM, ...args], {
+    encoding: "utf8",
+    ...options,
+  });
 
 function isLive(name, version) {
   try {
@@ -65,7 +68,17 @@ function release(directory, name, version, staged) {
   if (dryRun) return console.log(`Would release ${tag}.`);
   execFileSync(
     "gh",
-    ["release", "create", tag, "--target", process.env.GITHUB_SHA ?? "main", "--title", `${name} ${version}`, "--notes", notes],
+    [
+      "release",
+      "create",
+      tag,
+      "--target",
+      process.env.GITHUB_SHA ?? "main",
+      "--title",
+      `${name} ${version}`,
+      "--notes",
+      notes,
+    ],
     { stdio: "inherit" },
   );
 }
@@ -103,7 +116,9 @@ try {
       { stdio: "inherit" },
     );
     release(directory, name, version, true);
-    console.log(`${name}@${version} is staged. Approve it with: npm stage list`);
+    console.log(
+      `${name}@${version} is staged. Approve it with: npm stage list`,
+    );
   }
 } finally {
   rmSync(folder, { recursive: true, force: true });

@@ -13,11 +13,13 @@ export type { ActionDescriptor } from "./protocol.ts";
 export {
   createNodrail,
   guard,
+  guardMcpServer,
   Nodrail,
   NodrailBlockedError,
   type ActionInput,
   type Describe,
   type Guarded,
+  type McpServerLike,
   type GuardedFunction,
   type GuardOptions,
   type NodrailOptions,

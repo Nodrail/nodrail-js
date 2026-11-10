@@ -1,6 +1,12 @@
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { describe, expect, test } from "vitest";
@@ -52,9 +58,13 @@ test("the pages have examples to check, so the tests above can't pass empty", ()
 
 test("the getting-started CI example passes against the pack it starts from", () => {
   const cli = (...args: string[]) =>
-    spawnSync(process.execPath, ["--import", "tsx", join(root, "src/cli.ts"), ...args], {
-      encoding: "utf8",
-    });
+    spawnSync(
+      process.execPath,
+      ["--import", "tsx", join(root, "src/cli.ts"), ...args],
+      {
+        encoding: "utf8",
+      },
+    );
   const folder = mkdtempSync(join(tmpdir(), "nodrail-guide-"));
   const rules = join(folder, "rules.yaml");
   const cases = join(folder, "cases.yaml");

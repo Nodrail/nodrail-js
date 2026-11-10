@@ -45,30 +45,34 @@ const packageManagerFlags =
   /^--(?:script-shell|shell|config\..+|prefix|dir|userconfig|globalconfig|node-options|call|workspace-root)(?:=.*)?$/;
 
 // Maps, not objects: a program called __proto__ or constructor must find nothing.
-const riskyByProgram = new Map<string, RegExp>(Object.entries({
-  // -u is clone's --upload-pack; --config and --template can set a command or
-  // install hooks that run on the next git command.
-  git: /^(?:-x|-O.*|-u.*|--config(?:=.*)?|--template(?:=.*)?)$/,
-  zip: /^(?:-TT.*|--unzip-command(?:=.*)?)$/,
-  man: /^(?:-P.*|--pager(?:=.*)?|-H.*|--html(?:=.*)?)$/,
-  tar: /^(?:-I.*|-[a-zA-Z]*I)$/,
-  rsync: /^-e.*$/,
-  curl: /^(?:-[oOKTdF].*|--(?:output|remote-name|config|upload-file|data.*|form.*|json)(?:=.*)?)$/,
-  wget: /^(?:-[oO].*|--(?:output-document|output-file|post-file)(?:=.*)?)$/,
-  dd: /^of=/,
-  make: /^(?:-[fC].*|--(?:file|makefile|directory|eval)(?:=.*)?)$/,
-  // Settings that swap the shell scripts run in, or where config comes from.
-  npm: packageManagerFlags,
-  pnpm: packageManagerFlags,
-  yarn: packageManagerFlags,
-}));
+const riskyByProgram = new Map<string, RegExp>(
+  Object.entries({
+    // -u is clone's --upload-pack; --config and --template can set a command or
+    // install hooks that run on the next git command.
+    git: /^(?:-x|-O.*|-u.*|--config(?:=.*)?|--template(?:=.*)?)$/,
+    zip: /^(?:-TT.*|--unzip-command(?:=.*)?)$/,
+    man: /^(?:-P.*|--pager(?:=.*)?|-H.*|--html(?:=.*)?)$/,
+    tar: /^(?:-I.*|-[a-zA-Z]*I)$/,
+    rsync: /^-e.*$/,
+    curl: /^(?:-[oOKTdF].*|--(?:output|remote-name|config|upload-file|data.*|form.*|json)(?:=.*)?)$/,
+    wget: /^(?:-[oO].*|--(?:output-document|output-file|post-file)(?:=.*)?)$/,
+    dd: /^of=/,
+    make: /^(?:-[fC].*|--(?:file|makefile|directory|eval)(?:=.*)?)$/,
+    // Settings that swap the shell scripts run in, or where config comes from.
+    npm: packageManagerFlags,
+    pnpm: packageManagerFlags,
+    yarn: packageManagerFlags,
+  }),
+);
 
-const riskySubcommands = new Map<string, RegExp>(Object.entries({
-  git: /^(?:bisect|submodule|filter-branch|difftool|mergetool|config|alias|credential|hook)$/,
-  npm: /^(?:exec|x)$/,
-  pnpm: /^(?:exec|dlx)$/,
-  yarn: /^(?:exec|dlx)$/,
-}));
+const riskySubcommands = new Map<string, RegExp>(
+  Object.entries({
+    git: /^(?:bisect|submodule|filter-branch|difftool|mergetool|config|alias|credential|hook)$/,
+    npm: /^(?:exec|x)$/,
+    pnpm: /^(?:exec|dlx)$/,
+    yarn: /^(?:exec|dlx)$/,
+  }),
+);
 
 /**
  * Whether an argument points at a place credentials live, such as .env,
@@ -76,9 +80,7 @@ const riskySubcommands = new Map<string, RegExp>(Object.entries({
  * must not stretch to `git log -p -- .env`.
  */
 const namesASecret = (words: string[]) =>
-  words
-    .slice(1)
-    .some((word) => word.split(/[:=]/).some(fragmentReachesSecret));
+  words.slice(1).some((word) => word.split(/[:=]/).some(fragmentReachesSecret));
 
 /** A literal name, or a wildcard such as '.e*' or .en? that could match one. */
 function fragmentReachesSecret(fragment: string) {
@@ -140,6 +142,19 @@ const render = (words: string[]) =>
 const MAX_CHAIN_PARTS = 20;
 
 /** Splits on && || ; | and newlines outside quotes, or null if it can't. */
+/**
+ * How many characters the chain separator at `index` takes: 1 for ; | or a
+ * newline, 2 for && || or |&. Null for one a shell would read differently: a
+ * lone & runs in the background, and ;; only means something inside case.
+ */
+function separatorLength(text: string, index: number) {
+  const char = text[index] ?? "";
+  const doubled = text[index + 1] === char;
+  if (char === "&" && !doubled) return null;
+  if (doubled && (char === ";" || char === "\n")) return null;
+  return doubled ? 2 : 1;
+}
+
 function splitChain(text: string) {
   const parts: string[] = [];
   let part = "";
@@ -154,11 +169,9 @@ function splitChain(text: string) {
       part += char;
       continue;
     }
-    const doubled = text[index + 1] === char;
-    // A lone & runs in the background, and a shell has no ;; outside case.
-    if (char === "&" && !doubled) return null;
-    if (doubled && (char === ";" || char === "\n")) return null;
-    if (doubled) index += 1;
+    const length = separatorLength(text, index);
+    if (length === null) return null;
+    index += length - 1;
     parts.push(part);
     part = "";
   }

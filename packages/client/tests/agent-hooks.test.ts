@@ -288,16 +288,20 @@ describe("the credential never travels in the clear", () => {
 
   test("an http address elsewhere blocks without sending anything", async () => {
     const sent: string[] = [];
-    const result = await runHook(event("Bash", { command: "ls" }), {
-      NODRAIL_CREDENTIAL: "secret-credential",
-      NODRAIL_URL: "http://nodrail.example.com",
-      NODRAIL_WAIT_SECONDS: "0",
-    }, {
-      fetch: (async (url: string) => {
-        sent.push(url);
-        return new Response("{}");
-      }) as unknown as typeof fetch,
-    });
+    const result = await runHook(
+      event("Bash", { command: "ls" }),
+      {
+        NODRAIL_CREDENTIAL: "secret-credential",
+        NODRAIL_URL: "http://nodrail.example.com",
+        NODRAIL_WAIT_SECONDS: "0",
+      },
+      {
+        fetch: (async (url: string) => {
+          sent.push(url);
+          return new Response("{}");
+        }) as unknown as typeof fetch,
+      },
+    );
     expect(sent).toEqual([]);
     expect(reasonOf(result.stdout)).toContain("https");
   });
@@ -317,7 +321,9 @@ describe("reads are checked on the machine", () => {
     ["Grep", { pattern: "KEY", glob: ".env*" }],
     ["Glob", { pattern: "**/.aws/*" }],
   ])("%s %j is denied", async (tool, input) => {
-    const result = await runHook(event(tool, input), offline, { fetch: noServer });
+    const result = await runHook(event(tool, input), offline, {
+      fetch: noServer,
+    });
     expect(reasonOf(result.stdout)).toContain("credentials");
   });
 
@@ -325,7 +331,9 @@ describe("reads are checked on the machine", () => {
     ["Read", { file_path: "src/a.ts" }],
     ["Grep", { pattern: "TODO", glob: "*.ts" }],
   ])("%s %j goes ahead quietly", async (tool, input) => {
-    const result = await runHook(event(tool, input), offline, { fetch: noServer });
+    const result = await runHook(event(tool, input), offline, {
+      fetch: noServer,
+    });
     expect(result).toEqual({ exitCode: 0, stdout: "", stderr: "" });
   });
 });

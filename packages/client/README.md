@@ -62,7 +62,7 @@ every change:
 | LlamaIndex | | a tool or array of tools |
 | Anthropic SDK tool runner | | your `tools` array |
 | Claude Agent SDK | | the tools from `tool()` |
-| MCP SDK | [`mcp-server.ts`](examples/frameworks/mcp-server.ts) | what `registerTool` returns, [see below](#mcp-servers) |
+| MCP SDK | [`mcp-server.ts`](examples/frameworks/mcp-server.ts) | the server, with `guardMcpServer`, [see below](#mcp-servers) |
 | OpenAI SDK `runTools` | | your `tools` array |
 
 A framework's tools keep their exact type, so the result goes wherever the
@@ -137,24 +137,26 @@ guard(tools, {
 
 ### MCP servers
 
-Pass what `registerTool` returns, keyed by the tool's name. The server keeps
-calling that object, so `guard` puts the check inside it, through the SDK's own
-`update()`, and gives back the same object:
+Guard the server before registering its tools. Every tool it registers from
+then on is checked under the name it registers with:
 
 ```ts
-const server = new McpServer({ name: "github", version: "1.0.0" });
+import { guardMcpServer } from "@nodrail/client";
 
-guard({
-  delete_repo: server.registerTool(
-    "delete_repo",
-    { inputSchema: { repo: z.string() } },
-    async ({ repo }) => deleteRepo(repo),
-  ),
-});
+const server = guardMcpServer(new McpServer({ name: "github", version: "1.0.0" }));
+
+server.registerTool(
+  "delete_repo",
+  { inputSchema: { repo: z.string() } },
+  async ({ repo }) => deleteRepo(repo),
+);
 ```
 
-A blocked call answers the MCP client with `isError: true` and the reason.
-Tested against the real `@modelcontextprotocol/sdk` client and server.
+The check goes inside each tool the server keeps, so it holds when the server
+calls the tool, and a later `tool.update({ callback })` is checked too.
+Guarding a server that already has tools throws, rather than leaving them
+unchecked. A blocked call answers the MCP client with `isError: true` and the
+reason. Tested against the real `@modelcontextprotocol/sdk` client and server.
 
 ### Options
 

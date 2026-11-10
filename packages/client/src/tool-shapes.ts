@@ -71,13 +71,21 @@ export const isAsyncGenerator = (fn: unknown) =>
 
 const firstArgument = (args: unknown[]) => args[0];
 
+/**
+ * How a framework calls a method: where the tool's input is among its
+ * arguments, and how a refusal has to look to be read as the tool's result.
+ */
+type CallShape = {
+  inputOf?: (args: unknown[]) => unknown;
+  asResult?: (text: string) => unknown;
+};
+
 /** The same tool with one method put behind the check. */
 function guardMethod(
   tool: Tool,
   method: string,
   hooks: ToolHooks,
-  inputOf: (args: unknown[]) => unknown = firstArgument,
-  asResult?: (text: string) => unknown,
+  { inputOf = firstArgument, asResult }: CallShape = {},
 ) {
   const original = tool[method] as Fn;
   return replacing(tool, {
@@ -108,20 +116,30 @@ const adapters: ToolAdapter[] = [
     name: (tool) => text(tool.name),
     wrap: (tool, hooks) => {
       const key = isFn(tool.handler) ? "handler" : "callback";
-      const original = tool[key] as Fn;
-      // Without an input schema the first argument is the request context.
-      const hasInput = tool.inputSchema !== undefined;
-      const checked = function (this: unknown, ...args: unknown[]) {
-        return hooks.around(
-          hasInput ? args[0] : {},
-          () => original.apply(this, args),
-          contentRefusal,
-        );
-      };
-      (tool.update as (changes: Tool) => void)({ callback: checked });
+      const checkedVersion = (run: Fn) =>
+        function (this: unknown, ...args: unknown[]) {
+          // Without an input schema the first argument is the request context.
+          const input = tool.inputSchema !== undefined ? args[0] : {};
+          return hooks.around(
+            input,
+            () => run.apply(this, args),
+            contentRefusal,
+          );
+        };
+      const update = tool.update as (changes: Tool) => void;
+      const checked = checkedVersion(tool[key] as Fn);
+      update({ callback: checked });
       if (tool[key] !== checked)
         throw new TypeError(
           "Nodrail: this MCP tool didn't take the check, so it can't be guarded.",
+        );
+      // A later update() can't swap the check out: a new function is checked
+      // too. disable(), enable() and remove() go through here unchanged.
+      tool.update = (changes: Tool) =>
+        update(
+          isFn(changes.callback)
+            ? { ...changes, callback: checkedVersion(changes.callback) }
+            : changes,
         );
       return marked(tool);
     },
@@ -134,11 +152,12 @@ const adapters: ToolAdapter[] = [
     covers: ["_call", "invoke", "call", "func"],
     name: (tool) => text(tool.name),
     wrap: (tool, hooks) =>
-      guardMethod(tool, "_call", hooks, firstArgument, (reason) =>
-        tool.responseFormat === "content_and_artifact"
-          ? [reason, undefined]
-          : reason,
-      ),
+      guardMethod(tool, "_call", hooks, {
+        asResult: (reason) =>
+          tool.responseFormat === "content_and_artifact"
+            ? [reason, undefined]
+            : reason,
+      }),
   },
   {
     // OpenAI Agents SDK.
@@ -146,7 +165,9 @@ const adapters: ToolAdapter[] = [
     covers: ["invoke"],
     name: (tool) => text(tool.name),
     wrap: (tool, hooks) =>
-      guardMethod(tool, "invoke", hooks, (args) => parsedJson(args[1])),
+      guardMethod(tool, "invoke", hooks, {
+        inputOf: (args) => parsedJson(args[1]),
+      }),
   },
   {
     // Claude Agent SDK, which answers with content blocks.
@@ -154,7 +175,7 @@ const adapters: ToolAdapter[] = [
     covers: ["handler"],
     name: (tool) => text(tool.name),
     wrap: (tool, hooks) =>
-      guardMethod(tool, "handler", hooks, firstArgument, contentRefusal),
+      guardMethod(tool, "handler", hooks, { asResult: contentRefusal }),
   },
   {
     // OpenAI SDK `runTools`.
@@ -167,12 +188,9 @@ const adapters: ToolAdapter[] = [
     wrap: (tool, hooks) =>
       marked({
         ...tool,
-        function: guardMethod(
-          tool.function as Tool,
-          "function",
-          hooks,
-          (args) => parsedJson(args[0]),
-        ),
+        function: guardMethod(tool.function as Tool, "function", hooks, {
+          inputOf: (args) => parsedJson(args[0]),
+        }),
       }),
   },
   {

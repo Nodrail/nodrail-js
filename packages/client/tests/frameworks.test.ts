@@ -321,7 +321,12 @@ describe("guard", () => {
   test("a credential loaded after the tools were wrapped is picked up", async () => {
     const server = fakeNodrail();
     const env: Record<string, string | undefined> = {};
-    const nodrail = createNodrail({ url: "https://nodrail.test", waitMs: 0, fetch: server.fetch, env });
+    const nodrail = createNodrail({
+      url: "https://nodrail.test",
+      waitMs: 0,
+      fetch: server.fetch,
+      env,
+    });
     const work = vi.fn((_input: object) => "ran");
     const send = nodrail.guard(work, { name: "send" });
     await expect(send({})).resolves.toContain("not configured");
@@ -456,8 +461,12 @@ describe("what guard's type promises", () => {
   const { nodrail } = connected();
 
   test("a plain function has to ask first, so it returns a promise", () => {
-    const send = nodrail.guard((_args: { to: string }): number => 1, { name: "send" });
-    expectTypeOf(send).toEqualTypeOf<(_args: { to: string }) => Promise<number>>();
+    const send = nodrail.guard((_args: { to: string }): number => 1, {
+      name: "send",
+    });
+    expectTypeOf(send).toEqualTypeOf<
+      (_args: { to: string }) => Promise<number>
+    >();
     expectTypeOf(nodrail.guard({ send: async () => "sent" })).toEqualTypeOf<{
       send: () => Promise<string>;
     }>();
@@ -475,9 +484,16 @@ describe("what guard's type promises", () => {
       typeof langchainTools
     >();
     const agentsTools = [
-      agentsTool({ name: "x", description: "x", parameters: schema, execute: () => "done" }),
+      agentsTool({
+        name: "x",
+        description: "x",
+        parameters: schema,
+        execute: () => "done",
+      }),
     ];
-    expectTypeOf(nodrail.guard(agentsTools)).toEqualTypeOf<typeof agentsTools>();
+    expectTypeOf(nodrail.guard(agentsTools)).toEqualTypeOf<
+      typeof agentsTools
+    >();
   });
 });
 
@@ -488,20 +504,33 @@ describe("nothing with code of its own slips through", () => {
   const ran = vi.fn(() => "RAN");
 
   test.each([
-    ["a provider tool that still runs locally", { type: "provider", id: "anthropic.bash", inputSchema: {}, execute: ran }, "execute"],
+    [
+      "a provider tool that still runs locally",
+      { type: "provider", id: "anthropic.bash", inputSchema: {}, execute: ran },
+      "execute",
+    ],
     ["a tool that runs through run()", { inputSchema: {}, run: ran }, "run"],
   ])("%s is checked", async (_label, tool, method) => {
     ran.mockClear();
-    const guardedTool = unconfigured().guard({ shell: tool }).shell as Record<string, unknown>;
+    const guardedTool = unconfigured().guard({ shell: tool }).shell as Record<
+      string,
+      unknown
+    >;
     expect(guardedTool).not.toBe(tool);
-    const result = await (guardedTool[method] as (input: object) => unknown).call(guardedTool, { command: "rm -rf ~" });
+    const result = await (
+      guardedTool[method] as (input: object) => unknown
+    ).call(guardedTool, { command: "rm -rf ~" });
     expect(ran).not.toHaveBeenCalled();
     expect(JSON.stringify(result)).toContain("not configured");
   });
 
   test("a tool can't mark itself as already checked", async () => {
     ran.mockClear();
-    const forged = { [Symbol.for("nodrail.guarded")]: true, name: "shell", execute: ran };
+    const forged = {
+      [Symbol.for("nodrail.guarded")]: true,
+      name: "shell",
+      execute: ran,
+    };
     const guardedTool = unconfigured().guard(forged);
     // A tool object keeps its own type; the guarded call returns a promise.
     await (guardedTool.execute as unknown as () => Promise<unknown>)();
@@ -521,7 +550,9 @@ describe("nothing with code of its own slips through", () => {
 });
 
 test("a tool named like an Object property gets no description from Object", () => {
-  const describe = { create_issue: () => ({ tool: "github", operation: "issues.create" }) };
+  const describe = {
+    create_issue: () => ({ tool: "github", operation: "issues.create" }),
+  };
   for (const name of ["constructor", "__proto__", "toString", "hasOwnProperty"])
     expect(describerFor(describe, name)).toBeUndefined();
   expect(describerFor(describe, "create_issue")).toBe(describe.create_issue);
@@ -539,9 +570,13 @@ describe("MCP SDK tools", () => {
   }
   const unconfigured = () =>
     createNodrail({ env: { NODRAIL_HOME: "/nonexistent" }, waitMs: 0 });
+  const deleteRepo = (client: Client) =>
+    client.callTool({ name: "delete_repo", arguments: { repo: "a/b" } });
 
   test("a registered tool is checked where the server calls it", async () => {
-    const ran = vi.fn(() => ({ content: [{ type: "text" as const, text: "deleted" }] }));
+    const ran = vi.fn(() => ({
+      content: [{ type: "text" as const, text: "deleted" }],
+    }));
     const client = await connectedServer((server) => {
       const registered = server.registerTool(
         "delete_repo",
@@ -551,33 +586,162 @@ describe("MCP SDK tools", () => {
       const guarded = unconfigured().guard({ delete_repo: registered });
       expect(guarded.delete_repo).toBe(registered);
     });
-    const result = await client.callTool({ name: "delete_repo", arguments: { repo: "a/b" } });
+    const result = await deleteRepo(client);
     expect(ran).not.toHaveBeenCalled();
     expect(result.isError).toBe(true);
     expect(JSON.stringify(result.content)).toContain("not configured");
   });
 
   test("an allowed call reaches the tool with its arguments", async () => {
-    const server = fakeNodrail();
-    const nodrail = createNodrail({ url: "https://nodrail.test", credential: "c", waitMs: 0, fetch: server.fetch, env: {} });
-    const ran = vi.fn(({ repo }: { repo: string }) => ({ content: [{ type: "text" as const, text: `deleted ${repo}` }] }));
+    const { server, nodrail } = connected();
+    const ran = vi.fn(({ repo }: { repo: string }) => ({
+      content: [{ type: "text" as const, text: `deleted ${repo}` }],
+    }));
     const client = await connectedServer((mcp) => {
-      nodrail.guard({ delete_repo: mcp.registerTool("delete_repo", { inputSchema: { repo: z.string() } }, ran) });
+      nodrail.guard({
+        delete_repo: mcp.registerTool(
+          "delete_repo",
+          { inputSchema: { repo: z.string() } },
+          ran,
+        ),
+      });
     });
-    const result = await client.callTool({ name: "delete_repo", arguments: { repo: "a/b" } });
+    const result = await deleteRepo(client);
     expect(JSON.stringify(result.content)).toContain("deleted a/b");
-    expect(server.seen()[0]).toMatchObject({ tool: "delete_repo", resource: { id: "delete_repo" } });
+    expect(server.seen()[0]).toMatchObject({
+      tool: "delete_repo",
+      resource: { id: "delete_repo" },
+    });
+  });
+
+  test("a guarded server checks each tool under the name it registers with", async () => {
+    const { server, nodrail } = connected(() => "DENIED");
+    const ran = vi.fn(() => ({
+      content: [{ type: "text" as const, text: "done" }],
+    }));
+    const client = await connectedServer((mcp) => {
+      nodrail.guardMcpServer(mcp);
+      mcp.registerTool(
+        "delete_repo",
+        { inputSchema: { repo: z.string() } },
+        ran,
+      );
+    });
+    const result = await deleteRepo(client);
+    expect(ran).not.toHaveBeenCalled();
+    expect(result.isError).toBe(true);
+    expect(server.seen()[0]).toMatchObject({ tool: "delete_repo" });
+  });
+
+  test("a later update() can't swap the check out", async () => {
+    const replacement = vi.fn(() => ({
+      content: [{ type: "text" as const, text: "swapped" }],
+    }));
+    const client = await connectedServer((mcp) => {
+      unconfigured().guardMcpServer(mcp);
+      const tool = mcp.registerTool(
+        "delete_repo",
+        { inputSchema: { repo: z.string() } },
+        () => ({ content: [] }),
+      );
+      tool.update({ callback: replacement });
+    });
+    const result = await deleteRepo(client);
+    expect(replacement).not.toHaveBeenCalled();
+    expect(result.isError).toBe(true);
+  });
+
+  test("guarding a server after it registered tools is refused", () => {
+    const mcp = new McpServer({ name: "test", version: "1.0.0" });
+    mcp.registerTool("x", {}, () => ({ content: [] }));
+    expect(() => unconfigured().guardMcpServer(mcp)).toThrow(
+      /before registering/,
+    );
   });
 
   test("a tool that runs two ways is refused, not half guarded", () => {
     expect(() =>
-      unconfigured().guard({ dual: { name: "dual", execute: () => "a", run: () => "b" } }),
+      unconfigured().guard({
+        dual: { name: "dual", execute: () => "a", run: () => "b" },
+      }),
     ).toThrow(/also run through run/);
   });
 
   test("a task tool, whose code isn't a plain function, is refused", () => {
     expect(() =>
-      unconfigured().guard({ job: { inputSchema: {}, handler: { createTask: () => ({}) } } }),
+      unconfigured().guard({
+        job: { inputSchema: {}, handler: { createTask: () => ({}) } },
+      }),
     ).toThrow(/doesn't recognise/);
+  });
+});
+
+describe("the edges of guard", () => {
+  test("something that isn't a tool is refused", () => {
+    const { nodrail } = connected();
+    expect(() => nodrail.guard(42 as never)).toThrow(/not a tool/);
+  });
+
+  test("guarding twice returns the same guarded tool", () => {
+    const { nodrail } = connected();
+    const once = nodrail.guard({ name: "send", execute: () => "ok" });
+    expect(nodrail.guard(once)).toBe(once);
+  });
+
+  test("a recognised tool with no name is refused", () => {
+    const { nodrail } = connected();
+    expect(() => nodrail.guard({ execute: () => "ok" })).toThrow(/no name/);
+  });
+
+  test("a streaming function is checked before it streams", async () => {
+    const { nodrail } = connected(() => "DENIED");
+    const produced = vi.fn();
+    const stream = nodrail.guard(
+      async function* (_input: object) {
+        produced();
+        yield "chunk";
+      },
+      { name: "stream" },
+    );
+    const chunks: unknown[] = [];
+    for await (const chunk of stream({})) chunks.push(chunk);
+    expect(produced).not.toHaveBeenCalled();
+    expect(JSON.stringify(chunks)).toContain("denied");
+  });
+
+  test("a stream that fails is reported as failed, and its error kept", async () => {
+    const { nodrail, server } = connected();
+    const stream = nodrail.guard(
+      async function* (_input: object) {
+        yield "first";
+        throw new Error("broke");
+      },
+      { name: "stream" },
+    );
+    const read = async () => {
+      for await (const _chunk of stream({})) void _chunk;
+    };
+    await expect(read()).rejects.toThrow("broke");
+    expect(server.reports[0]?.outcome).toBe("failure");
+  });
+
+  test("check() with input it can't describe answers INVALID_ACTION", async () => {
+    const { nodrail } = connected();
+    const circular: Record<string, unknown> = {};
+    circular.self = circular;
+    await expect(
+      nodrail.check({ tool: "t", operation: "o", params: circular }),
+    ).resolves.toMatchObject({ allowed: false, code: "INVALID_ACTION" });
+  });
+
+  test("the shortcuts use the environment", async () => {
+    vi.stubEnv("NODRAIL_CREDENTIAL", "");
+    vi.stubEnv("NODRAIL_HOME", "/nonexistent");
+    const { guard, guardMcpServer } = await import("../src/sdk");
+    const send = guard((_input: object) => "ran", { name: "send" });
+    await expect(send({})).resolves.toContain("not configured");
+    const server = { registerTool: vi.fn() };
+    expect(guardMcpServer(server)).toBe(server);
+    vi.unstubAllEnvs();
   });
 });

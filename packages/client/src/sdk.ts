@@ -1,7 +1,11 @@
 import { randomUUID } from "node:crypto";
 import { describeNamedTool } from "@nodrail/policy-engine/actions";
 import { blockedText } from "./blocked-text.ts";
-import { resolveConnection, waitMsFrom, type Environment } from "./connection.ts";
+import {
+  resolveConnection,
+  waitMsFrom,
+  type Environment,
+} from "./connection.ts";
 import {
   authorize,
   NodrailClient,
@@ -15,10 +19,11 @@ import {
   isGuarded,
   isToolWithoutCode,
   uncovered,
+  type ToolAdapter,
   type ToolHooks,
 } from "./tool-shapes.ts";
 
-export const SDK_VERSION = "0.1.4";
+export const SDK_VERSION = "0.1.5";
 
 type Blocked = Extract<Decision, { allowed: false }>;
 
@@ -308,6 +313,30 @@ export class Nodrail {
     return this.guardNamed(target, undefined, options) as Guarded<T>;
   }
 
+  /**
+   * Puts every tool an MCP server registers from now on behind the check,
+   * under the name it registers with. Call it before registering tools: ones
+   * already registered aren't covered, so that throws.
+   */
+  guardMcpServer<S extends McpServerLike>(
+    server: S,
+    options: GuardOptions = {},
+  ): S {
+    const registered = (server as { _registeredTools?: object })
+      ._registeredTools;
+    if (registered && Object.keys(registered).length)
+      throw new TypeError(
+        "Nodrail: guard the MCP server before registering its tools; ones already registered wouldn't be checked.",
+      );
+    const register = server.registerTool.bind(server);
+    server.registerTool = ((name: string, ...rest: unknown[]) => {
+      const tool = (register as (...args: unknown[]) => unknown)(name, ...rest);
+      this.guardNamed({ [name]: tool }, undefined, options);
+      return tool;
+    }) as S["registerTool"];
+    return server;
+  }
+
   private guardNamed(
     target: unknown,
     key: string | undefined,
@@ -315,38 +344,66 @@ export class Nodrail {
   ): unknown {
     if (Array.isArray(target))
       return target.map((item) => this.guardNamed(item, undefined, options));
-    if (typeof target === "function") {
-      const name = options.name ?? key ?? target.name;
-      if (!name)
-        throw new TypeError(
-          "Nodrail: this function has no name. Pass { name } so rules can refer to it.",
-        );
-      return guardFunction(
+    if (typeof target === "function")
+      return this.guardPlainFunction(
         target as (...args: unknown[]) => unknown,
-        this.hooksFor(name, options),
+        key,
+        options,
       );
-    }
     if (!isRecord(target))
       throw new TypeError(
         "Nodrail: this is not a tool, so it can't be guarded.",
       );
     if (isGuarded(target)) return target;
     const adapter = adapterFor(target);
-    if (adapter) {
-      // A second way to run it would be left unchecked.
-      const others = uncovered(target, adapter);
-      if (others.length)
-        throw new TypeError(
-          `Nodrail: ${key ? `"${key}"` : "this tool"} can also run through ${others.join(", ")}, which this shape doesn't cover. Pass one function instead.`,
-        );
-      const name = adapter.name(target) ?? key;
-      if (!name)
-        throw new TypeError(
-          "Nodrail: this tool has no name, so rules can't refer to it.",
-        );
-      return adapter.wrap(target, this.hooksFor(name, options));
-    }
-    // Silently leaving a tool unguarded would look like it was protected.
+    if (adapter) return this.guardShaped(target, adapter, key, options);
+    return this.guardUnshaped(target, key, options);
+  }
+
+  private guardPlainFunction(
+    target: (...args: unknown[]) => unknown,
+    key: string | undefined,
+    options: GuardOptions,
+  ) {
+    const name = options.name ?? key ?? target.name;
+    if (!name)
+      throw new TypeError(
+        "Nodrail: this function has no name. Pass { name } so rules can refer to it.",
+      );
+    return guardFunction(target, this.hooksFor(name, options));
+  }
+
+  /** A tool in a shape a framework uses, put behind the check. */
+  private guardShaped(
+    target: Record<string, unknown>,
+    adapter: ToolAdapter,
+    key: string | undefined,
+    options: GuardOptions,
+  ) {
+    // A second way to run it would be left unchecked.
+    const others = uncovered(target, adapter);
+    if (others.length)
+      throw new TypeError(
+        `Nodrail: ${key ? `"${key}"` : "this tool"} can also run through ${others.join(", ")}, which this shape doesn't cover. Pass one function instead.`,
+      );
+    const name = adapter.name(target) ?? key;
+    if (!name)
+      throw new TypeError(
+        "Nodrail: this tool has no name, so rules can't refer to it.",
+      );
+    return adapter.wrap(target, this.hooksFor(name, options));
+  }
+
+  /**
+   * Anything else: a tool with no code here passes through, a record of tools
+   * is guarded tool by tool, and the rest is refused. Silently leaving a tool
+   * unguarded would look like it was protected.
+   */
+  private guardUnshaped(
+    target: Record<string, unknown>,
+    key: string | undefined,
+    options: GuardOptions,
+  ): unknown {
     const which = key ? `"${key}"` : "this object";
     if (canRun(target))
       throw new TypeError(
@@ -410,9 +467,21 @@ function guardFunction(fn: (...args: unknown[]) => unknown, hooks: ToolHooks) {
   };
 }
 
+/** The part of an MCP SDK server that guardMcpServer needs. */
+export type McpServerLike = { registerTool: (...args: never[]) => unknown };
+
 export const createNodrail = (options?: NodrailOptions) => new Nodrail(options);
 
 let shared: Nodrail | null = null;
+
+/** `nodrail.guardMcpServer(server)` with the connection taken from the environment. */
+export function guardMcpServer<S extends McpServerLike>(
+  server: S,
+  options?: GuardOptions,
+): S {
+  shared ??= new Nodrail();
+  return shared.guardMcpServer(server, options);
+}
 
 /** `guard(tools)` with the connection taken from the environment. */
 export function guard<T>(target: T, options?: GuardOptions): Guarded<T> {
