@@ -278,7 +278,7 @@ A simulation never approves anything or issues a permit.
 
 | Component            | Supported                                | Checked with      |
 | -------------------- | ---------------------------------------- | ----------------- |
-| Claude Code          | 2.1.295 or later, which adds `onFailure` | 2.1.321 on macOS, real CLI |
+| Claude Code          | 2.1.295 or later, which adds `onFailure` | 2.1.322 on macOS, real CLI: a missing, timed-out or crashing hook blocks the tool |
 | Codex                | 0.155 or later                           | 0.155.1 on macOS, real CLI |
 | LangChain            | 1.x                                      | 1.6 agent loop    |
 | Vercel AI SDK        | 7                                        | 7.0 agent loop    |
