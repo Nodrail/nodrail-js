@@ -1,7 +1,13 @@
 name: Release
 
-# Changesets opens a "Version packages" pull request. Merging it publishes to
-# npm with provenance, tags each package and creates its GitHub release.
+# Changesets opens a "Version packages" pull request. Merging it stages each
+# new version on npm with provenance, tags it and writes its GitHub release.
+# Nothing is installable until a maintainer approves it with two-factor
+# authentication (npm stage approve).
+#
+# npm trusted publishing checks this workflow's identity directly, so no npm
+# token is stored anywhere. Each package on npmjs.com trusts Nodrail/nodrail-js,
+# release.yml, environment "npm".
 on:
   push:
     branches: [main]
@@ -14,15 +20,15 @@ concurrency:
 
 jobs:
   release:
-    name: Version and publish
+    name: Version and stage
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    # The npm token lives only in this environment, which only main can use.
+    # npm trusts only this environment, which only main can use.
     environment: npm
     permissions:
       contents: write # push version commits and tags, write releases
       pull-requests: write # open the "Version packages" pull request
-      id-token: write # npm provenance
+      id-token: write # trusted publishing and provenance
     steps:
       # Credentials stay: changesets pushes the version branch and tags.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 # zizmor: ignore[artipacked]
@@ -45,5 +51,4 @@ jobs:
           create-github-releases: true
           push-git-tags: true
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           NPM_CONFIG_PROVENANCE: true

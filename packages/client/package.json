@@ -1,6 +1,6 @@
 {
   "name": "@nodrail/client",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Check with Nodrail before an AI agent acts. Wrap the tools of LangChain, the Vercel AI SDK, OpenAI Agents or any agent in one line.",
   "keywords": [
     "ai",

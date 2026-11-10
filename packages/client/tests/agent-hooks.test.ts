@@ -1,9 +1,10 @@
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { describe, expect, test } from "vitest";
 import { resolveConnection, waitMsFrom } from "../src/connection";
-import { describeToolCall, runHook } from "../src/hooks";
+import { describeToolCall, HOOK_VERSION, runHook } from "../src/hooks";
+import { SDK_VERSION } from "../src/sdk";
 import { claudeCodeHooks, codexGovernedTools, codexHooks } from "../src/setup";
 import { fakeNodrail } from "./support/fake-nodrail";
 
@@ -109,7 +110,7 @@ describe("the hook as Codex runs it", () => {
         return server.fetch(url, init);
       }) as unknown as typeof fetch,
     });
-    expect(adapters).toEqual(["codex-hook/0.1.0"]);
+    expect(adapters).toEqual([`codex-hook/${HOOK_VERSION}`]);
   });
 
   test("answers before Codex's own time limit would let the tool run", async () => {
@@ -261,4 +262,11 @@ describe("the hook declarations", () => {
       claudeCodeHooks({ command: "x" }).PreToolUse[0]?.hooks[0],
     ).toMatchObject({ onFailure: "block" });
   });
+});
+
+test("the versions sent to Nodrail are the package's version", () => {
+  const { version } = JSON.parse(
+    readFileSync(new URL("../package.json", import.meta.url), "utf8"),
+  ) as { version: string };
+  expect([SDK_VERSION, HOOK_VERSION]).toEqual([version, version]);
 });
