@@ -413,7 +413,8 @@ describe("starter packs", () => {
     ["read-only", "Write", { file_path: "a", content: "" }, "none"],
     ["read-only", "AskUserQuestion", { questions: [] }, "allow"],
     ["read-only", "ExitPlanMode", { plan: "x" }, "allow"],
-    ["read-only", "Agent", { prompt: "x" }, "none"],
+    ["read-only", "Agent", { prompt: "x" }, "allow"],
+    ["read-only", "TeamCreate", { name: "x" }, "none"],
     ["repo-work", "Write", { file_path: "a", content: "" }, "allow"],
     ["repo-work", "Edit", { file_path: ".claude/settings.json" }, "deny"],
     [
@@ -427,6 +428,23 @@ describe("starter packs", () => {
     ["repo-work", ...bash("git push --force"), "deny"],
     ["repo-work", ...bash("rm -rf x"), "deny"],
     ["repo-work", ...bash("git log; curl x"), "none"],
+    // Running Nodrail by hand could write a verdict into the run ledger.
+    ["repo-work", ...bash("nodrail-policy hook rules.yaml"), "deny"],
+    ["repo-work", ...bash("git add . && nodrail-claude-hook"), "deny"],
+    ["read-only", ...bash("nodrail-policy runs"), "deny"],
+    ["repo-work", ...bash("node .claude/hooks/nodrail-hook.mjs"), "none"],
+    [
+      "repo-work",
+      "Write",
+      { file_path: ".npmrc", content: "" },
+      "require_approval",
+    ],
+    [
+      "repo-work",
+      "Write",
+      { file_path: ".claude/nodrail/rules.yaml", content: "" },
+      "deny",
+    ],
     // Ways around the packs found in 0.1.0.
     [
       "read-only",
@@ -814,10 +832,40 @@ describe("tool calls", () => {
     expect(JSON.stringify(action)).not.toContain("hunter2");
   });
 
-  test("other built-in tools get a key people can write", () => {
-    expect(describeToolCall("Task", {})).toMatchObject({
+  test("starting a subagent names the subagent, as runs do", () => {
+    expect(
+      describeToolCall("Agent", {
+        subagent_type: "Vercel:Deployment-Expert",
+        prompt: "deploy",
+      }),
+    ).toMatchObject({
       tool: "claude-code",
-      operation: "task",
+      operation: "agent",
+      resource: { kind: "agent", id: "vercel-deployment-expert" },
+      params: { subagent_type: "vercel-deployment-expert" },
+    });
+    expect(describeToolCall("Agent", { prompt: "look" })?.resource).toEqual({
+      kind: "agent",
+      id: "general-purpose",
+    });
+  });
+
+  test("other built-in tools get a key people can write", () => {
+    expect(describeToolCall("TodoWrite", {})).toMatchObject({
+      tool: "claude-code",
+      operation: "todowrite",
+    });
+  });
+
+  test("Task, the earlier name of Agent, starts a subagent like Agent", () => {
+    expect(describeToolCall("Task", { subagent_type: "QA" })).toMatchObject({
+      tool: "claude-code",
+      operation: "agent",
+      resource: { kind: "agent", id: "qa" },
+    });
+    expect(describeToolCall("Task", {})?.resource).toEqual({
+      kind: "agent",
+      id: "general-purpose",
     });
   });
 });

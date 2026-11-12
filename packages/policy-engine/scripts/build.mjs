@@ -19,6 +19,8 @@ await build({
     "src/simulator.ts",
     "src/yaml.ts",
     "src/actions.ts",
+    "src/receipts.ts",
+    "src/hook-runs.ts",
   ],
   outdir: "dist",
 });

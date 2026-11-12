@@ -25,6 +25,7 @@ export {
   type NodrailOptions,
   type OnBlocked,
 } from "./sdk.ts";
+export { receiptOf, type ReadReceipt, type StepOptions } from "./runs.ts";
 
 export type ClientOptions = {
   url: string;
@@ -33,6 +34,28 @@ export type ClientOptions = {
   /** Per request. Exceeding it blocks the call. */
   timeoutMs?: number;
   fetch?: typeof fetch;
+};
+
+/** The piece of work a call belongs to, and the step taking it, if any. */
+export type RunRef = {
+  key: string;
+  step?: { id: string; agent: string };
+};
+
+/** What an agent ends its step with: as read, or the receipt block as written. */
+export type StepReceipt =
+  | {
+      verdict: string | null;
+      findings: string[];
+      usage: { tokens?: number; usd?: number };
+    }
+  | { text: string };
+
+export type StepEvent = {
+  run: { key: string };
+  step: { id: string; agent: string };
+  event: "started" | "finished";
+  receipt?: StepReceipt;
 };
 
 export type Decision =
@@ -147,13 +170,27 @@ export class NodrailClient {
     });
   }
 
-  async submit(descriptor: ActionDescriptor, idempotencyKey: string) {
+  /** The run is context for the decision; it is not part of the digest. */
+  async submit(
+    descriptor: ActionDescriptor,
+    idempotencyKey: string,
+    run?: RunRef,
+  ) {
     return asStatus(
       await this.request("/actions", {
-        body: { ...descriptor, adapter_version: this.options.adapterVersion },
+        body: {
+          ...descriptor,
+          ...(run ? { run } : {}),
+          adapter_version: this.options.adapterVersion,
+        },
         headers: { "idempotency-key": idempotencyKey },
       }),
     );
+  }
+
+  /** A step of a run starting or finishing. Grants nothing by itself. */
+  step(event: StepEvent) {
+    return this.request("/steps", { body: event });
   }
 
   async status(actionId: string) {
@@ -229,6 +266,8 @@ export type AuthorizeOptions = {
   waitMs?: number;
   pollMs?: number;
   sleep?: (ms: number) => Promise<void>;
+  /** The run this call belongs to, so gates and budgets can see its history. */
+  run?: RunRef;
 };
 
 const defaultSleep = (ms: number) =>
@@ -250,10 +289,10 @@ async function resolve(
   client: NodrailClient,
   descriptor: ActionDescriptor,
   key: string,
-  { waitMs = 0, pollMs = 2000, sleep = defaultSleep }: AuthorizeOptions,
+  { waitMs = 0, pollMs = 2000, sleep = defaultSleep, run }: AuthorizeOptions,
 ): Promise<Decision> {
   if (!isPlainJson(descriptor.params)) throw new Blocked("INVALID_ACTION");
-  let status = await client.submit(descriptor, key);
+  let status = await client.submit(descriptor, key, run);
   assertSameCall(status, descriptor);
 
   const deadline = Date.now() + waitMs;

@@ -2,7 +2,14 @@
 // Reading and checking the files themselves is in rules-file.ts.
 import type { z } from "zod";
 import { classifyCommand } from "./commands.ts";
+import { reportSchemaIssues } from "./compile-issues.ts";
+import {
+  compileBudgets,
+  compileGates,
+  type RuleCompiler,
+} from "./compile-runs.ts";
 import { policyDocument, type Condition } from "./policies.ts";
+import { legacySubagentRuleProblem } from "./upgrades.ts";
 import {
   Collector,
   readFile,
@@ -281,7 +288,12 @@ function ruleProblem(name: string, rule: RuleEntry) {
     (rule.tool ?? rule.operation ?? rule.resource) !== undefined
   )
     return `Rule "${name}" sets command, so it cannot also set tool, operation or resource.`;
-  return null;
+  const legacy = legacySubagentRuleProblem({
+    toolKey: rule.tool ?? "",
+    operationKey: rule.operation ?? "",
+    resourceKind: rule.resource?.kind ?? "",
+  });
+  return legacy ? `Rule "${name}": ${legacy}` : null;
 }
 
 /** One rule as the evaluator's rules, one per resource or list item. */
@@ -346,25 +358,12 @@ function warnUnused({ state, used, collector }: Compiling) {
       collector.warn(macro, `Macro "${name}" is not used.`);
 }
 
-/** A problem in the compiled document, reported at the rule it came from. */
-function reportSchemaIssues(
-  issues: { path: PropertyKey[]; message: string }[],
-  compiled: CompiledRule[],
-  fallback: string,
-  collector: Collector,
-) {
-  for (const issue of issues) {
-    const index = typeof issue.path[1] === "number" ? issue.path[1] : null;
-    const rule = index === null ? undefined : compiled[index];
-    const field = issue.path.slice(2).join(".");
-    collector.error(
-      rule
-        ? { file: rule.source.file, line: rule.source.line, column: 1 }
-        : { file: fallback, line: 1, column: 1 },
-      `${rule ? `Rule "${rule.name}"` : "Rules"}${field ? ` ${field}` : ""}: ${issue.message}`,
-    );
-  }
-}
+const ruleCompiler: RuleCompiler = {
+  problem: (name, rule) => ruleProblem(name, rule as RuleEntry),
+  compile: (name, rule, compiling) =>
+    compileRule(name, rule as RuleEntry, compiling),
+  slug,
+};
 
 /**
  * Turns rule files into one policy document for the one evaluator. Later files
@@ -376,6 +375,8 @@ export function compilePolicies(sources: PolicySource[]): CompileResult {
     lists: new Map(),
     macros: new Map(),
     rules: new Map(),
+    gates: new Map(),
+    budgets: new Map(),
   };
   for (const source of sources) readFile(source, state, collector);
   const compiling: Compiling = {
@@ -395,17 +396,32 @@ export function compilePolicies(sources: PolicySource[]): CompileResult {
     if (problem) collector.error(at, problem);
     else results.push(...compileRule(name, rule, compiling));
   }
+  const gates = compileGates(compiling, ruleCompiler);
+  const budgets = compileBudgets(compiling, ruleCompiler);
   warnUnused(compiling);
 
   const compiled = results.map((result) => result.compiled);
-  const parsed = policyDocument.safeParse({
-    version: 1,
-    rules: results.map((result) => result.output),
-  });
+  const outputs = (items: { output: unknown }[]) =>
+    items.map((item) => item.output);
+  // Only a document that needs them is version 2, so every other stays readable by older engines.
+  const parsed = policyDocument.safeParse(
+    gates.length || budgets.length
+      ? {
+          version: 2,
+          rules: outputs(results),
+          gates: outputs(gates),
+          budgets: outputs(budgets),
+        }
+      : { version: 1, rules: outputs(results) },
+  );
   if (!parsed.success)
     reportSchemaIssues(
       parsed.error.issues,
-      compiled,
+      {
+        rules: compiled,
+        gates: gates.map((gate) => gate.compiled),
+        budgets: budgets.map((budget) => budget.compiled),
+      },
       sources[0]?.name ?? "rules",
       collector,
     );

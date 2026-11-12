@@ -26,6 +26,34 @@ describe("each reason a call is blocked", () => {
     expect(blocked("DENIED", null)).toBe("Nodrail: this action is denied.");
   });
 
+  test("a gate says which steps to run, so the agent can run them", () => {
+    const text = blockedText({
+      allowed: false,
+      code: "DENIED",
+      reason: "gate",
+      reference: "REQ-1",
+    });
+    expect(text).toMatch(
+      /^Nodrail: this action is denied\. Request REQ-1\. A gate/,
+    );
+    expect(text).toMatch(/QA or review.*after the last change/);
+  });
+
+  test.each([
+    ["budget", /budget .* is used up/],
+    ["agent_paused", /agent is paused/],
+    ["rule", /^Nodrail: this action is denied\. Request APR-1\.$/],
+  ])("a %s reason", (reason, message) => {
+    expect(
+      blockedText({
+        allowed: false,
+        code: "DENIED",
+        reason,
+        reference: "APR-1",
+      }),
+    ).toMatch(message);
+  });
+
   test("every message says the action is blocked or waiting", () => {
     for (const code of ["DENIED", "EXPIRED", "SOMETHING_NEW"])
       expect(blocked(code)).toMatch(/^Nodrail: /);

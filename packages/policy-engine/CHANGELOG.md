@@ -1,5 +1,101 @@
 # Changelog
 
+## 0.2.0
+
+Gates, budgets and receipts. Engine level 3.
+
+### Breaking
+
+- Starting a Claude Code subagent (`Agent`, and `Task`, its earlier name) is
+  described with the subagent's type as resource `{ kind: agent, id: <type> }`
+  instead of `{ kind: tool, id: Agent }`. A rule for `tool: claude-code`,
+  `operation: agent` with resource kind `tool` is now a compile error that
+  points to
+  [Upgrading rules for subagents](docs/runs.md#upgrading-rules-for-subagents),
+  instead of quietly never matching.
+- A file with gates or budgets compiles to document `version: 2`, which
+  earlier engines reject. `validate` reports what the files compiled to, such
+  as `OK, compiled to 150 rules, 2 gates and 1 budget.`, instead of
+  `OK: N rules.` The counts are compiled entries: a command prefix rule
+  compiles to two.
+- The hook's run key is `NODRAIL_RUN`, else `<repo>/<branch>` (the `origin`
+  remote as host/owner/name, with no credentials, or the repository folder's
+  name), pinned to the Claude Code session by its first event, so switching
+  branch doesn't change the run. On the default branch, a detached HEAD or
+  outside git it is `session:<id>`.
+- A budget that covers an action decided with no run applies its `otherwise`,
+  as a gate with no history holds. `eval`, `check` and `exec` decide with no
+  run, so they hold too.
+
+Upgrading: change rules for starting a subagent to the new resource.
+
+```yaml fragment
+# Before
+- rule: Start subagents
+  tool: claude-code
+  operation: agent
+  resource: { kind: tool, match: exact, value: Agent }
+  effect: allow
+
+# After: any subagent, or match: exact, value: qa for one type
+- rule: Start subagents
+  tool: claude-code
+  operation: agent
+  resource: { kind: agent, match: any }
+  effect: allow
+```
+
+### Added
+
+- `gate` entries: an action that matches waits until named steps started and
+  finished with accepted verdicts after the last work, otherwise `deny` or
+  `require_approval`. A gate never allows on its own. Work is anything the
+  `since` agents did, and any change by another agent than the one required:
+  files written, edited, patched or deleted, and shell commands other than
+  the read-only pack's look-around ones.
+- `isChange(descriptor)` from the main entry says whether an action is such a
+  change; action events take `change: true`. Old events without it are not
+  changes.
+- `budget` entries: tool calls per step or run, tokens and dollars per run,
+  with a warning level.
+- `simulate()` takes the run's history and reports gates, budgets and
+  warnings with every decision.
+- `parseReceipt()` and `receiptBlock()` in `@nodrail/policy-engine/receipts`
+  read the receipt an agent ends its step with. They read only the last 16 KB
+  of a message, and a block over `MAX_RECEIPT_TEXT` (8192 characters) is no
+  receipt, as in Cloud.
+- `legacySubagentRuleProblem()` from the main entry, the compile check above
+  for a rule form.
+- `renderPolicies()` keeps gates and budgets.
+- `nodrail-policy hook` keeps a run ledger when the rules have gates or
+  budgets: steps from `SubagentStart` and `SubagentStop`, receipts from the
+  last message, every decided action. One JSON Lines file per run in the
+  repository's git folder, with session pins next to it. Each decision reads,
+  decides and records under a lock file; a call that waits over 5 seconds is
+  blocked. A last line cut off mid-write is left out. Rules without gates or
+  budgets never touch it.
+- `nodrail-policy hook` denies any file tool change to the rule files and
+  folders it loaded, before reading the rules.
+- `nodrail-policy runs`, `runs show <run>` and `runs report`.
+- `@nodrail/policy-engine/hook-runs`: `runKey()`, `receiptBlock()`,
+  `MAX_RECEIPT_TEXT` and `agentName()` for hooks that report runs elsewhere,
+  with no zod or YAML.
+- Cases files take `run` and `step`, so gates and budgets can be tested in CI.
+  `{ action: <agent>, command: <line> }` records a command; a `finished` with
+  no open step records a whole step.
+- A decision held by a used-up budget says so: "Budget … is at 61 of 60 tool
+  calls. Over the limit, …".
+
+### Changed
+
+- Gates and budgets only make the rules' decision stricter. An action no
+  rule covers stays blocked when an unmet gate or used-up budget only asks
+  for a review.
+- Both starter packs allow starting a Claude Code subagent. What it then does
+  is still decided call by call.
+- Both starter packs deny running `nodrail-policy` and `nodrail-claude-hook`
+  from the shell. `repo-work` sends writes to `.npmrc` to a person.
+
 ## 0.1.5
 
 No changes to the engine; released with `@nodrail/client` 0.1.5. Tests now

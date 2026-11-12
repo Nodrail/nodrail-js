@@ -1,5 +1,50 @@
 # Changelog
 
+## 0.2.0
+
+Runs and steps for any agent framework, so gates and budgets work outside
+Claude Code.
+
+### Breaking
+
+- Starting a subagent in Claude Code (`Agent`, and `Task`, its earlier name)
+  is now governed, as tool `claude-code`, operation `agent`, resource type
+  `agent` with the subagent's type as id. Without a rule that allows it, each
+  start waits for a person. Upgrading: add a rule that allows `claude-code`
+  `agent` for the subagent types you use. Rule files with a rule for the
+  earlier resource (type `tool`, id `Agent`) no longer compile.
+- The Claude Code hook's run key is `NODRAIL_RUN`, else `<repo>/<branch>`
+  pinned to the session by its first event, so switching branch doesn't
+  change the run. On the default branch, a detached HEAD or outside git it is
+  `session:<id>`. The repository is the `origin` remote as host/owner/name,
+  with no credentials. Pins are kept in `.git/nodrail/sessions`.
+
+### Added
+
+- A block says why when Cloud does: a gate tells the agent to run the steps
+  it waits for (such as QA or review) after the last change and try again; a
+  used-up budget and a paused agent are named too.
+- `createNodrail({ run })`, or `NODRAIL_RUN`, sets the run calls belong to;
+  `nodrail.inRun(key, work)` sets it for one piece of work.
+- `nodrail.step(agent, work)` records a step around an agent's work. Calls
+  made while it runs belong to it, through a framework's tool loop too, and
+  the verdict is read from the result with `receiptOf`, or by your own
+  function passed as `{ receipt }`.
+- `authorize()` takes `run: { key, step? }` and sends it with the intent, so
+  the server can decide gates and budgets on the run's history. The run is not
+  part of the descriptor digest. `client.step()` records a step starting or
+  finishing.
+- The Claude Code hook sends each intent's run and step, and records
+  `SubagentStart` and `SubagentStop` as steps with the receipt block. Recording
+  a step never blocks the agent.
+- The Codex hook sends the run with each call. Codex doesn't say which
+  subagent makes a call, so every call is the main agent's.
+
+### Changed
+
+- Receipts are read from the last 16 KB of a message only, and a block over
+  8 KB is no receipt, in the hook and in `receiptOf` alike, as in Cloud.
+
 ## 0.1.5
 
 - New: `guardMcpServer(server)`. Every tool the server registers from then on

@@ -1,7 +1,7 @@
 export { compilePolicies } from "./compile.ts";
+export { renderPolicies } from "./render.ts";
 export {
   ENGINE_VERSION,
-  renderPolicies,
   type CompileResult,
   type CompiledRule,
   type PolicyIssue,

@@ -44,7 +44,10 @@ nodrail-policy eval rules.yaml --command "git push --force origin main"
   "outcome": "deny",
   "matchedRuleId": "never-force-push-args",
   "reason": "explicit_rule",
-  "explanation": "Matched never-force-push-args with effect deny."
+  "explanation": "Matched never-force-push-args with effect deny.",
+  "gates": [],
+  "budgets": [],
+  "warnings": []
 }
 ```
 
@@ -55,6 +58,7 @@ To put the rules in front of Claude Code, see [Getting started](docs/getting-sta
 - **One decision for everything an agent does.** Shell commands, file reads and edits, web requests, and MCP tools go through the same rules.
 - **Rules you can review.** Plain YAML with lists, macros and layered files, in the style of [Falco](https://falco.org/docs/concepts/rules/). Validate them and test expected outcomes in CI.
 - **Blocked by default.** Deny beats review, review beats allow, and no match means no.
+- **Rules about the whole run.** Gates hold an action until other agents' steps finished with the right verdict, such as no pull request before QA passed after the last change. Budgets limit tool calls per step or run, and reported tokens and dollars per run. See [Runs, gates and budgets](docs/runs.md).
 - **Hard to talk around.** `g"i"t  push` is judged as `git push`, and `git status; rm -rf /` doesn't match a rule for `git status`.
 - **Secrets stay out.** Likely credentials are removed from how a call is described, so rules and reviewers don't see them.
 - **Small.** Three runtime dependencies. The evaluator has no Node APIs, so it can run in other JavaScript runtimes.
@@ -69,6 +73,7 @@ It decides; it doesn't enforce. A hook or your own code has to act on the answer
 | ------------------------------------------------ | ---------------------------------------------- |
 | [Getting started](docs/getting-started.md)       | Write rules and connect Claude Code            |
 | [Rules](docs/rules.md)                           | Everything a rule file can contain             |
+| [Runs, gates and budgets](docs/runs.md)          | Rules about what already happened in a run     |
 | [Commands and tools](docs/commands-and-tools.md) | How each kind of call is described and matched |
 | [Command line](docs/cli.md)                      | Every `nodrail-policy` command                 |
 | [Library](docs/library.md)                       | Use the engine from TypeScript                 |

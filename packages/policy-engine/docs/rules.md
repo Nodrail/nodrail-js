@@ -1,6 +1,8 @@
 # Rules
 
-A rules file is a YAML list of `rule`, `list` and `macro` entries. Several files can be loaded in order, and later ones can change earlier ones.
+This page is the reference for rule files: every field a rule can have, how resources and conditions match, and how files layer.
+
+A rules file is a YAML list of `rule`, `list` and `macro` entries, plus `gate` and `budget` entries, which are described in [Runs, gates and budgets](runs.md). A `required_engine_version` entry says which engine level the file needs. Several files can be loaded in order, and later ones can change earlier ones.
 
 ```yaml
 - required_engine_version: 1
@@ -99,6 +101,15 @@ An entry can also be `{ macro: name }`, or `{ field: currency, op: in, list: nam
 
 Conditions compare what the caller declares. A parameter that is missing or of the wrong type never helps an allow rule, while deny and review rules still apply. So `"5"` can't pass a rule that wants a number under 1000.
 
+### Ids
+
+Decisions name the rule that won by its id: `matchedRuleId` in a result, and the reason Claude Code shows. Without an `id`, the id is made from the name: lowercased, with anything but letters, digits, `_` and `-` turned into `-`, so `Never force push` is `never-force-push`. One rule can compile to several, and those get a suffix:
+
+- A `command: { prefix: … }` rule is two: the exact command keeps the id, and the command with arguments adds `-args` (`never-force-push-args`).
+- A rule over a list, or a condition with `contains` and a list, adds a short hash of each item.
+
+Set `id` when other things refer to the rule, such as dashboards, tests or a reviewer's notes, so renaming it keeps the same id. Gates and budgets take `id` the same way.
+
 ## Lists and macros
 
 A list is reusable values. A macro is reusable conditions, and can use other macros. They can be defined after the rules that use them. An empty list used by a rule is an error, so a list can't quietly remove a deny.
@@ -121,7 +132,7 @@ Files load in the order given, and a folder loads its `.yaml` and `.yml` files b
   override: { enabled: replace }
 ```
 
-Lists, conditions and tags can be appended to. Everything else is replaced.
+Lists, conditions and tags can be appended to. Everything else is replaced. Gates layer the same way; a budget's fields can only be replaced.
 
 Unlike Falco, redefining a name without `override` is an error, so a later file can't silently weaken a rule.
 
@@ -129,6 +140,6 @@ Conditions are structured YAML rather than an expression language, which makes t
 
 ## Limits
 
-500 compiled rules, 20 conditions per rule, 1 MB per file. YAML aliases are limited, and duplicate keys are errors.
+500 compiled rules, 20 conditions per rule, 1 MB per file. YAML aliases are limited, and duplicate keys are errors. Gates and budgets have [their own limits](runs.md#limits).
 
-Files declare the format they need with `required_engine_version`. A file that needs a newer engine is refused.
+Files declare the engine level they need with `required_engine_version`. A file that needs a newer engine is refused. Level 1 is the base format, level 2 adds `contains` with a list, and level 3 adds gates and budgets and describes starting a subagent as an `agent` resource. See [Versions](runs.md#versions) for how this relates to the compiled document's version.

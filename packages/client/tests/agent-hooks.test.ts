@@ -114,6 +114,19 @@ describe("the hook as Codex runs it", () => {
     expect(adapters).toEqual([`codex-hook/${HOOK_VERSION}`]);
   });
 
+  test("sends the run, so command gates and run budgets apply", async () => {
+    const server = fakeNodrail();
+    await runHook(
+      event("Bash", { command: "git push" }),
+      { ...env, NODRAIL_RUN: "ENG-9" },
+      { agent: "codex", fetch: server.fetch },
+    );
+    // Codex doesn't say which subagent made a call, so every call is the main agent's.
+    expect(
+      server.requests.find((request) => request.path === "/actions")?.body.run,
+    ).toEqual({ key: "ENG-9" });
+  });
+
   test("answers before Codex's own time limit would let the tool run", async () => {
     const result = await runHook(event("Bash", { command: "ls" }), env, {
       agent: "codex",
@@ -256,6 +269,21 @@ describe("the hook declarations", () => {
   test("each outlasts the wait for a person", () => {
     for (const hooks of [claudeCodeHooks({ command: "x" }), codexHooks("x")])
       expect(hooks.PreToolUse[0]?.hooks[0]?.timeout).toBeGreaterThan(345);
+  });
+
+  test("Claude Code governs starting a subagent, and records its steps", () => {
+    const hooks = claudeCodeHooks({ command: "x" });
+    const governed = new RegExp(hooks.PreToolUse[0]?.matcher ?? "");
+    expect(governed.test("Agent")).toBe(true);
+    // Task is the earlier name of Agent: governed the same way.
+    expect(governed.test("Task")).toBe(true);
+    expect(describeToolCall("Task", { subagent_type: "qa" })).toMatchObject({
+      tool: "claude-code",
+      operation: "agent",
+      resource: { kind: "agent", id: "qa" },
+    });
+    expect(hooks.SubagentStart[0]?.hooks[0]).toMatchObject({ command: "x" });
+    expect(hooks.SubagentStop[0]?.hooks[0]).toMatchObject({ command: "x" });
   });
 
   test("Claude Code blocks if the check itself fails", () => {
