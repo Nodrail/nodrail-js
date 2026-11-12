@@ -2,7 +2,9 @@
 import { execFileSync, spawnSync } from "node:child_process";
 import {
   existsSync,
+  mkdirSync,
   mkdtempSync,
+  readFileSync,
   readdirSync,
   rmSync,
   writeFileSync,
@@ -65,6 +67,11 @@ try {
     join(folder, "use.ts"),
     `import { simulate, type PolicyDocument } from "@nodrail/policy-engine";
 import { compilePolicies } from "@nodrail/policy-engine/yaml";
+import { receiptBlock, runKey } from "@nodrail/policy-engine/hook-runs";
+import { parseReceipt } from "@nodrail/policy-engine/receipts";
+export const block: string | null = receiptBlock("x");
+export const key: string | null = runKey(".", null, {});
+export const read = parseReceipt(block ?? "");
 export const compiled = compilePolicies([{ name: "a.yaml", text: "" }]);
 export const typed: typeof simulate = simulate;
 export const shape: PolicyDocument | null = compiled.ok ? compiled.document : null;
@@ -156,6 +163,68 @@ export const shape: PolicyDocument | null = compiled.ok ? compiled.document : nu
     hook("x", "missing.yaml").status === 2,
     "hook must block without rules",
   );
+
+  // A run through the installed hook, each event its own process as Claude Code runs it.
+  const repo = join(folder, "repo");
+  mkdirSync(repo);
+  spawnSync("git", ["init", "-q", "-b", "work"], { cwd: repo });
+  writeFileSync(
+    join(repo, "runs.yaml"),
+    `- required_engine_version: 3
+- rule: Start subagents
+  tool: claude-code
+  operation: agent
+  resource: { kind: agent, match: any }
+  effect: allow
+- gate: Review first
+  tool: claude-code
+  operation: agent
+  resource: { kind: agent, match: exact, value: github }
+  requires: [{ agent: reviewer, verdict: ship, since: [dev] }]
+  otherwise: deny
+`,
+  );
+  const installedCli = join(folder, engineCli);
+  const send = (payload) =>
+    spawnSync(process.execPath, [installedCli, "hook", "runs.yaml"], {
+      cwd: repo,
+      encoding: "utf8",
+      input: JSON.stringify({ session_id: "s", cwd: repo, ...payload }),
+    });
+  const dispatchGithub = () =>
+    send({
+      hook_event_name: "PreToolUse",
+      tool_name: "Agent",
+      tool_input: { subagent_type: "github", prompt: "open the PR" },
+    }).stdout;
+  check(dispatchGithub().includes('"deny"'), "gate did not hold the dispatch");
+  for (const [id, type, verdict] of [
+    ["d1", "dev", "done"],
+    ["r1", "reviewer", "ship"],
+  ]) {
+    send({ hook_event_name: "SubagentStart", agent_id: id, agent_type: type });
+    send({
+      hook_event_name: "SubagentStop",
+      agent_id: id,
+      agent_type: type,
+      last_assistant_message: `ok\n\`\`\`nodrail-receipt\nverdict: ${verdict}\n\`\`\``,
+    });
+  }
+  check(dispatchGithub() === "", "gate did not open after the review");
+  const listed = spawnSync(process.execPath, [installedCli, "runs"], {
+    cwd: repo,
+    encoding: "utf8",
+  });
+  // No remote, so the run is the repository folder's name and the branch.
+  check(listed.stdout.startsWith("repo/work  2 steps"), `runs: ${listed.stdout}`);
+
+  // Hooks bundle these: no schema library, and reading a receipt runs no git.
+  const installed = join(folder, "node_modules/@nodrail/policy-engine/dist");
+  const hookRuns = readFileSync(join(installed, "hook-runs.js"), "utf8");
+  for (const marker of ['from "zod"', 'from "yaml"'])
+    check(!hookRuns.includes(marker), `hook-runs imports ${marker}`);
+  const receipts = readFileSync(join(installed, "receipts.js"), "utf8");
+  check(!receipts.includes("child_process"), "receipts runs git");
 
   check(/^\d+\.\d+\.\d+/.test(cli("--version").stdout), "--version");
   check(cli("--help").stdout.includes("Usage"), "--help");

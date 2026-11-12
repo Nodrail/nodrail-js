@@ -25,6 +25,7 @@ export {
   type NodrailOptions,
   type OnBlocked,
 } from "./sdk.ts";
+export { receiptOf, type ReadReceipt, type StepOptions } from "./runs.ts";
 
 export type ClientOptions = {
   url: string;
@@ -33,6 +34,28 @@ export type ClientOptions = {
   /** Per request. Exceeding it blocks the call. */
   timeoutMs?: number;
   fetch?: typeof fetch;
+};
+
+/** The piece of work a call belongs to, and the step taking it, if any. */
+export type RunRef = {
+  key: string;
+  step?: { id: string; agent: string };
+};
+
+/** What an agent ends its step with: as read, or the receipt block as written. */
+export type StepReceipt =
+  | {
+      verdict: string | null;
+      findings: string[];
+      usage: { tokens?: number; usd?: number };
+    }
+  | { text: string };
+
+export type StepEvent = {
+  run: { key: string };
+  step: { id: string; agent: string };
+  event: "started" | "finished";
+  receipt?: StepReceipt;
 };
 
 export type Decision =
@@ -114,7 +137,11 @@ export class NodrailClient {
 
   private async request(
     path: string,
-    init: { body?: object; headers?: Record<string, string> } = {},
+    init: {
+      body?: object;
+      headers?: Record<string, string>;
+      timeoutMs?: number;
+    } = {},
   ): Promise<unknown> {
     // The credential never travels in the clear.
     if (!this.secure) throw new Blocked("INSECURE_URL");
@@ -128,7 +155,7 @@ export class NodrailClient {
           ...init.headers,
         },
         body: init.body ? JSON.stringify(init.body) : undefined,
-        signal: AbortSignal.timeout(this.timeoutMs),
+        signal: AbortSignal.timeout(init.timeoutMs ?? this.timeoutMs),
         redirect: "error",
       });
     } catch {
@@ -147,13 +174,27 @@ export class NodrailClient {
     });
   }
 
-  async submit(descriptor: ActionDescriptor, idempotencyKey: string) {
+  /** The run is context for the decision; it is not part of the digest. */
+  async submit(
+    descriptor: ActionDescriptor,
+    idempotencyKey: string,
+    run?: RunRef,
+  ) {
     return asStatus(
       await this.request("/actions", {
-        body: { ...descriptor, adapter_version: this.options.adapterVersion },
+        body: {
+          ...descriptor,
+          ...(run ? { run } : {}),
+          adapter_version: this.options.adapterVersion,
+        },
         headers: { "idempotency-key": idempotencyKey },
       }),
     );
+  }
+
+  /** A step of a run starting or finishing. Grants nothing by itself. */
+  step(event: StepEvent) {
+    return this.request("/steps", { body: event });
   }
 
   async status(actionId: string) {
@@ -204,6 +245,19 @@ export class NodrailClient {
     return body as PermitAllow;
   }
 
+  /**
+   * Takes back a request nobody has decided, so no one approves a call that
+   * will never run. It never allows anything; a repeat changes nothing.
+   */
+  async withdraw(actionId: string, options: { timeoutMs?: number } = {}) {
+    return asStatus(
+      await this.request(`/actions/${actionId}/withdraw`, {
+        body: {},
+        timeoutMs: options.timeoutMs,
+      }),
+    );
+  }
+
   report(
     actionId: string,
     report: {
@@ -229,6 +283,10 @@ export type AuthorizeOptions = {
   waitMs?: number;
   pollMs?: number;
   sleep?: (ms: number) => Promise<void>;
+  /** The run this call belongs to, so gates and budgets can see its history. */
+  run?: RunRef;
+  /** Stops waiting for a person early, as if `waitMs` had passed. */
+  signal?: AbortSignal;
 };
 
 const defaultSleep = (ms: number) =>
@@ -246,24 +304,75 @@ function assertSameCall(status: ActionStatus, descriptor: ActionDescriptor) {
 
 const waiting = new Set(["APPROVAL_PENDING", "UNKNOWN_PERMISSION_BLOCKED"]);
 
+/** How long giving up may take: the block never waits on Cloud for longer. */
+export const WITHDRAW_TIMEOUT_MS = 3000;
+
+/** Best effort: whatever happens, the caller gets the same block. */
+async function withdrawQuietly(client: NodrailClient, actionId: string) {
+  try {
+    await client.withdraw(actionId, { timeoutMs: WITHDRAW_TIMEOUT_MS });
+  } catch {
+    // A request left open expires on its own; it can never become an allow.
+  }
+}
+
+/** A pause between checks that ends at once when the caller stops waiting. */
+async function pause(
+  ms: number,
+  sleep: AuthorizeOptions["sleep"],
+  signal?: AbortSignal,
+) {
+  const slept = (sleep ?? defaultSleep)(ms);
+  if (!signal) return slept;
+  let stop = () => {};
+  const stopped = new Promise<void>((done) => {
+    stop = done;
+    if (signal.aborted) done();
+    else signal.addEventListener("abort", stop, { once: true });
+  });
+  try {
+    await Promise.race([slept, stopped]);
+  } finally {
+    signal.removeEventListener("abort", stop);
+  }
+}
+
+/**
+ * Polls until a person decides. Giving up after waiting takes the request
+ * back; with `waitMs: 0` it stays open, for a caller that comes back later.
+ */
+async function waitForPerson(
+  client: NodrailClient,
+  descriptor: ActionDescriptor,
+  submitted: ActionStatus,
+  { waitMs = 0, pollMs = 2000, sleep, signal }: AuthorizeOptions,
+): Promise<ActionStatus> {
+  let status = submitted;
+  const deadline = Date.now() + waitMs;
+  while (waiting.has(status.code)) {
+    if (Date.now() >= deadline || signal?.aborted) {
+      if (waitMs > 0) await withdrawQuietly(client, status.action_id);
+      throw new Blocked(status.code, status.reference, status.reason);
+    }
+    await pause(pollMs, sleep, signal);
+    if (signal?.aborted) continue;
+    status = await client.status(status.action_id);
+    assertSameCall(status, descriptor);
+  }
+  return status;
+}
+
 async function resolve(
   client: NodrailClient,
   descriptor: ActionDescriptor,
   key: string,
-  { waitMs = 0, pollMs = 2000, sleep = defaultSleep }: AuthorizeOptions,
+  options: AuthorizeOptions,
 ): Promise<Decision> {
   if (!isPlainJson(descriptor.params)) throw new Blocked("INVALID_ACTION");
-  let status = await client.submit(descriptor, key);
-  assertSameCall(status, descriptor);
+  const submitted = await client.submit(descriptor, key, options.run);
+  assertSameCall(submitted, descriptor);
 
-  const deadline = Date.now() + waitMs;
-  while (waiting.has(status.code)) {
-    if (Date.now() >= deadline)
-      throw new Blocked(status.code, status.reference, status.reason);
-    await sleep(pollMs);
-    status = await client.status(status.action_id);
-    assertSameCall(status, descriptor);
-  }
+  const status = await waitForPerson(client, descriptor, submitted, options);
   if (status.code !== "READY")
     throw new Blocked(status.code, status.reference, status.reason);
 

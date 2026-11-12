@@ -2,7 +2,15 @@
 // Reading and checking the files themselves is in rules-file.ts.
 import type { z } from "zod";
 import { classifyCommand } from "./commands.ts";
+import { reportSchemaIssues } from "./compile-issues.ts";
+import {
+  compileBudgets,
+  compileGates,
+  type RuleCompiler,
+} from "./compile-runs.ts";
 import { policyDocument, type Condition } from "./policies.ts";
+import { pick, type Path, type Place } from "./positions.ts";
+import { legacySubagentRuleProblem } from "./upgrades.ts";
 import {
   Collector,
   readFile,
@@ -11,9 +19,7 @@ import {
   type ConditionEntry,
   type fileCommand,
   type fileResource,
-  type PolicyIssue,
   type PolicySource,
-  type RuleFields,
   type State,
 } from "./rules-file.ts";
 
@@ -38,21 +44,25 @@ function slug(text: string) {
 const MAX_CONDITIONS = 20;
 
 type Used = { lists: Set<string>; macros: Set<string> };
-type Place = Omit<PolicyIssue, "message">;
+type RuleEntry = State["rules"] extends Map<string, infer R> ? R : never;
 /** What compiling one set of files shares: what was read, used and reported. */
 type Compiling = { state: State; used: Used; collector: Collector };
 /** How deep inside macros a condition sits, and how many are left to spend. */
 type Nesting = { stack: string[]; budget: { left: number } };
 
+/** Where the condition at an index of the rule is; inside a macro, its use. */
+type ConditionPlace = (index: number) => Place;
+
 function expandConditions(
   entries: ConditionEntry[],
   compiling: Compiling,
-  at: Place,
+  place: ConditionPlace,
   nesting: Nesting = { stack: [], budget: { left: MAX_CONDITIONS } },
 ): unknown[] {
   const { state, used, collector } = compiling;
   const { stack, budget } = nesting;
-  return entries.flatMap((entry): unknown[] => {
+  return entries.flatMap((entry, index): unknown[] => {
+    const at = place(index);
     // Stops here rather than after nested macros have filled memory.
     if (budget.left <= 0) {
       if (budget.left === 0)
@@ -74,7 +84,7 @@ function expandConditions(
         collector.error(at, `Macro "${entry.macro}" refers to itself.`);
         return [];
       }
-      return expandConditions(macro.condition, compiling, at, {
+      return expandConditions(macro.condition, compiling, () => at, {
         stack: [...stack, entry.macro],
         budget,
       });
@@ -118,10 +128,9 @@ type Expansion = {
 type Naming = { name: string; base: string };
 
 function resourceExpansions(
-  rule: RuleFields,
+  rule: RuleEntry,
   { name, base }: Naming,
   { state, used, collector }: Compiling,
-  at: Place,
 ): Expansion[] | null {
   const resource = rule.resource as z.infer<typeof fileResource>;
   const shared = { tool: rule.tool, operation: rule.operation };
@@ -129,6 +138,7 @@ function resourceExpansions(
     return [{ ...shared, id: base, label: name, resource }];
   const list = state.lists.get(resource.list);
   used.lists.add(resource.list);
+  const at = pick(rule, [["resource", "list"]]);
   if (!list) {
     collector.error(at, `Unknown list "${resource.list}".`);
     return null;
@@ -160,12 +170,17 @@ function resourceExpansions(
  * "git logger". That takes two rules in the evaluator's literal terms.
  */
 function commandExpansions(
-  command: z.infer<typeof fileCommand>,
+  rule: RuleEntry,
   { name, base }: Naming,
   { state, used, collector }: Compiling,
-  at: Place,
 ): Expansion[] | null {
+  const command = rule.command as z.infer<typeof fileCommand>;
   const fromList = typeof command === "object" && "list" in command;
+  const at = pick(rule, [
+    ["command", "list"],
+    ["command", "prefix"],
+    ["command"],
+  ]);
   let values: unknown[];
   if (fromList) {
     const list = state.lists.get(command.list);
@@ -255,15 +270,13 @@ function anyOfVariants(
   }));
 }
 
-type RuleEntry = State["rules"] extends Map<string, infer R> ? R : never;
-
 /** A switched-off rule still counts as using what it names. */
-function markUsed(rule: RuleEntry, { state, used }: Compiling, at: Place) {
+function markUsed(rule: RuleEntry, { state, used }: Compiling) {
   // Problems here belong to a rule that is off, so they aren't reported.
   expandConditions(
     rule.condition ?? [],
     { state, used, collector: new Collector() },
-    at,
+    () => rule,
   );
   if (rule.resource && "list" in rule.resource)
     used.lists.add(rule.resource.list);
@@ -271,26 +284,44 @@ function markUsed(rule: RuleEntry, { state, used }: Compiling, at: Place) {
     used.lists.add(rule.command.list);
 }
 
-/** Why a rule can't compile at all, before looking inside it. */
-function ruleProblem(name: string, rule: RuleEntry) {
+/** Why a rule can't compile at all, before looking inside it, and where. */
+function ruleProblem(
+  name: string,
+  rule: RuleEntry,
+): { message: string; paths: Path[] } | null {
   const needed = rule.command === undefined ? required : (["effect"] as const);
   const missing = needed.filter((field) => rule[field] === undefined);
-  if (missing.length) return `Rule "${name}" needs ${missing.join(", ")}.`;
+  if (missing.length)
+    return {
+      message: `Rule "${name}" needs ${missing.join(", ")}.`,
+      paths: [],
+    };
   if (
     rule.command !== undefined &&
     (rule.tool ?? rule.operation ?? rule.resource) !== undefined
   )
-    return `Rule "${name}" sets command, so it cannot also set tool, operation or resource.`;
-  return null;
+    return {
+      message: `Rule "${name}" sets command, so it cannot also set tool, operation or resource.`,
+      paths: [["command"]],
+    };
+  const legacy = legacySubagentRuleProblem({
+    toolKey: rule.tool ?? "",
+    operationKey: rule.operation ?? "",
+    resourceKind: rule.resource?.kind ?? "",
+  });
+  return legacy
+    ? { message: `Rule "${name}": ${legacy}`, paths: [["resource"]] }
+    : null;
 }
 
 /** One rule as the evaluator's rules, one per resource or list item. */
 function compileRule(name: string, rule: RuleEntry, compiling: Compiling) {
-  const at = { file: rule.file, line: rule.line, column: rule.column };
   const variants = anyOfVariants(
-    expandConditions(rule.condition ?? [], compiling, at),
+    expandConditions(rule.condition ?? [], compiling, (index) =>
+      pick(rule, [["condition", index]]),
+    ),
     name,
-    at,
+    pick(rule, [["condition"]]),
     compiling.collector,
   );
   if (!variants) return [];
@@ -299,8 +330,8 @@ function compileRule(name: string, rule: RuleEntry, compiling: Compiling) {
   const naming = { name: shownName, base };
   const expansions =
     rule.command === undefined
-      ? resourceExpansions(rule, naming, compiling, at)
-      : commandExpansions(rule.command, naming, compiling, at);
+      ? resourceExpansions(rule, naming, compiling)
+      : commandExpansions(rule, naming, compiling);
   if (!expansions) return [];
   return expansions.flatMap((plain) =>
     variants.map(({ conditions, item }) => {
@@ -332,6 +363,7 @@ function compileRule(name: string, rule: RuleEntry, compiling: Compiling) {
           tags: rule.tags ?? [],
           source: { file: rule.file, line: rule.line },
         } satisfies CompiledRule,
+        entry: rule,
       };
     }),
   );
@@ -346,25 +378,12 @@ function warnUnused({ state, used, collector }: Compiling) {
       collector.warn(macro, `Macro "${name}" is not used.`);
 }
 
-/** A problem in the compiled document, reported at the rule it came from. */
-function reportSchemaIssues(
-  issues: { path: PropertyKey[]; message: string }[],
-  compiled: CompiledRule[],
-  fallback: string,
-  collector: Collector,
-) {
-  for (const issue of issues) {
-    const index = typeof issue.path[1] === "number" ? issue.path[1] : null;
-    const rule = index === null ? undefined : compiled[index];
-    const field = issue.path.slice(2).join(".");
-    collector.error(
-      rule
-        ? { file: rule.source.file, line: rule.source.line, column: 1 }
-        : { file: fallback, line: 1, column: 1 },
-      `${rule ? `Rule "${rule.name}"` : "Rules"}${field ? ` ${field}` : ""}: ${issue.message}`,
-    );
-  }
-}
+const ruleCompiler: RuleCompiler = {
+  problem: (name, rule) => ruleProblem(name, rule as RuleEntry),
+  compile: (name, rule, compiling) =>
+    compileRule(name, rule as RuleEntry, compiling),
+  slug,
+};
 
 /**
  * Turns rule files into one policy document for the one evaluator. Later files
@@ -376,6 +395,8 @@ export function compilePolicies(sources: PolicySource[]): CompileResult {
     lists: new Map(),
     macros: new Map(),
     rules: new Map(),
+    gates: new Map(),
+    budgets: new Map(),
   };
   for (const source of sources) readFile(source, state, collector);
   const compiling: Compiling = {
@@ -386,26 +407,36 @@ export function compilePolicies(sources: PolicySource[]): CompileResult {
 
   const results: ReturnType<typeof compileRule> = [];
   for (const [name, rule] of state.rules) {
-    const at = { file: rule.file, line: rule.line, column: rule.column };
     if (rule.enabled === false) {
-      markUsed(rule, compiling, at);
+      markUsed(rule, compiling);
       continue;
     }
     const problem = ruleProblem(name, rule);
-    if (problem) collector.error(at, problem);
+    if (problem) collector.error(pick(rule, problem.paths), problem.message);
     else results.push(...compileRule(name, rule, compiling));
   }
+  const gates = compileGates(compiling, ruleCompiler);
+  const budgets = compileBudgets(compiling, ruleCompiler);
   warnUnused(compiling);
 
   const compiled = results.map((result) => result.compiled);
-  const parsed = policyDocument.safeParse({
-    version: 1,
-    rules: results.map((result) => result.output),
-  });
+  const outputs = (items: { output: unknown }[]) =>
+    items.map((item) => item.output);
+  // Only a document that needs them is version 2, so every other stays readable by older engines.
+  const parsed = policyDocument.safeParse(
+    gates.length || budgets.length
+      ? {
+          version: 2,
+          rules: outputs(results),
+          gates: outputs(gates),
+          budgets: outputs(budgets),
+        }
+      : { version: 1, rules: outputs(results) },
+  );
   if (!parsed.success)
     reportSchemaIssues(
       parsed.error.issues,
-      compiled,
+      { rules: results, gates, budgets },
       sources[0]?.name ?? "rules",
       collector,
     );

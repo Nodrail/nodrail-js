@@ -1,17 +1,39 @@
-import {
-  parseDocument,
-  LineCounter,
-  isMap,
-  isSeq,
-  stringify,
-  type Document,
-} from "yaml";
+import { parseDocument, LineCounter, isMap, isSeq } from "yaml";
 import { z } from "zod";
+import {
+  listItem,
+  macroItem,
+  mode,
+  ruleFields,
+  versionItem,
+  type RuleFields,
+} from "./file-fields.ts";
 import type { PolicyDocument } from "./policies.ts";
+import {
+  entryWhere,
+  issuePlace,
+  layered,
+  pick,
+  type Place,
+  type Where,
+} from "./positions.ts";
+import {
+  budgetItem,
+  gateItem,
+  type BudgetFields,
+  type GateFields,
+} from "./run-entries.ts";
+
+export {
+  fileCommand,
+  fileResource,
+  type ConditionEntry,
+  type RuleFields,
+} from "./file-fields.ts";
 
 /** Rule files declare the highest format they need, as Falco files do. */
-/** 2 adds `op: contains` with a list. The compiled document is still version 1. */
-export const ENGINE_VERSION = 2;
+/** 2 adds `op: contains` with a list; 3 adds gates and budgets (document version 2). */
+export const ENGINE_VERSION = 3;
 
 const MAX_FILE_BYTES = 1024 * 1024;
 
@@ -38,80 +60,7 @@ export type CompileResult =
     }
   | { ok: false; issues: PolicyIssue[]; warnings: PolicyIssue[] };
 
-const scalar = z.union([z.string(), z.number(), z.boolean()]);
-const mode = z.enum(["append", "replace"]);
-const refName = z.string().regex(/^[A-Za-z0-9_.-]{1,64}$/);
-
-const conditionEntry = z.union([
-  z.strictObject({ macro: refName }),
-  z.strictObject({
-    field: z.string(),
-    op: z.enum(["in", "contains"]),
-    list: refName,
-  }),
-  z.strictObject({ field: z.string(), op: z.string(), value: z.unknown() }),
-]);
-export type ConditionEntry = z.infer<typeof conditionEntry>;
-
-const versionItem = z.strictObject({
-  required_engine_version: z.number().int().positive(),
-});
-
-const listItem = z.strictObject({
-  list: refName,
-  items: z.array(scalar).max(500),
-  override: z.strictObject({ items: mode }).optional(),
-});
-
-const macroItem = z.strictObject({
-  macro: refName,
-  condition: z.array(conditionEntry).min(1).max(20),
-  override: z.strictObject({ condition: mode }).optional(),
-});
-
-export const fileResource = z.union([
-  z.strictObject({
-    kind: z.string(),
-    match: z.enum(["exact", "prefix"]).optional(),
-    list: refName,
-  }),
-  z.strictObject({
-    kind: z.string(),
-    match: z.enum(["any", "exact", "prefix"]),
-    value: z.string().optional(),
-  }),
-]);
-
-export const fileCommand = z.union([
-  z.string().min(1).max(512),
-  z.strictObject({ prefix: z.string().min(1).max(512) }),
-  z.strictObject({
-    list: refName,
-    match: z.enum(["exact", "prefix"]).optional(),
-  }),
-]);
-
-const ruleFields = {
-  id: z.string().optional(),
-  title: z.string().max(120).optional(),
-  desc: z.string().max(500).optional(),
-  tool: z.string().optional(),
-  operation: z.string().optional(),
-  resource: fileResource.optional(),
-  command: fileCommand.optional(),
-  condition: z.array(conditionEntry).max(20).optional(),
-  effect: z.string().optional(),
-  agent: z.string().nullable().optional(),
-  installation: z.string().nullable().optional(),
-  expires: z.string().nullable().optional(),
-  enabled: z.boolean().optional(),
-  tags: z.array(z.string().max(64)).max(20).optional(),
-};
-export type RuleFields = {
-  [K in keyof typeof ruleFields]?: z.infer<(typeof ruleFields)[K]>;
-};
-
-const appendable = new Set(["condition", "tags"]);
+const appendable = new Set(["condition", "tags", "requires"]);
 
 const ruleItem = z.strictObject({
   rule: z.string().min(1).max(200),
@@ -124,40 +73,38 @@ const ruleItem = z.strictObject({
     .optional(),
 });
 
-type Place = { file: string; line: number; column: number };
+/** An entry as read, with where it is and where each of its fields is. */
+export type Located<T> = T & Place & { where: Where };
 
-type Located<T> = T & { file: string; line: number; column: number };
+// Only the place is kept, so an entry passed as `at` adds none of its fields.
+const toIssue = ({ file, line, column }: Place, message: string) => ({
+  file,
+  line,
+  column,
+  message,
+});
 
 export class Collector {
   readonly issues: PolicyIssue[] = [];
   readonly warnings: PolicyIssue[] = [];
-  error(at: Omit<PolicyIssue, "message">, message: string) {
-    this.issues.push({ ...at, message });
+  error(at: Place, message: string) {
+    this.issues.push(toIssue(at, message));
   }
-  warn(at: Omit<PolicyIssue, "message">, message: string) {
-    this.warnings.push({ ...at, message });
+  warn(at: Place, message: string) {
+    this.warnings.push(toIssue(at, message));
   }
-}
-
-function locator(doc: Document, counter: LineCounter, file: string) {
-  return (path: (string | number)[]) => {
-    // The deepest node that exists, so a missing key points at its parent.
-    for (let depth = path.length; depth >= 0; depth -= 1) {
-      const node = doc.getIn(path.slice(0, depth), true) as
-        { range?: [number, number, number] | null } | undefined;
-      const offset = node?.range?.[0];
-      if (offset !== undefined) {
-        const { line, col } = counter.linePos(offset);
-        return { file, line, column: col };
-      }
-    }
-    return { file, line: 1, column: 1 };
-  };
 }
 
 function kindOf(item: unknown) {
   if (typeof item !== "object" || item === null) return null;
-  for (const key of ["required_engine_version", "list", "macro", "rule"])
+  for (const key of [
+    "required_engine_version",
+    "list",
+    "macro",
+    "rule",
+    "gate",
+    "budget",
+  ])
     if (key in item) return key;
   return null;
 }
@@ -166,6 +113,8 @@ export type State = {
   lists: Map<string, Located<z.infer<typeof listItem>>>;
   macros: Map<string, Located<z.infer<typeof macroItem>>>;
   rules: Map<string, Located<RuleFields & { rule: string }>>;
+  gates: Map<string, Located<GateFields & { gate: string }>>;
+  budgets: Map<string, Located<BudgetFields & { budget: string }>>;
 };
 
 /** Where a named entry goes, and where its problems are reported. */
@@ -186,7 +135,7 @@ function mergeNamed<T extends object>(
     // Falco replaces silently; a later file quietly weakening a deny is too risky.
     if (existing)
       collector.error(
-        incoming,
+        pick(incoming, [[kind]]),
         `${kind} "${name}" is already defined at ${existing.file}:${existing.line}. Use override to change it.`,
       );
     else store.set(name, fresh as unknown as Located<T>);
@@ -194,21 +143,30 @@ function mergeNamed<T extends object>(
   }
   if (!existing) {
     collector.error(
-      incoming,
+      pick(incoming, [["override"]], "key"),
       `${kind} "${name}" has override but no earlier definition.`,
     );
     return;
   }
-  const merged: Record<string, unknown> = { ...existing };
+  const merged: Record<string, unknown> = {
+    ...existing,
+    where: layered(existing, incoming.where, override),
+  };
   const record = fresh as Record<string, unknown>;
   for (const [field, how] of Object.entries(override)) {
     if (record[field] === undefined) {
-      collector.error(incoming, `override names "${field}" but it is not set.`);
+      collector.error(
+        pick(incoming, [["override", field]], "key"),
+        `override names "${field}" but it is not set.`,
+      );
       continue;
     }
     if (how === "append") {
       if (!Array.isArray(merged[field]) && merged[field] !== undefined) {
-        collector.error(incoming, `"${field}" cannot be appended to.`);
+        collector.error(
+          pick(incoming, [["override", field]]),
+          `"${field}" cannot be appended to.`,
+        );
         continue;
       }
       merged[field] = [
@@ -219,11 +177,14 @@ function mergeNamed<T extends object>(
   }
   for (const field of Object.keys(record))
     if (
-      !["file", "line", "column", kind].includes(field) &&
+      !["file", "line", "column", "where", kind].includes(field) &&
       record[field] !== undefined &&
       !(field in override)
     )
-      collector.error(incoming, `"${field}" is set but not named in override.`);
+      collector.error(
+        pick(incoming, [[field]], "key"),
+        `"${field}" is set but not named in override.`,
+      );
   store.set(name, merged as Located<T>);
 }
 
@@ -232,6 +193,8 @@ const schemas = {
   list: listItem,
   macro: macroItem,
   rule: ruleItem,
+  gate: gateItem,
+  budget: budgetItem,
 };
 
 /** The file as YAML entries, or null with every problem reported. */
@@ -257,13 +220,18 @@ function parseEntries(source: PolicySource, collector: Collector) {
   if (!isSeq(doc.contents)) {
     collector.error(
       start,
-      "A rules file is a list of list, macro and rule entries.",
+      "A rules file is a list of list, macro, rule, gate and budget entries.",
     );
     return null;
   }
   try {
     const items = doc.toJS({ maxAliasCount: 50 }) as unknown[];
-    return { doc, items, at: locator(doc, counter, source.name) };
+    // Each entry with where it starts and a way to find its fields.
+    const entry = (index: number) => {
+      const where = entryWhere(doc, counter, source.name, index);
+      return { ...(where([]) ?? start), where };
+    };
+    return { doc, items, entry };
   } catch {
     collector.error(start, "Too many YAML aliases.");
     return null;
@@ -274,17 +242,18 @@ type Entries = NonNullable<ReturnType<typeof parseEntries>>;
 
 /** One entry checked against its schema, or null with its problems reported. */
 function checkEntry(
-  { doc, at }: Entries,
+  { doc, entry }: Entries,
   raw: unknown,
   index: number,
   collector: Collector,
 ) {
   const kind = kindOf(raw);
   const schema = kind ? schemas[kind as keyof typeof schemas] : undefined;
+  const here = entry(index);
   if (!schema || !isMap(doc.getIn([index], true))) {
     collector.error(
-      at([index]),
-      "Expected a list, macro, rule or required_engine_version entry.",
+      here,
+      "Expected a list, macro, rule, gate, budget or required_engine_version entry.",
     );
     return null;
   }
@@ -293,7 +262,7 @@ function checkEntry(
     return { kind, value: parsed.data as Record<string, unknown> };
   for (const issue of parsed.error.issues)
     collector.error(
-      at([index, ...(issue.path as (string | number)[])]),
+      issuePlace(here, issue),
       `${issue.path.join(".") || kind}: ${issue.message}`,
     );
   return null;
@@ -302,14 +271,14 @@ function checkEntry(
 /** Adds a checked entry to what has been read so far. */
 function addEntry(
   { kind, value }: { kind: string | null; value: Record<string, unknown> },
-  here: Place,
+  here: Located<object>,
   state: State,
   collector: Collector,
 ) {
   if (kind === "required_engine_version") {
     if ((value.required_engine_version as number) > ENGINE_VERSION)
       collector.error(
-        here,
+        pick(here, [["required_engine_version"]]),
         `This file needs engine version ${String(value.required_engine_version)}; this is ${ENGINE_VERSION}.`,
       );
     return;
@@ -330,7 +299,22 @@ function addEntry(
   const overridden = value.override as Record<string, string> | undefined;
   for (const [field, how] of Object.entries(overridden ?? {}))
     if (how === "append" && !appendable.has(field))
-      collector.error(here, `"${field}" cannot be appended to; use replace.`);
+      collector.error(
+        pick(here, [["override", field]]),
+        `"${field}" cannot be appended to; use replace.`,
+      );
+  if (kind === "gate")
+    return mergeNamed(
+      { store: state.gates, kind, collector },
+      value.gate as string,
+      located,
+    );
+  if (kind === "budget")
+    return mergeNamed(
+      { store: state.budgets, kind, collector },
+      value.budget as string,
+      located,
+    );
   mergeNamed(
     { store: state.rules, kind: "rule", collector },
     value.rule as string,
@@ -347,31 +331,6 @@ export function readFile(
   if (!entries) return;
   entries.items.forEach((raw, index) => {
     const entry = checkEntry(entries, raw, index, collector);
-    if (entry) addEntry(entry, entries.at([index]), state, collector);
+    if (entry) addEntry(entry, entries.entry(index), state, collector);
   });
-}
-
-/** The opposite of compiling: rule files that compile back to this document. */
-export function renderPolicies(document: PolicyDocument) {
-  const seen = new Map<string, number>();
-  const items = document.rules.map((rule) => {
-    const uses = seen.get(rule.name) ?? 0;
-    seen.set(rule.name, uses + 1);
-    return {
-      // Names must be unique in a file, so a repeated one is kept as its title.
-      ...(uses
-        ? { rule: `${rule.name} (${rule.id})`, title: rule.name }
-        : { rule: rule.name }),
-      id: rule.id,
-      tool: rule.toolKey,
-      operation: rule.operationKey,
-      resource: rule.resource,
-      ...(rule.conditions.length ? { condition: rule.conditions } : {}),
-      effect: rule.effect,
-      ...(rule.agentKey ? { agent: rule.agentKey } : {}),
-      ...(rule.installationName ? { installation: rule.installationName } : {}),
-      ...(rule.expiresAt ? { expires: rule.expiresAt } : {}),
-    };
-  });
-  return `# Nodrail rules. Keep each id so a rule stays the same rule when renamed.\n${items.length ? stringify(items, { lineWidth: 0 }) : "[]\n"}`;
 }

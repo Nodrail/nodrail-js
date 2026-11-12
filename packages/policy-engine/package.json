@@ -1,6 +1,6 @@
 {
   "name": "@nodrail/policy-engine",
-  "version": "0.1.5",
+  "version": "0.2.0",
   "description": "Decide what an AI agent may do before it does it. Deterministic rules in YAML for tools and shell commands.",
   "keywords": [
     "ai",
@@ -33,7 +33,9 @@
     "./protocol": "./src/protocol.ts",
     "./simulator": "./src/simulator.ts",
     "./yaml": "./src/yaml.ts",
-    "./actions": "./src/actions.ts"
+    "./actions": "./src/actions.ts",
+    "./receipts": "./src/receipts.ts",
+    "./hook-runs": "./src/hook-runs.ts"
   },
   "scripts": {
     "check": "tsc --noEmit",
@@ -94,6 +96,14 @@
       "./actions": {
         "types": "./dist/actions.d.ts",
         "default": "./dist/actions.js"
+      },
+      "./receipts": {
+        "types": "./dist/receipts.d.ts",
+        "default": "./dist/receipts.js"
+      },
+      "./hook-runs": {
+        "types": "./dist/hook-runs.d.ts",
+        "default": "./dist/hook-runs.js"
       }
     },
     "bin": {

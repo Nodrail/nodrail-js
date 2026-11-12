@@ -1,8 +1,17 @@
-import { resolve } from "node:path";
+import { spawnSync } from "node:child_process";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { describe, expect, test, vi } from "vitest";
 import { describeToolCall, runHook } from "../src/hooks";
+import { fakeNodrail } from "./support/fake-nodrail";
 
-const env = { NODRAIL_URL: "https://x", NODRAIL_CREDENTIAL: "c" };
+// Session pins go here, not in the home folder.
+const env = {
+  NODRAIL_URL: "https://x",
+  NODRAIL_CREDENTIAL: "c",
+  NODRAIL_LEDGER: mkdtempSync(join(tmpdir(), "nodrail-hook-ledger-")),
+};
 
 const pre = (overrides: object = {}) =>
   JSON.stringify({
@@ -315,4 +324,173 @@ describe("after a tool runs", () => {
       ).resolves.toEqual({ stdout: "", stderr: "", exitCode: 0 });
     },
   );
+});
+
+describe("runs and steps", () => {
+  // Outside any git repository, so the run comes from the session.
+  const cwd = mkdtempSync(join(tmpdir(), "nodrail-hook-run-"));
+  const event = (overrides: object) =>
+    JSON.stringify({ cwd, session_id: "s1", ...overrides });
+  const receipt = "```nodrail-receipt\nverdict: pass\n```";
+
+  test("an intent carries its run and the step taking it", async () => {
+    const server = fakeNodrail();
+    const result = await runHook(
+      pre({ cwd, session_id: "s1", agent_id: "a1", agent_type: "QA" }),
+      env,
+      { fetch: server.fetch },
+    );
+    expect(result.stdout).toBe("");
+    const [submitted] = server.requests.filter((r) => r.path === "/actions");
+    expect(submitted?.body.run).toEqual({
+      key: "session:s1",
+      step: { id: "a1", agent: "qa" },
+    });
+  });
+
+  test("NODRAIL_RUN names the run; the main agent sends no step", async () => {
+    const server = fakeNodrail();
+    await runHook(
+      pre({ cwd }),
+      { ...env, NODRAIL_RUN: "issue-42" },
+      {
+        fetch: server.fetch,
+      },
+    );
+    const [submitted] = server.requests.filter((r) => r.path === "/actions");
+    expect(submitted?.body.run).toEqual({ key: "issue-42" });
+  });
+
+  test("without a run, none is sent", async () => {
+    const server = fakeNodrail();
+    await runHook(pre({ cwd }), env, { fetch: server.fetch });
+    const [submitted] = server.requests.filter((r) => r.path === "/actions");
+    expect(submitted?.body).not.toHaveProperty("run");
+  });
+
+  test("the run stays the one the session started in", async () => {
+    const repo = mkdtempSync(join(tmpdir(), "nodrail-hook-repo-"));
+    const git = (...args: string[]) =>
+      spawnSync("git", args, { cwd: repo, encoding: "utf8" });
+    git("init", "-q", "-b", "feature/a");
+    git(
+      "remote",
+      "add",
+      "origin",
+      "https://user:token@github.com/acme/app.git",
+    );
+    git(
+      "-c",
+      "user.name=t",
+      "-c",
+      "user.email=t@t",
+      "commit",
+      "-q",
+      "--allow-empty",
+      "-m",
+      "x",
+    );
+    const keys: unknown[] = [];
+    for (const branch of [null, "feature/b"]) {
+      if (branch) git("switch", "-q", "-c", branch);
+      const server = fakeNodrail();
+      await runHook(pre({ cwd: repo, session_id: "pinned" }), env, {
+        fetch: server.fetch,
+      });
+      keys.push(server.requests.find((r) => r.path === "/actions")?.body.run);
+    }
+    expect(keys).toEqual([
+      { key: "github.com/acme/app/feature/a" },
+      { key: "github.com/acme/app/feature/a" },
+    ]);
+  });
+
+  test("starting a subagent is an intent", async () => {
+    const server = fakeNodrail();
+    await runHook(
+      pre({
+        cwd,
+        tool_name: "Agent",
+        tool_input: { subagent_type: "github", prompt: "open the PR" },
+      }),
+      env,
+      { fetch: server.fetch },
+    );
+    expect(server.seen()[0]).toMatchObject({
+      tool: "claude-code",
+      operation: "agent",
+      resource: { kind: "agent", id: "github" },
+    });
+  });
+
+  test("a subagent starting and stopping are steps, with the receipt block", async () => {
+    const server = fakeNodrail();
+    const step = { agent_id: "a1", agent_type: "qa" };
+    for (const payload of [
+      { hook_event_name: "SubagentStart", ...step },
+      {
+        hook_event_name: "SubagentStop",
+        ...step,
+        last_assistant_message: `Done.\n${receipt}`,
+      },
+    ])
+      await expect(
+        runHook(event(payload), env, { fetch: server.fetch }),
+      ).resolves.toEqual({ stdout: "", stderr: "", exitCode: 0 });
+    expect(server.requests.map((r) => r.body)).toEqual([
+      {
+        run: { key: "session:s1" },
+        step: { id: "a1", agent: "qa" },
+        event: "started",
+      },
+      {
+        run: { key: "session:s1" },
+        step: { id: "a1", agent: "qa" },
+        event: "finished",
+        receipt: { text: receipt },
+      },
+    ]);
+  });
+
+  test.each([
+    ["no receipt", "All done."],
+    [
+      "a receipt too long to send",
+      `x\n${"```nodrail-receipt\n"}${"a".repeat(9000)}\n${"```"}`,
+    ],
+    [
+      "a receipt that starts too far from the end",
+      `x\n${"```nodrail-receipt\nverdict: pass\n"}${"a\n".repeat(9000)}${"```"}`,
+    ],
+  ])("a step that ends with %s finishes without one", async (_, message) => {
+    const server = fakeNodrail();
+    await runHook(
+      event({
+        hook_event_name: "SubagentStop",
+        agent_id: "a1",
+        agent_type: "qa",
+        last_assistant_message: message,
+      }),
+      env,
+      { fetch: server.fetch },
+    );
+    expect(server.requests[0]?.body).not.toHaveProperty("receipt");
+  });
+
+  test.each([
+    ["unconfigured", { NODRAIL_HOME: "/nonexistent" }, { agent_id: "a1" }],
+    ["with no step", env, {}],
+    ["when the service is down", env, { agent_id: "a1" }],
+  ])("a step is quiet %s", async (_, environment, step) => {
+    const send = vi.fn().mockRejectedValue(new Error("down"));
+    await expect(
+      runHook(
+        event({ hook_event_name: "SubagentStart", ...step }),
+        environment,
+        {
+          fetch: send as unknown as typeof fetch,
+        },
+      ),
+    ).resolves.toEqual({ stdout: "", stderr: "", exitCode: 0 });
+  });
 });

@@ -79,7 +79,8 @@ this call with these arguments. Your team's rules in Nodrail decide:
 - **Denied:** the tool doesn't run. The agent gets the reason as the tool's
   result, so it can tell the user or try something else.
 - **Needs a person:** someone gets the request in Nodrail and allows or denies
-  it. The call waits up to 5 minutes for the answer, then counts as blocked.
+  it. The call waits up to 5 minutes for the answer, then counts as blocked
+  and withdraws the request, so nobody approves a call that will not run.
 
 Every decision is recorded. Rules change in Nodrail, without a deploy.
 
@@ -162,10 +163,14 @@ reason. Tested against the real `@modelcontextprotocol/sdk` client and server.
 
 | Option      | Default                 | Meaning                                                   |
 | ----------- | ----------------------- | --------------------------------------------------------- |
-| `waitMs`    | `NODRAIL_WAIT_SECONDS`, or 5 minutes | How long a call waits for a person. `0` blocks at once. |
+| `waitMs`    | `NODRAIL_WAIT_SECONDS`, or 5 minutes | How long a call waits for a person. `0` blocks at once and leaves the request open for a person to decide later. |
 | `onBlocked` | `"return"`              | `"throw"`, or a function, to change what a blocked tool does. Not used by the LangChain middleware, which always answers with an error message to the model. |
 | `describe`  | the tool's name         | What rules see for each tool. `guard` only.               |
 | `name`      | the function's name     | Needed for a function with no name. `guard` only.         |
+| `run`       | `NODRAIL_RUN`, else no run | The run calls belong to when no `inRun` or `step` says otherwise. `createNodrail()` only. |
+| `env`       | `process.env`           | Where `NODRAIL_*` settings are read from. `createNodrail()` only. |
+| `fetch`     | the global `fetch`      | The function requests to Nodrail use. `createNodrail()` only. |
+| `sleep`     | a timer                 | How the client waits between checks for a person's answer, for tests. `createNodrail()` only. |
 
 `waitMs` and `onBlocked` also go to `createNodrail()`, which makes an instance
 with its own `url`, `credential` and `adapterVersion`. Each request to Nodrail
@@ -198,8 +203,39 @@ if (decision.allowed) {
 }
 ```
 
-A plain string `resource` is resource type `resource`. `run()` and `check()` send
+A plain string `resource` is resource type `resource`. With no `resource`, it is
+type `tool` with the id `<tool>.<operation>`, such as `github.issues.delete`. `run()` and `check()` send
 `params` exactly as you pass them, with no redaction: keep secrets out of them.
+
+### Runs and steps, for any framework
+
+Gates and budgets decide with what already happened in a piece of work: hold
+the pull request until QA passed after the last change, or limit how many tool
+calls one agent step makes. Tell Nodrail which run a call belongs to, and wrap
+each agent's work as a step:
+
+```ts
+const nodrail = createNodrail({ run: "ENG-42" }); // or NODRAIL_RUN
+
+await nodrail.step("dev", () => devAgent.run(task));
+const review = await nodrail.step("qa", () => qaAgent.run(task));
+await nodrail.step("github", () => releaseAgent.run(task)); // a gate can hold its calls
+```
+
+Every guarded call made while a step runs belongs to it, through your agent
+framework's tool loop too, so tools need no change. Steps running side by side
+keep their own calls. `nodrail.inRun(key, work)` sets the run for one piece of
+work, for a server handling many.
+
+A step's verdict comes from its result: a string ending with a
+`nodrail-receipt` block, or an object with `verdict` (and optional `findings`
+and `usage: { tokens, usd }`). Pass `{ receipt: (result) => … }` as the third
+argument to read your own shape. A step that throws finishes with no verdict,
+and the error goes on. Recording a step never stops the work: if it can't be
+recorded, gates that need it stay closed.
+
+`step` needs a run, and throws if there is none. Without a run, calls are
+decided as before, and any gate they match holds them.
 
 ### Where the connection comes from
 
@@ -254,6 +290,30 @@ for Codex. `@nodrail/client/setup` exports the hook settings for both agents
 (`claudeCodeHooks`, `codexHooks`). The connect page in Nodrail shows them filled
 in.
 
+The Claude Code hook sends each intent with its run and the subagent taking it,
+governs starting a subagent (`Agent`, or `Task` in older Claude Code), and
+records `SubagentStart` and `SubagentStop` as steps with the receipt block the
+subagent ended with (read from the last 16 KB of its message, up to 8 KB). The
+run is `NODRAIL_RUN`, else `<repo>/<branch>` where the session started, such as
+`github.com/acme/app/fix-42`, kept for the whole session so switching
+branch doesn't change it; on the default branch or outside git it is the
+session. The pin is kept in `.git/nodrail/sessions`. Gates and budgets in your rules use
+that history. Any other agent uses
+[runs and steps](#runs-and-steps-for-any-framework) in the SDK.
+
+**Upgrading:** starting a subagent used to be ungoverned by the plugin. It is
+now tool `claude-code`, operation `agent`, with the subagent's type as a
+resource of type `agent` (`vercel:deployment-expert` becomes
+`vercel-deployment-expert`). Until a rule allows it, each start waits for a
+person. Rule files with a rule for the earlier resource, type `tool` with id
+`Agent`, no longer compile.
+
+The Codex hook sends the run the same way. Codex doesn't say which subagent
+makes a call, so every call is the main agent's: gates on commands (such as
+`git push`) and budgets per run work, and a gate waiting for another agent's
+step holds until that step is recorded some other way, for example with
+`nodrail.step()` in a script.
+
 To see all three outcomes, add these rules under **Policies**, then ask the agent
 to run the commands:
 
@@ -290,12 +350,13 @@ A simulation never approves anything or issues a permit.
 | Node.js              | 22 or later                              | 22 and 24         |
 | Linux                | Blocking paths checked on Alpine, arm64  | Node 22 in Docker |
 | Windows              | Supported                                | Node 22 in CI; the agents' hooks not yet in the real CLIs |
-| TypeScript consumers | `moduleResolution: bundler`              | TypeScript 7      |
+| TypeScript consumers | `moduleResolution: bundler` or `nodenext` | TypeScript 7      |
 | Protocol             | schema 1, canonicalizer 1                |                   |
 
 How a Claude Code call maps to a rule is part of the contract. A change to it uses
-new operation names, so an existing rule can never silently start matching
-something else.
+new operation names or resource types, so an existing rule can never silently
+start matching something else; at worst it stops matching, and the call is
+blocked until the rule is updated.
 
 | Claude Code tool                                                               | Tool    | Operation          | Resource   |
 | ------------------------------------------------------------------------------ | ------- | ------------------ | ---------- |
@@ -307,6 +368,7 @@ something else.
 | WebFetch                                                                       | `web`   | `fetch`            | `url`      |
 | WebSearch                                                                      | `web`   | `search`           | `query`    |
 | `mcp__server__tool`                                                            | server  | tool               | `mcp_tool` |
+| Agent (starting a subagent)                                                    | `claude-code` | `agent`      | `agent`, id the subagent's type |
 | Codex `apply_patch` (one file)                                                 | `files` | `file.write`, `file.edit` or `file.delete` | `file` |
 | Codex `apply_patch` (several files, or a rename)                               | `files` | `file.patch`       | `file`, id `patch:sha256:…` |
 | Any other tool                                                                 | `claude-code` | the tool's name in lowercase | `tool` |
@@ -326,7 +388,12 @@ and `github` can never share a rule.
   effort, so keep secrets out of them. A fingerprint of the original binds an
   approval to the exact call.
 - **Results:** only whether the tool succeeded and how long it took.
-
+- **Runs:** the run key each call belongs to (`NODRAIL_RUN`, else the
+  repository and branch, such as `github.com/acme/app/fix-42`, without
+  any credentials in the remote's URL, else the session), the step's
+  agent name, and the receipt a step ends with: in Claude Code, the
+  `nodrail-receipt` block that ends a subagent's last message, not the rest of
+  it; with `nodrail.step()`, the receipt read from the step's result.
 - **`run()` and `check()`:** `params` exactly as you pass them, with no
   redaction.
 

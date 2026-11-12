@@ -6,6 +6,10 @@ import { parse } from "yaml";
 import { z } from "zod";
 import { describeArguments, describeToolCall } from "./actions.ts";
 import { decideToolCall, toDescriptor, type Identity } from "./local-hook.ts";
+import { runHook } from "./run-hook.ts";
+import { protectedPaths } from "./rules-guard.ts";
+import { caseRun, toRunContext } from "./case-runs.ts";
+import { runsCommand } from "./runs-cli.ts";
 import type { ActionDescriptor } from "./protocol.ts";
 import { compilePolicies } from "./compile.ts";
 import { type PolicyIssue, type PolicySource } from "./rules-file.ts";
@@ -30,8 +34,11 @@ Commands:
   test --cases <file>  Check expected outcomes, for use in CI
   check -- <program> [args]  Exit 0 only if the rules allow this command
   exec -- <program> [args]   Run it only if the rules allow it
-  hook                 Claude Code PreToolUse hook; reads the event from stdin
+  hook                 Claude Code hook; reads the event from stdin
     --unmatched deny|ask   When no rule covers a call (default deny)
+    With gates or budgets, also SubagentStart and SubagentStop, and the run
+    is recorded in the repository's git folder.
+  runs [list | show <run> | report]   What the run ledger recorded
 
 Files are loaded in the order given; a folder loads its .yaml files by name.
 Anything other than an allow is blocked. Nothing here issues a permit.`;
@@ -120,6 +127,8 @@ const caseFile = z.array(
       }),
     ]),
     expect: z.enum(["allow", "deny", "require_approval", "none"]),
+    // A run's history, so a gate or budget can be tested like a rule.
+    ...caseRun,
   }),
 );
 
@@ -179,6 +188,8 @@ type Run = {
   document: PolicyDocument;
   count: number;
   now: Date;
+  /** The rule files and folders given, which the hook keeps from being changed. */
+  paths: string[];
 };
 
 const identityOf = (values: Values) => ({
@@ -222,6 +233,7 @@ async function testCommand({ values, document, now }: Run) {
       document,
       descriptor: descriptorFor(item.call),
       now,
+      run: toRunContext(item.run, item.step),
     });
     if (outcome === item.expect) io.log(`ok   ${item.name}`);
     else {
@@ -261,21 +273,53 @@ function gateCommand({ command, values, program, document, now }: Run) {
   return run.status ?? 1;
 }
 
-async function hookCommand({ values, document, now }: Run) {
-  const result = decideToolCall(await io.readStdin(), {
+async function hookCommand({ values, document, now, paths }: Run) {
+  const options = {
     document,
     now,
-    unmatched: values.unmatched === "ask" ? "ask" : "deny",
+    protect: protectedPaths(paths),
+    unmatched:
+      values.unmatched === "ask" ? ("ask" as const) : ("deny" as const),
     ...identityOf(values),
-  });
+  };
+  const stdin = await io.readStdin();
+  // Rules without gates or budgets never read or write the ledger.
+  const result =
+    document.version === 2
+      ? runHook(stdin, options)
+      : decideToolCall(stdin, options);
   if (result.stdout) io.write(result.stdout);
   if (result.stderr) io.writeError(result.stderr);
   return result.exitCode;
 }
 
+const counted = (count: number, word: string) =>
+  `${count} ${word}${count === 1 ? "" : "s"}`;
+
+/**
+ * What a valid file compiles to. Counts are of compiled entries, the ones the
+ * limits apply to: a command rule or gate can compile to more than one.
+ */
+function summary(count: number, document: PolicyDocument) {
+  const parts = [counted(count, "rule")];
+  if (document.version === 2)
+    parts.push(
+      counted(document.gates.length, "gate"),
+      counted(document.budgets.length, "budget"),
+    );
+  const last = parts.pop();
+  return parts.length ? `${parts.join(", ")} and ${last}` : last;
+}
+
 // A Map, so a command named like an Object property finds nothing.
 const commands = new Map<string, (run: Run) => number | Promise<number>>([
-  ["validate", ({ count }) => (io.log(`OK: ${count} rules.`), 0)],
+  [
+    "validate",
+    ({ count, document }) => (
+      io.log(`OK, compiled to ${summary(count, document)}.`),
+      0
+    ),
+  ],
   ["compile", ({ document }) => (io.log(JSON.stringify(document, null, 2)), 0)],
   ["eval", evalCommand],
   ["test", testCommand],
@@ -318,6 +362,7 @@ export async function runCli(
   if (values.version) return printVersion();
   const [command = "", ...paths] = positionals;
   if (command === "init") return printPack(paths[0]);
+  if (command === "runs") return runsCommand(paths, io);
   const handler = commands.get(command);
   if (!handler || !paths.length) {
     io.error(usage);
@@ -333,5 +378,6 @@ export async function runCli(
     document: compiled.document,
     count: compiled.count,
     now: new Date(values.now ?? Date.now()),
+    paths,
   });
 }

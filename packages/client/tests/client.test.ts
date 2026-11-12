@@ -254,6 +254,108 @@ describe("everything else blocks", () => {
   });
 });
 
+/** A request nobody decides: every check finds it still waiting. */
+function undecided(withdraw: () => Promise<Response>) {
+  const withdrawn: unknown[] = [];
+  const send = vi.fn(async (url: string, init: RequestInit) => {
+    if (url.endsWith(`/actions/${ACTION}/withdraw`)) {
+      withdrawn.push(JSON.parse(init.body as string));
+      return withdraw();
+    }
+    return new Response(JSON.stringify(status({ code: "APPROVAL_PENDING" })));
+  });
+  return { send: send as unknown as typeof fetch, withdrawn };
+}
+
+const closed = () =>
+  Promise.resolve(
+    new Response(
+      JSON.stringify(status({ code: "INVALIDATED", reason: "withdrawn" })),
+    ),
+  );
+
+const waitFor = (
+  send: typeof fetch,
+  options: { waitMs: number; signal?: AbortSignal },
+) =>
+  authorize(
+    new NodrailClient({ url: "https://x", credential: "c", fetch: send }),
+    descriptor,
+    "key",
+    {
+      ...options,
+      pollMs: 1,
+      sleep: () => new Promise((done) => setTimeout(done, 1)),
+    },
+  );
+
+const stillWaiting = {
+  ...blockedWith("APPROVAL_PENDING"),
+  reference: "APR-AAAAAAAA",
+};
+
+describe("giving up on a person", () => {
+  test("after waiting, takes the request back once", async () => {
+    const server = undecided(closed);
+    await expect(waitFor(server.send, { waitMs: 20 })).resolves.toEqual({
+      ...stillWaiting,
+      reason: null,
+    });
+    expect(server.withdrawn).toEqual([{}]);
+  });
+
+  test("when the caller stops waiting early, takes it back too", async () => {
+    const server = undecided(closed);
+    const stop = new AbortController();
+    setTimeout(() => stop.abort(), 10);
+    await expect(
+      waitFor(server.send, { waitMs: 60_000, signal: stop.signal }),
+    ).resolves.toMatchObject(stillWaiting);
+    expect(server.withdrawn).toHaveLength(1);
+  });
+
+  test("with waitMs 0 leaves it open for a person to decide later", async () => {
+    const server = undecided(closed);
+    await expect(waitFor(server.send, { waitMs: 0 })).resolves.toMatchObject(
+      stillWaiting,
+    );
+    expect(server.withdrawn).toEqual([]);
+  });
+
+  test.each([
+    ["is refused", () => Promise.resolve(new Response("{}", { status: 503 }))],
+    ["fails", () => Promise.reject(new TypeError("network"))],
+    [
+      "answers nonsense",
+      () => Promise.resolve(new Response(JSON.stringify({ code: "ALLOW" }))),
+    ],
+  ])("the same block when taking it back %s", async (_label, withdraw) => {
+    const server = undecided(withdraw);
+    await expect(waitFor(server.send, { waitMs: 20 })).resolves.toEqual({
+      ...stillWaiting,
+      reason: null,
+    });
+    expect(server.withdrawn).toHaveLength(1);
+  });
+
+  test("never waits long on taking it back", async () => {
+    const send = vi.fn(
+      (_url: string, init: RequestInit) =>
+        new Promise<Response>((_done, fail) =>
+          init.signal?.addEventListener("abort", () => fail(new Error("late"))),
+        ),
+    ) as unknown as typeof fetch;
+    const client = new NodrailClient({
+      url: "https://x",
+      credential: "c",
+      fetch: send,
+    });
+    const startedAt = Date.now();
+    await expect(client.withdraw(ACTION, { timeoutMs: 20 })).rejects.toThrow();
+    expect(Date.now() - startedAt).toBeLessThan(1000);
+  });
+});
+
 describe("digests", () => {
   test("ignore key order", () => {
     const one = { ...descriptor, params: { a: 1, b: [1, 2] } };

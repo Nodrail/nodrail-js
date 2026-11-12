@@ -5,11 +5,13 @@
 
 /**
  * Everything except tools that only read or organise, so new tools are governed
- * by default. Without onFailure, Claude Code treats a crashed or timed-out hook
- * as no objection and runs the tool.
+ * by default. Starting a subagent (`Agent`, or `Task` in older Claude Code) is
+ * governed: a gate can hold it.
+ * Without onFailure, Claude Code treats a crashed or timed-out hook as no
+ * objection and runs the tool.
  */
 export const governedTools =
-  "^(?!(Read|Glob|Grep|LS|TodoWrite|TodoRead|AskUserQuestion|Agent|Task|ToolSearch|ExitPlanMode|EnterPlanMode)$).*$";
+  "^(?!(Read|Glob|Grep|LS|TodoWrite|TodoRead|AskUserQuestion|ToolSearch|ExitPlanMode|EnterPlanMode)$).*$";
 
 /**
  * Tools that only read. They aren't sent to Nodrail, but the hook checks them
@@ -20,6 +22,9 @@ const localReadMatcher = `^(${localReadTools.join("|")})$`;
 
 /** A read is checked on the machine, so this needs no time for a person. */
 const READ_TIMEOUT_SECONDS = 30;
+
+/** Recording a step never waits for a person. */
+const STEP_TIMEOUT_SECONDS = 30;
 
 /** Codex's matcher has no lookahead, so here the governed tools are named. */
 export const codexGovernedTools = "^(Bash|apply_patch|mcp__.*)$";
@@ -46,6 +51,9 @@ export function claudeCodeHooks(run: Command) {
     ],
     PostToolUse: [report],
     PostToolUseFailure: [report],
+    // Subagents starting and stopping are the steps of a run.
+    SubagentStart: [{ hooks: [{ ...hook, timeout: STEP_TIMEOUT_SECONDS }] }],
+    SubagentStop: [{ hooks: [{ ...hook, timeout: STEP_TIMEOUT_SECONDS }] }],
   };
 }
 

@@ -14,6 +14,7 @@ export function fakeNodrail(
 ) {
   const actions = new Map<string, Stored>();
   const reports: { outcome: string; descriptor: ActionDescriptor }[] = [];
+  const requests: { path: string; body: Record<string, unknown> }[] = [];
   let count = 0;
 
   const status = (action: Stored) => {
@@ -38,7 +39,9 @@ export function fakeNodrail(
       : {};
     const json = (value: unknown) =>
       new Response(JSON.stringify(value), { status: 200 });
+    requests.push({ path, body });
     if (path === "/heartbeat") return json({ ok: true });
+    if (path === "/steps") return json({ recorded: true });
     if (path === "/actions") {
       count += 1;
       const { tool, operation, resource, params } = body;
@@ -72,6 +75,10 @@ export function fakeNodrail(
         expires_at: new Date(issued.getTime() + 30_000).toISOString(),
       });
     }
+    if (verb === "withdraw") {
+      if (action.code !== "READY") action.code = "INVALIDATED";
+      return json(status(action));
+    }
     if (verb === "reports") {
       reports.push({
         outcome: body.outcome as string,
@@ -85,6 +92,7 @@ export function fakeNodrail(
   return {
     fetch: send,
     reports,
+    requests,
     seen: () => [...actions.values()].map((action) => action.descriptor),
   };
 }
