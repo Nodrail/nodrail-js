@@ -1,5 +1,20 @@
 import { SECRET_PAIRS, SECRET_PLACES } from "./secrets.ts";
 
+/**
+ * Commands that only look at things, allowed with any arguments. Not git diff
+ * or git show: given a path or a revision they print any file, secrets
+ * included. Runs use these too: running one is not a change.
+ */
+export const LOOKING_COMMANDS = ["cd", "ls", "git status", "git log"] as const;
+
+/** Commands that only look at things, allowed exactly as written. */
+export const EXACT_LOOKING_COMMANDS = [
+  "pwd",
+  "git branch",
+  "git diff",
+  "git diff --staged",
+] as const;
+
 // Quoted: *.pem would otherwise read as a YAML alias.
 const yamlList = (items: readonly string[]) =>
   items.map((item) => `    - ${JSON.stringify(item)}`).join("\n");
@@ -70,18 +85,28 @@ ${pairRules}
 # Commands that only look at things. Not git diff or git show: given a path or
 # a revision they print any file, secrets included.
 - list: looking_commands
-  items: [cd, ls, git status, git log]
+  items: [${LOOKING_COMMANDS.join(", ")}]
 
 - rule: Look around
   command: { list: looking_commands, match: prefix }
   effect: allow
 
 - list: exact_looking_commands
-  items: [pwd, git branch, git diff, git diff --staged]
+  items: [${EXACT_LOOKING_COMMANDS.join(", ")}]
 
 - rule: Where am I
   command: { list: exact_looking_commands }
   effect: allow
+
+# Nodrail's own commands. Run by hand, the hook could write a step or a verdict
+# into the run ledger, so they are for you, not the agent. Starting the plugin
+# hook through node or npx runs another program, which no rule here allows.
+- list: nodrail_commands
+  items: [nodrail-policy, nodrail-claude-hook]
+
+- rule: Never run Nodrail itself
+  command: { list: nodrail_commands, match: prefix }
+  effect: deny
 
 # Claude Code's own tools that only plan or talk to the person.
 - rule: Keep a task list
@@ -106,6 +131,14 @@ ${pairRules}
   tool: claude-code
   operation: exitplanmode
   resource: { kind: tool, match: any }
+  effect: allow
+
+# Starting a subagent. What the subagent then does is decided call by call,
+# like the main agent. Narrow this to the types you use, or gate one.
+- rule: Start subagents
+  tool: claude-code
+  operation: agent
+  resource: { kind: agent, match: any }
   effect: allow
 `;
 
@@ -177,6 +210,7 @@ const repoWorkRules = `
     - justfile
     - Taskfile.yml
     - node_modules
+    - .npmrc
 
 - rule: A person reviews script writes
   tool: files

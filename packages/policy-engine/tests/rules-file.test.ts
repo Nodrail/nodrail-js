@@ -506,7 +506,11 @@ describe("reporting problems", () => {
   effect: deny
 `),
     );
-    expect(issues.map((issue) => issue.line)).toEqual([1, 6]);
+    // Each at the value that is wrong: effect: maybe, tool: BAD TOOL.
+    expect(issues.map(({ line, column }) => [line, column])).toEqual([
+      [5, 11],
+      [7, 9],
+    ]);
     expect(issues[0]?.message).toContain('Rule "One" effect');
   });
 
@@ -596,6 +600,172 @@ describe("the same engine", () => {
         call("refunds.create", "I", { amount: "5", currency: "USD" }),
       ),
     ).toBe("require_approval");
+  });
+});
+
+describe("where problems are reported", () => {
+  /** Each problem as file:line:column, then its message. */
+  const places = (...texts: string[]) =>
+    issuesOf(compile(...texts)).map(({ file, line, column, message }) => [
+      `${file}:${line}:${column}`,
+      message,
+    ]);
+  const at = (place: string, message: string) => [
+    place,
+    expect.stringContaining(message),
+  ];
+
+  const rule = (extra: string) => `- rule: One
+  tool: stripe
+  operation: refunds.create
+  resource: { kind: invoice, match: any }
+  effect: allow
+${extra}`;
+
+  test("an unknown key in a rule is at that key", () => {
+    expect(places(rule("  efect: allow\n"))).toEqual([
+      at("f0.yaml:6:3", '"efect"'),
+    ]);
+  });
+
+  test("an unknown key inside a field is at that key", () => {
+    const gate = `- list: reviewers
+  items: [qa]
+- gate: Review
+  tool: stripe
+  operation: refunds.create
+  resource: { kind: invoice, match: any }
+  requires:
+    - agent: qa
+      verdict: pass
+      sinse: { list: reviewers }
+  otherwise: deny
+`;
+    expect(places(gate)).toEqual([at("f0.yaml:10:7", '"sinse"')]);
+  });
+
+  test("a bad enum value is at the value", () => {
+    expect(
+      places(`- budget: Calls
+  per: forever
+  tool_calls: 10
+  otherwise: deny
+`),
+    ).toEqual([at("f0.yaml:2:8", "per:")]);
+    // A field of several shapes fits none of them, so the field's value.
+    expect(
+      places(`- rule: One
+  command:
+    list: safe
+    match: sometimes
+  effect: allow
+`),
+    ).toEqual([at("f0.yaml:3:5", "command:")]);
+  });
+
+  test("a bad value inside requires is at that value", () => {
+    const gate = (verdict: string) => `- gate: Review
+  tool: stripe
+  operation: refunds.create
+  resource: { kind: invoice, match: any }
+  requires:
+    - agent: qa
+      verdict: ${verdict}
+  otherwise: deny
+`;
+    // One the file's schema refuses, and one only the compiled document does.
+    expect(places(gate("[]"))).toEqual([
+      at("f0.yaml:7:16", "requires.0.verdict"),
+    ]);
+    expect(places(gate("[pass, BAD VERDICT]"))).toEqual([
+      at("f0.yaml:7:23", 'Gate "Review" requires.0.verdicts.1'),
+    ]);
+  });
+
+  test("a duplicate is at the later entry's name", () => {
+    expect(places(rule(""), `# again\n${rule("")}`)).toEqual([
+      at("f1.yaml:2:9", 'rule "One" is already defined at f0.yaml:1'),
+    ]);
+  });
+
+  test("a duplicate id is at the id", () => {
+    const named = (name: string) => `- rule: ${name}
+  id: same
+  command: ls
+  effect: allow
+`;
+    expect(places(named("One") + named("Two"))).toEqual([
+      at("f0.yaml:6:7", 'Rule "Two" id'),
+    ]);
+  });
+
+  test("compile problems are at the field they concern", () => {
+    expect(
+      places(`- gate: Review
+  command: ls
+  requires:
+    - { agent: qa, verdict: pass, since: { list: missing } }
+  otherwise: deny
+- required_engine_version: 99
+`),
+    ).toEqual([
+      at("f0.yaml:6:28", "engine version 99"),
+      at("f0.yaml:4:50", 'Unknown list "missing"'),
+    ]);
+    expect(
+      places(`- rule: Start subagents
+  tool: claude-code
+  operation: agent
+  resource: { kind: tool, match: any }
+  effect: allow
+`),
+    ).toEqual([at("f0.yaml:4:13", "resource kind agent")]);
+  });
+
+  test("an override is checked where it was written", () => {
+    expect(
+      places(
+        rule(""),
+        `- rule: One
+  override: { tags: append }
+  effect: deny
+`,
+      ),
+    ).toEqual([
+      at("f1.yaml:2:15", 'override names "tags"'),
+      at("f1.yaml:3:3", '"effect" is set but not named'),
+    ]);
+  });
+
+  test("an appended condition is where the later file wrote it", () => {
+    expect(
+      places(
+        rule("  condition:\n    - { field: amount, op: gt, value: 1 }\n"),
+        `- rule: One
+  override: { condition: append }
+  condition:
+    - macro: missing
+`,
+      ),
+    ).toEqual([at("f1.yaml:4:7", 'Unknown macro "missing"')]);
+  });
+
+  test("what can't be found is at the entry", () => {
+    // A missing key has no place of its own, so the entry stands in.
+    expect(places("- list: empty\n")).toEqual([at("f0.yaml:1:3", "items:")]);
+    expect(places("- rule: Lonely\n  tool: x\n")).toEqual([
+      at("f0.yaml:1:3", 'Rule "Lonely" needs operation'),
+    ]);
+  });
+
+  test("a problem carries only its place and message", () => {
+    const [issue] = issuesOf(compile(`${rule("")}${rule("")}`));
+    expect(Object.keys(issue ?? {}).sort()).toEqual([
+      "column",
+      "file",
+      "line",
+      "message",
+    ]);
   });
 });
 

@@ -4,6 +4,7 @@ import {
   type CommandShape,
 } from "./commands.ts";
 import { fingerprint } from "./protocol.ts";
+import { agentName } from "./names.ts";
 import {
   bounded,
   MAX_INLINE_INPUT,
@@ -331,6 +332,23 @@ function otherToolCall(
   };
 }
 
+/**
+ * Starting a subagent. The resource is its type, named as runs name agents,
+ * so a rule or gate can tell starting `qa` from starting `github`. Claude Code
+ * starts a general-purpose agent when no type is given.
+ */
+function subagentCall(input: ToolInput): ActionDescriptor {
+  const name = agentName(
+    nonEmptyText(input.subagent_type) ?? "general-purpose",
+  );
+  return {
+    tool: "claude-code",
+    operation: "agent",
+    resource: { kind: "agent", id: name },
+    params: { subagent_type: name, input_sha256: fingerprint(input) },
+  };
+}
+
 const whatIsWritten = (input: ToolInput) => input.content;
 const wholeInput = (input: ToolInput) => input;
 
@@ -343,6 +361,9 @@ type Describe = (
 // A Map, so a tool named like an Object property finds nothing.
 const describers = new Map<string, Describe>([
   ["Bash", (input, _cwd, name) => shellCall(name, input)],
+  ["Agent", (input) => subagentCall(input)],
+  // Claude Code's earlier name for Agent, with the same subagent_type.
+  ["Task", (input) => subagentCall(input)],
   ["PowerShell", (input, _cwd, name) => shellCall(name, input)],
   [
     "Write",

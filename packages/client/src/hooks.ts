@@ -7,6 +7,11 @@ import {
   type HookResult,
   type ToolInput as Input,
 } from "@nodrail/policy-engine/actions";
+import {
+  agentName,
+  receiptBlock,
+  runKey,
+} from "@nodrail/policy-engine/hook-runs";
 import { blockedText } from "./blocked-text.ts";
 import {
   resolveConnection,
@@ -14,7 +19,14 @@ import {
   type Environment,
 } from "./connection.ts";
 import { localReadTools } from "./setup.ts";
-import { authorize, NodrailClient, type Decision } from "./index.ts";
+import {
+  authorize,
+  NodrailClient,
+  WITHDRAW_TIMEOUT_MS,
+  type Decision,
+  type RunRef,
+  type StepEvent,
+} from "./index.ts";
 
 export {
   describeToolCall,
@@ -22,9 +34,12 @@ export {
   type HookResult,
 } from "@nodrail/policy-engine/actions";
 
-export const HOOK_VERSION = "0.1.5";
+export const HOOK_VERSION = "0.2.0";
 
-/** Longer than the wait for a person, shorter than the hook's own time limit. */
+/**
+ * Longer than the wait for a person, and short enough that withdrawing the
+ * request still fits in the hook's own time limit.
+ */
 const HOOK_DEADLINE_MS = 345_000;
 
 export type AgentKind = "claude-code" | "codex";
@@ -56,7 +71,37 @@ type HookEvent = {
   duration_ms?: unknown;
   is_interrupt?: unknown;
   tool_response?: unknown;
+  session_id?: unknown;
+  agent_id?: unknown;
+  agent_type?: unknown;
+  last_assistant_message?: unknown;
 };
+
+/** The step taking a call, from the subagent fields Claude Code adds. */
+function stepOf(event: HookEvent) {
+  const id = text(event.agent_id);
+  if (!id) return undefined;
+  return {
+    id: id.slice(0, 200),
+    agent: agentName(text(event.agent_type) ?? "unnamed"),
+  };
+}
+
+/**
+ * The run a call belongs to: NODRAIL_RUN, else the key pinned to the session
+ * (`<repo>/<branch>`, or `session:<id>` on the default branch), the same rule
+ * the local ledger uses. Without one, no run is sent.
+ */
+function runOf(event: HookEvent, env: Environment): RunRef | undefined {
+  const key = runKey(
+    text(event.cwd) ?? process.cwd(),
+    text(event.session_id),
+    env,
+  );
+  if (!key) return undefined;
+  const step = stepOf(event);
+  return step ? { key, step } : { key };
+}
 
 const readTools = new Set<string>(localReadTools);
 
@@ -78,6 +123,46 @@ function checkReadLocally(name: string, event: HookEvent): HookResult {
       "Nodrail: this reads a place where credentials live, so it is blocked.",
     );
   return { exitCode: 0, stdout: "", stderr: "" };
+}
+
+const timedOut: Decision = {
+  allowed: false,
+  code: "TIMED_OUT",
+  reason: null,
+  reference: null,
+};
+
+/** The first to settle, or null once `ms` has passed. */
+async function within<T>(work: Promise<T>, ms: number): Promise<T | null> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      work,
+      new Promise<null>((done) => {
+        timer = setTimeout(() => done(null), ms);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Codex runs the tool if a hook times out, so this always answers first. At
+ * the deadline the wait stops, and the request gets a moment to be withdrawn
+ * before the answer, which is a block whatever happens meanwhile.
+ */
+async function decideInTime(
+  ask: (signal: AbortSignal) => Promise<Decision>,
+  deadlineMs: number,
+): Promise<Decision> {
+  const stop = new AbortController();
+  const asked = ask(stop.signal);
+  const answer = await within(asked, deadlineMs);
+  if (answer) return answer;
+  stop.abort();
+  await within(asked, WITHDRAW_TIMEOUT_MS + 500);
+  return timedOut;
 }
 
 async function beforeTool(
@@ -111,27 +196,16 @@ async function beforeTool(
       "Nodrail: this call could not be described for review, so it is blocked.",
     );
 
-  // Codex runs the tool if a hook times out, so this always answers first.
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const decision = await Promise.race([
-    authorize(client, descriptor, key, {
-      waitMs: waitMsFrom(env),
-      sleep: deps.sleep,
-    }),
-    new Promise<Decision>((done) => {
-      timer = setTimeout(
-        () =>
-          done({
-            allowed: false,
-            code: "TIMED_OUT",
-            reason: null,
-            reference: null,
-          }),
-        deps.deadlineMs ?? HOOK_DEADLINE_MS,
-      );
-    }),
-  ]);
-  clearTimeout(timer);
+  const decision = await decideInTime(
+    (signal) =>
+      authorize(client, descriptor, key, {
+        waitMs: waitMsFrom(env),
+        sleep: deps.sleep,
+        run: runOf(event, env),
+        signal,
+      }),
+    deps.deadlineMs ?? HOOK_DEADLINE_MS,
+  );
   // Staying silent hands back to the agent's own permissions: a Nodrail allow
   // can only ever narrow what the agent may do, never widen it.
   return decision.allowed ? allowQuietly : deny(blockedText(decision));
@@ -173,6 +247,35 @@ async function afterTool(
     });
   } catch {
     // A report is optional; losing one must not disturb the agent.
+  }
+  return allowQuietly;
+}
+
+/**
+ * A subagent starting or stopping is a step of the run. Recording never
+ * blocks the agent: a step that wasn't recorded has no verdict, so a gate
+ * that needs it stays closed.
+ */
+async function onStep(
+  event: HookEvent,
+  env: Environment,
+  deps: HookDeps,
+): Promise<HookResult> {
+  const client = clientFrom(env, deps);
+  const run = runOf(event, env);
+  const step = run?.step;
+  if (!client || !run || !step) return allowQuietly;
+  const body: StepEvent = { run: { key: run.key }, step, event: "started" };
+  if (event.hook_event_name === "SubagentStop") {
+    // Read from the end of the message only; a block over 8 KB is no receipt.
+    const block = receiptBlock(text(event.last_assistant_message) ?? "");
+    body.event = "finished";
+    if (block) body.receipt = { text: block };
+  }
+  try {
+    await client.step(body);
+  } catch {
+    // Without a record the step has no verdict; nothing else changes.
   }
   return allowQuietly;
 }
@@ -223,6 +326,9 @@ export async function runHook(
       return afterTool(event, env, deps);
     case "SessionStart":
       return onSessionStart(env, deps);
+    case "SubagentStart":
+    case "SubagentStop":
+      return onStep(event, env, deps);
     default:
       return deny(
         "Nodrail: unsupported hook event, so this action is blocked.",

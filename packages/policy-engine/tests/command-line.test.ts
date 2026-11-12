@@ -4,21 +4,7 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test } from "vitest";
-import { runCli, type Io } from "../src/command-line.ts";
-
-async function cli(args: string[], stdin = "") {
-  const out: string[] = [];
-  const err: string[] = [];
-  const io: Io = {
-    log: (text) => out.push(`${text}\n`),
-    error: (text) => err.push(`${text}\n`),
-    write: (text) => out.push(text),
-    writeError: (text) => err.push(text),
-    readStdin: async () => stdin,
-  };
-  const code = await runCli(args, io);
-  return { code, stdout: out.join(""), stderr: err.join("") };
-}
+import { cli } from "./run-cli.ts";
 
 const folder = mkdtempSync(join(tmpdir(), "nodrail-cli-"));
 const write = (name: string, text: string) => {
@@ -89,8 +75,30 @@ describe("validate and compile", () => {
     const result = await cli(["validate", rules]);
     expect(result).toMatchObject({
       code: 0,
-      stdout: expect.stringMatching(/^OK: \d+ rules\./) as string,
+      stdout: expect.stringMatching(/^OK, compiled to \d+ rules\./) as string,
     });
+  });
+
+  test("gates and budgets are counted next to rules, as compiled", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "nodrail-cli-runs-"));
+    writeFileSync(
+      join(dir, "a.yaml"),
+      [
+        "- required_engine_version: 3",
+        "- gate: Review first",
+        "  command: { prefix: git push }",
+        "  requires: [{ agent: reviewer, verdict: ship }]",
+        "  otherwise: deny",
+        "- budget: Run calls",
+        "  per: run",
+        "  tool_calls: 10",
+        "  otherwise: deny",
+        "",
+      ].join("\n"),
+    );
+    expect((await cli(["validate", dir])).stdout).toContain(
+      "OK, compiled to 0 rules, 2 gates and 1 budget.",
+    );
   });
 
   test("a folder loads only its YAML files", async () => {
@@ -100,7 +108,9 @@ describe("validate and compile", () => {
       "- rule: A\n  command: ls\n  effect: allow\n",
     );
     writeFileSync(join(dir, "notes.txt"), "not rules");
-    expect((await cli(["validate", dir])).stdout).toContain("OK: 1 rules");
+    expect((await cli(["validate", dir])).stdout).toContain(
+      "OK, compiled to 1 rule.",
+    );
   });
 
   test("problems are reported by file and line, and exit 1", async () => {

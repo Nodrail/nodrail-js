@@ -12,6 +12,7 @@ import {
   type ActionDescriptor,
   type Decision,
 } from "./index.ts";
+import { Runs, type StepOptions } from "./runs.ts";
 import {
   adapterFor,
   canRun,
@@ -23,7 +24,7 @@ import {
   type ToolHooks,
 } from "./tool-shapes.ts";
 
-export const SDK_VERSION = "0.1.5";
+export const SDK_VERSION = "0.2.0";
 
 type Blocked = Extract<Decision, { allowed: false }>;
 
@@ -39,71 +40,23 @@ export class NodrailBlockedError extends Error {
   }
 }
 
-/** The shorthand accepted everywhere an action is described. */
-export type ActionInput = {
-  tool: string;
-  operation: string;
-  /** "acme/app", or a kind and id when rules need to tell kinds apart. */
-  resource?: string | { kind: string; id: string };
-  params?: Record<string, unknown>;
-};
-
-export type OnBlocked =
-  "return" | "throw" | ((error: NodrailBlockedError) => unknown);
-
-/** Lets a tool name what it acts on, so rules can match that and not just its name. */
-export type Describe = (
-  input: unknown,
-  name: string,
-) => Partial<ActionInput> | undefined;
-
-type AnyFunction = (...args: never[]) => unknown;
-
-/**
- * A guarded plain function has to ask first, so it always returns a promise.
- * Async generators stay generators, and framework tools keep their own type.
- */
-export type GuardedFunction<F> = F extends (...args: infer A) => infer R
-  ? [R] extends [AsyncIterable<unknown>]
-    ? F
-    : (...args: A) => Promise<Awaited<R>>
-  : F;
-
-/** What `guard` returns for each kind of input. */
-export type Guarded<T> = T extends AnyFunction
-  ? GuardedFunction<T>
-  : T extends readonly (infer Item)[]
-    ? Item extends AnyFunction
-      ? GuardedFunction<Item>[]
-      : T
-    : T extends Record<string, unknown>
-      ? T[keyof T] extends AnyFunction
-        ? { [Name in keyof T]: GuardedFunction<T[Name]> }
-        : T
-      : T;
-
-export type GuardOptions = {
-  /** What a blocked tool does. By default the agent reads why as the result. */
-  onBlocked?: OnBlocked;
-  /** One function for every tool, or one per tool name. */
-  describe?: Describe | Record<string, Describe>;
-  /** Names a bare function. Otherwise its own name is used. */
-  name?: string;
-  waitMs?: number;
-};
-
-export type NodrailOptions = {
-  url?: string;
-  credential?: string;
-  /** Shown on the agent's page in Nodrail. */
-  adapterVersion?: string;
-  /** How long a call waits for a person. Default 5 minutes. */
-  waitMs?: number;
-  onBlocked?: OnBlocked;
-  env?: Environment;
-  fetch?: typeof fetch;
-  sleep?: (ms: number) => Promise<void>;
-};
+export type {
+  ActionInput,
+  Describe,
+  Guarded,
+  GuardedFunction,
+  GuardOptions,
+  NodrailOptions,
+  OnBlocked,
+} from "./sdk-types.ts";
+import type {
+  ActionInput,
+  Describe,
+  Guarded,
+  GuardOptions,
+  NodrailOptions,
+  OnBlocked,
+} from "./sdk-types.ts";
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
@@ -134,6 +87,7 @@ export class Nodrail {
   private readonly env: Environment;
   private readonly onBlocked: OnBlocked;
   private readonly sleep: NodrailOptions["sleep"];
+  private readonly runs: Runs;
 
   constructor(options: NodrailOptions = {}) {
     this.options = options;
@@ -141,6 +95,27 @@ export class Nodrail {
     this.client = this.connect();
     this.onBlocked = options.onBlocked ?? "return";
     this.sleep = options.sleep;
+    this.runs = new Runs(
+      () => (this.client ??= this.connect()),
+      options.run?.trim() || this.env.NODRAIL_RUN?.trim() || undefined,
+    );
+  }
+
+  /** Runs `work` as part of the run `key`: its steps and calls belong to it. */
+  inRun<T>(key: string, work: () => T): T {
+    return this.runs.inRun(key, work);
+  }
+
+  /**
+   * Runs `work` as one step of `agent` in the current run, and records how it
+   * ended: a result that is, or ends with, a receipt gives the step its verdict.
+   */
+  step<T>(
+    agent: string,
+    work: () => T | Promise<T>,
+    options?: StepOptions<T>,
+  ): Promise<T> {
+    return this.runs.step(agent, work, options);
   }
 
   /**
@@ -177,6 +152,7 @@ export class Nodrail {
     return authorize(this.client, descriptor, randomUUID(), {
       waitMs,
       sleep: this.sleep,
+      run: this.runs.current(),
     });
   }
 

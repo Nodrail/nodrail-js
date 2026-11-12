@@ -1,6 +1,12 @@
 // Installs the real tarballs in an empty folder outside the monorepo and uses them.
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -168,6 +174,16 @@ export const wrong: string = guard((n: number) => String(n), { name: "f" })(1);
     fail(
       `the installed hook did not block: ${unconfigured.stdout}${unconfigured.stderr}`,
     );
+
+  // Runs on every tool call, so it carries no schema or YAML library.
+  const bundled = readFileSync(
+    join(folder, "node_modules/@nodrail/client/dist/nodrail-hook.mjs"),
+    "utf8",
+  );
+  if (Buffer.byteLength(bundled) > 80_000)
+    fail(`the hook grew to ${Buffer.byteLength(bundled)} bytes`);
+  for (const marker of ["ZodError", "YAMLParseError"])
+    if (bundled.includes(marker)) fail(`the hook bundles ${marker}`);
 
   console.log("Package check passed: installed and used outside the monorepo.");
 } finally {

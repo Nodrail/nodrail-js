@@ -164,6 +164,10 @@ describe("policy document simulation", () => {
       matchedRuleId: "deny-rule",
       reason: "explicit_rule",
       explanation: "Matched deny-rule with effect deny.",
+      // A version 1 document has no gates or budgets to report.
+      gates: [],
+      budgets: [],
+      warnings: [],
     });
     expect("permit_id" in result).toBe(false);
   });
