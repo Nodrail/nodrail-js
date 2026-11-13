@@ -1,0 +1,7 @@
+- required_engine_version: 2
+- rule: Inspect the working tree
+  command: git status
+  effect: allow
+- rule: Protect untracked files
+  command: git clean -fd
+  effect: deny

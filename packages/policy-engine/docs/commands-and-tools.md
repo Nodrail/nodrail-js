@@ -20,7 +20,7 @@ Every call is described as a tool, an operation and a resource, and rules match 
 | Starting a Claude Code subagent (`Agent`, or `Task`)       | `claude-code` | `agent`                    | `agent`, id the subagent's type |
 | Any other Claude Code tool                                 | `claude-code` | tool name, lowercase       | `tool`          |
 
-The subagent's type is named the way runs name agents, so `vercel:deployment-expert` is `vercel-deployment-expert`. Rules written before engine level 3 described this call as resource `{ kind: tool, id: Agent }`; a rules file with such a rule is now refused: see [Upgrading rules for subagents](runs.md#upgrading-rules-for-subagents).
+The subagent's type is named the way runs name agents, so `vercel:deployment-expert` is `vercel-deployment-expert`. Rules written before engine level 3 described this call as resource `{ kind: tool, id: Agent }`; a rules file with such a rule is now refused: see [Upgrading rules for subagents (preview)](runs.md#upgrading-rules-for-subagents).
 
 ## Command rules
 

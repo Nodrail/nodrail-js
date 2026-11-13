@@ -1,8 +1,8 @@
 # @nodrail/client
 
-Checks with Nodrail before an agent runs a governed action. Anything other than a
-fresh, exact allow blocks the call. A timeout, an error or an unknown answer all
-mean the action does not run.
+Connect your agent’s tools to Nodrail Cloud for shared policies, approvals and decision history. A wrapped tool runs only after the client receives a fresh allow for the exact call. A denied request, a timeout or an invalid response blocks that invocation.
+
+For local YAML policies, use the [APF policy engine](https://github.com/Nodrail/nodrail-js/tree/main/packages/policy-engine).
 
 **Developer preview:** the API may still change before 1.0. Licensed under
 [Apache-2.0](https://github.com/Nodrail/nodrail-js/blob/main/LICENSE). Report
@@ -208,6 +208,8 @@ type `tool` with the id `<tool>.<operation>`, such as `github.issues.delete`. `r
 `params` exactly as you pass them, with no redaction: keep secrets out of them.
 
 ### Runs and steps, for any framework
+
+**SDK walkthrough preview.** The examples below require a client build that provides `inRun` and `step`. Check your installed client before following the run-history setup.
 
 Gates and budgets decide with what already happened in a piece of work: hold
 the pull request until QA passed after the last change, or limit how many tool

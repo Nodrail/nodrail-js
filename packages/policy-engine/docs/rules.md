@@ -2,7 +2,9 @@
 
 This page is the reference for rule files: every field a rule can have, how resources and conditions match, and how files layer.
 
-A rules file is a YAML list of `rule`, `list` and `macro` entries, plus `gate` and `budget` entries, which are described in [Runs, gates and budgets](runs.md). A `required_engine_version` entry says which engine level the file needs. Several files can be loaded in order, and later ones can change earlier ones.
+A rules file is a YAML list of `rule`, `list` and `macro` entries, plus `gate` and `budget` entries, which are described in [Runs, gates and budgets (preview)](runs.md). A `required_engine_version` entry says which engine level the file needs. Several files can be loaded in order, and later ones can change earlier ones.
+
+> **Level 3 preview.** Gates and budgets use run history supplied by the integration. The local quickstart uses level-2 rules and works with the public 0.1.5 engine.
 
 ```yaml
 - required_engine_version: 1
@@ -140,6 +142,6 @@ Conditions are structured YAML rather than an expression language, which makes t
 
 ## Limits
 
-500 compiled rules, 20 conditions per rule, 1 MB per file. YAML aliases are limited, and duplicate keys are errors. Gates and budgets have [their own limits](runs.md#limits).
+500 compiled rules, 20 conditions per rule, 1 MB per file. YAML aliases are limited, and duplicate keys are errors. Gates and budgets have [their own limits (preview)](runs.md#limits).
 
-Files declare the engine level they need with `required_engine_version`. A file that needs a newer engine is refused. Level 1 is the base format, level 2 adds `contains` with a list, and level 3 adds gates and budgets and describes starting a subagent as an `agent` resource. See [Versions](runs.md#versions) for how this relates to the compiled document's version.
+Files declare the engine level they need with `required_engine_version`. A file that needs a newer engine is refused. Level 1 is the base format, level 2 adds `contains` with a list, and level 3 adds gates and budgets and describes starting a subagent as an `agent` resource. See [Versions (preview)](runs.md#versions) for how this relates to the compiled document's version.
