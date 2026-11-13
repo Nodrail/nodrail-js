@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.2.1
+
+Package metadata and documentation only; the engine, CLI and hook behave
+as in 0.2.0.
+
+- npm description: "Compile, test and evaluate Agent Policy Format (APF)
+  rules locally. Includes the CLI, TypeScript evaluator and local Claude Code
+  hook." Keywords add `apf` and `agent-policy-format`.
+- The quickstart starts in an empty folder with a two-rule policy, three
+  proposed commands (allow, deny, none) and three CI cases.
+- Gates, budgets and the `runs` command are marked as preview and name the
+  engine release that has them.
+
 ## 0.2.0
 
 Gates, budgets and receipts. Engine level 3.

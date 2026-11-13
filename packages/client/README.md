@@ -209,7 +209,7 @@ type `tool` with the id `<tool>.<operation>`, such as `github.issues.delete`. `r
 
 ### Runs and steps, for any framework
 
-**SDK walkthrough preview.** The examples below require a client build that provides `inRun` and `step`. Check your installed client before following the run-history setup.
+**SDK walkthrough preview.** The examples below require client 0.2.0 or later, which provides `inRun` and `step`.
 
 Gates and budgets decide with what already happened in a piece of work: hold
 the pull request until QA passed after the last change, or limit how many tool

@@ -1,6 +1,6 @@
 # Runs, gates and budgets
 
-> **Preview reference.** Gates and budgets require APF engine feature level 3. The public 0.1.5 CLI supports the local policy quickstart. It does not include the run-history commands shown here.
+> **Preview reference.** Gates and budgets require APF engine feature level 3, which engine 0.2.0 and later support. The local policy quickstart works without them.
 
 This page covers gates, budgets and receipts: rules that depend on what already happened in a piece of work, how the Claude Code hook records that history, and how to test it.
 

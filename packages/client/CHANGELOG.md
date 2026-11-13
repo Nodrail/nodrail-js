@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.2.1
+
+Package metadata and documentation only; the client and its hook behave
+as in 0.2.0.
+
+- npm description: "TypeScript client for Nodrail Cloud. Check supported tool
+  calls against workspace policies and coordinate human approvals." Keywords
+  add `tool-permissions`.
+- The run-history walkthrough is marked as preview and names the client
+  release that has `inRun` and `step`.
+
 ## 0.2.0
 
 Runs and steps for any agent framework, so gates and budgets work outside

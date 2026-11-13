@@ -8,16 +8,17 @@ nodrail-policy <command> <rules file or folder>...
 
 Files load in the order given. A folder loads its `.yaml` and `.yml` files by name. Use `nodrail-policy --help` and `nodrail-policy --version`.
 
-| Command                             | What it does                                                | Exit code                                     |
-| ----------------------------------- | ----------------------------------------------------------- | --------------------------------------------- |
-| `init <pack>`                       | Prints a starter file: `read-only` or `repo-work`           | 0, or 2 for an unknown pack                   |
-| `validate <rules>`                  | Reports every problem by file and line                      | 0 valid, 1 invalid                            |
-| `compile <rules>`                   | Prints the compiled policy as JSON                          | 0, or 1 if invalid                            |
-| `eval <rules>`                      | Evaluates one call and prints the result                    | 0 whatever the outcome                        |
-| `test <rules> --cases <file>`       | Checks expected outcomes                                    | 0 all passed, 1 otherwise                     |
-| `check <rules> -- <program> [args]` | Answers whether this may run                                | 0 allowed, 1 otherwise                        |
-| `exec <rules> -- <program> [args]`  | Runs it only if allowed                                     | The program's own, 126 blocked, 127 not found |
-| `hook <rules>`                      | Claude Code `PreToolUse` hook, reading the event from stdin | 0 answered, 2 if rules can't load             |
+| Command                               | What it does                                                | Exit code                                     |
+| ------------------------------------- | ----------------------------------------------------------- | --------------------------------------------- |
+| `init <pack>`                         | Prints a starter file: `read-only` or `repo-work`           | 0, or 2 for an unknown pack                   |
+| `validate <rules>`                    | Reports every problem by file and line                      | 0 valid, 1 invalid                            |
+| `compile <rules>`                     | Prints the compiled policy as JSON                          | 0, or 1 if invalid                            |
+| `eval <rules>`                        | Evaluates one call and prints the result                    | 0 whatever the outcome                        |
+| `test <rules> --cases <file>`         | Checks expected outcomes                                    | 0 all passed, 1 otherwise                     |
+| `check <rules> -- <program> [args]`   | Answers whether this may run                                | 0 allowed, 1 otherwise                        |
+| `exec <rules> -- <program> [args]`    | Runs it only if allowed                                     | The program's own, 126 blocked, 127 not found |
+| `hook <rules>`                        | Claude Code `PreToolUse` hook, reading the event from stdin | 0 answered, 2 if rules can't load             |
+| `runs [list \| show <run> \| report]` | What the run ledger recorded. Takes no rules                | 0, 1 for a run that isn't there               |
 
 Usage mistakes exit with 2.
 
@@ -48,7 +49,7 @@ The rule files and folders given to `hook` are protected: a file tool that would
 
 ## `runs`
 
-> **Preview command.** This section describes a CLI with run-history support. Version 0.1.5 has no `runs` command. Check `nodrail-policy --help` for the commands in your installation.
+> **Preview command.** `runs` needs version 0.2.0 or later. Check `nodrail-policy --help` for the commands in your installation.
 
 `runs` (or `runs list`) lists the runs in the ledger, `runs show <run>` prints one step by step, and `runs report` counts steps, verdicts and held actions per agent. It needs no rules file. It reads the ledger of the repository you are in, or the folder `NODRAIL_LEDGER` names. Runs on a branch are named `<repo>/<branch>`, such as `github.com/acme/app/feature/login`: see [Claude Code run history (preview)](runs.md#claude-code).
 
