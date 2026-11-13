@@ -1,7 +1,7 @@
 {
   "name": "@nodrail/client",
   "version": "0.2.0",
-  "description": "Check with Nodrail before an AI agent acts. Wrap the tools of LangChain, the Vercel AI SDK, OpenAI Agents or any agent in one line.",
+  "description": "TypeScript client for Nodrail Cloud. Check supported tool calls against workspace policies and coordinate human approvals.",
   "keywords": [
     "ai",
     "agents",
@@ -16,7 +16,8 @@
     "mcp",
     "claude-code",
     "codex",
-    "sdk"
+    "sdk",
+    "tool-permissions"
   ],
   "homepage": "https://github.com/Nodrail/nodrail-js/tree/main/packages/client#readme",
   "repository": {

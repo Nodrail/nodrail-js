@@ -1,0 +1,9 @@
+- name: Inspecting the working tree is allowed
+  call: { command: git status }
+  expect: allow
+- name: Cleaning untracked files is denied
+  call: { command: git clean -fd }
+  expect: deny
+- name: A command without a matching rule is undecided
+  call: { command: git log }
+  expect: none

@@ -1,64 +1,47 @@
-# Nodrail Policy Engine
+# Agent Policy Format (APF) policy engine
 
-**Decide what an AI agent may do before it does it.**
+Use `@nodrail/policy-engine` to compile YAML policies and evaluate the actions an AI agent proposes. The CLI, library and local Claude Code hook run without a server or account.
 
-Rules live in YAML in your repository. Before a shell command, file edit, web request or MCP tool call runs, the engine answers: allow it, deny it, or ask a person. Anything no rule covers is blocked.
+## Try a policy locally
 
-It runs on your machine with no server and no account. The same rule always gives the same answer.
-
-```yaml
-- rule: Safe git reads
-  command: { prefix: git status }
-  effect: allow
-
-- rule: A person reviews pushes
-  command: { prefix: git push }
-  effect: require_approval
-
-- rule: Never force push
-  command: { prefix: git push --force }
-  effect: deny
-
-- rule: Never read secrets
-  tool: files
-  operation: file.read
-  resource: { kind: file, match: any }
-  condition:
-    - { field: path_parts, op: contains, value: .env }
-  effect: deny
-```
-
-## Try it
-
-Needs Node 22 or later.
+Install the engine with Node.js 22 or later.
 
 ```sh
-npm install --global @nodrail/policy-engine
-
-nodrail-policy init repo-work > rules.yaml
-nodrail-policy eval rules.yaml --command "git push --force origin main"
+pnpm add --global @nodrail/policy-engine
 ```
 
-```json
-{
-  "outcome": "deny",
-  "matchedRuleId": "never-force-push-args",
-  "reason": "explicit_rule",
-  "explanation": "Matched never-force-push-args with effect deny.",
-  "gates": [],
-  "budgets": [],
-  "warnings": []
-}
+In an empty directory, save this as `rules.yaml`.
+
+```yaml
+- required_engine_version: 2
+- rule: Inspect the working tree
+  command: git status
+  effect: allow
+- rule: Protect untracked files
+  command: git clean -fd
+  effect: deny
 ```
 
-To put the rules in front of Claude Code, see [Getting started](docs/getting-started.md).
+```sh
+nodrail-policy validate rules.yaml
+nodrail-policy eval rules.yaml --command "git status"
+nodrail-policy eval rules.yaml --command "git clean -fd"
+```
+
+The two evaluations print `allow` and `deny`. Both commands inside the quotes are input to the evaluator. Neither runs. Read `outcome` to inspect a decision. For a script that uses an exit code to gate a command, use `nodrail-policy check`.
+
+## Put the decision before the tool
+
+Use the [local hook](docs/getting-started.md) with Claude Code or [embed the evaluator](docs/library.md) in a harness you maintain. Map supported tool calls consistently so that the same APF rule has the same meaning in each integration. If a rule requires review, the harness needs an authorized review path. Otherwise, hold the action.
+
+Building a compatible evaluator? Start with the [conformance fixtures](tests/fixtures/conformance-v1.json) and the [rules reference](docs/rules.md).
 
 ## What it does
 
-- **One decision for everything an agent does.** Shell commands, file reads and edits, web requests, and MCP tools go through the same rules.
+- **One format for covered tool calls.** An adapter can describe shell commands, file operations, web requests and MCP tools for evaluation.
 - **Rules you can review.** Plain YAML with lists, macros and layered files, in the style of [Falco](https://falco.org/docs/concepts/rules/). Validate them and test expected outcomes in CI.
-- **Blocked by default.** Deny beats review, review beats allow, and no match means no.
-- **Rules about the whole run.** Gates hold an action until other agents' steps finished with the right verdict, such as no pull request before QA passed after the last change. Budgets limit tool calls per step or run, and reported tokens and dollars per run. See [Runs, gates and budgets](docs/runs.md).
+- **Explicit outcomes.** Deny takes precedence over review, and review over allow. An unmatched action returns `none`. The local hook blocks it by default.
+- **Run history (preview).** Level-3 gates and budgets use recorded steps and actions. Read the [preview reference](docs/runs.md) for the required inputs.
 - **Hard to talk around.** `g"i"t  push` is judged as `git push`, and `git status; rm -rf /` doesn't match a rule for `git status`.
 - **Secrets stay out.** Likely credentials are removed from how a call is described, so rules and reviewers don't see them.
 - **Small.** Three runtime dependencies. The evaluator has no Node APIs, so it can run in other JavaScript runtimes.
@@ -73,7 +56,7 @@ It decides; it doesn't enforce. A hook or your own code has to act on the answer
 | ------------------------------------------------ | ---------------------------------------------- |
 | [Getting started](docs/getting-started.md)       | Write rules and connect Claude Code            |
 | [Rules](docs/rules.md)                           | Everything a rule file can contain             |
-| [Runs, gates and budgets](docs/runs.md)          | Rules about what already happened in a run     |
+| [Runs, gates and budgets (preview)](docs/runs.md)          | Rules about what already happened in a run     |
 | [Commands and tools](docs/commands-and-tools.md) | How each kind of call is described and matched |
 | [Command line](docs/cli.md)                      | Every `nodrail-policy` command                 |
 | [Library](docs/library.md)                       | Use the engine from TypeScript                 |

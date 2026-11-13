@@ -56,23 +56,90 @@ test("the pages have examples to check, so the tests above can't pass empty", ()
   expect(blocks(read("docs/rules.md"), "yaml").length).toBeGreaterThan(0);
 });
 
-test("the getting-started CI example passes against the pack it starts from", () => {
-  const cli = (...args: string[]) =>
+describe("the getting-started walkthrough", () => {
+  const cli = (args: string[], input?: string) =>
     spawnSync(
       process.execPath,
       ["--import", "tsx", join(root, "src/cli.ts"), ...args],
-      {
-        encoding: "utf8",
-      },
+      { encoding: "utf8", input },
     );
+  const guide = read("docs/getting-started.md");
   const folder = mkdtempSync(join(tmpdir(), "nodrail-guide-"));
   const rules = join(folder, "rules.yaml");
-  const cases = join(folder, "cases.yaml");
-  writeFileSync(rules, cli("init", "repo-work").stdout);
-  const guide = read("docs/getting-started.md");
-  const section = guide.slice(guide.indexOf("## Test your rules in CI"));
-  writeFileSync(cases, blocks(section, "yaml")[0] ?? "");
-  const result = cli("test", rules, "--cases", cases);
-  expect(result.stdout + result.stderr).toContain("2 of 2 passed");
-  expect(result.status).toBe(0);
+  writeFileSync(rules, blocks(guide, "yaml")[0] ?? "");
+
+  test("its policy decides the three commands as its table says", () => {
+    expect(cli(["validate", rules]).stdout).toMatch(/^OK\b.*\b2 rules\./);
+    for (const [command, outcome] of [
+      ["git status", "allow"],
+      ["git clean -fd", "deny"],
+      ["git log", "none"],
+    ] as const) {
+      expect(guide).toContain(`| \`${command}\` | \`${outcome}\` |`);
+      const result = cli(["eval", rules, "--command", command]);
+      expect(JSON.parse(result.stdout)).toMatchObject({ outcome });
+    }
+  });
+
+  test("its CI cases pass against its policy", () => {
+    const cases = join(folder, "cases.yaml");
+    const section = guide.slice(guide.indexOf("## Test your rules in CI"));
+    writeFileSync(cases, blocks(section, "yaml")[0] ?? "");
+    const result = cli(["test", rules, "--cases", cases]);
+    expect(result.stdout + result.stderr).toContain("3 of 3 passed.");
+    expect(result.status).toBe(0);
+  });
+
+  test("its hook example denies the unmatched command", () => {
+    const [event] = /'(\{"hook_event_name".*?\})'/.exec(guide) ?? [];
+    expect(event).toBeDefined();
+    const result = cli(["hook", rules], event!.slice(1, -1));
+    expect(JSON.parse(result.stdout)).toMatchObject({
+      hookSpecificOutput: { permissionDecision: "deny" },
+    });
+  });
+});
+
+describe("the custom harness in the library guide", () => {
+  const example = join(root, "examples/custom-harness");
+  const guide = read("docs/library.md");
+  const section = guide.slice(
+    guide.indexOf("## Connect a custom harness"),
+    guide.indexOf("## Rule files"),
+  );
+
+  test("shows the files in examples/custom-harness", () => {
+    expect(blocks(section, "yaml")).toEqual([
+      readFileSync(join(example, "rules.yaml"), "utf8"),
+    ]);
+    expect(blocks(section, "js")).toEqual([
+      readFileSync(join(example, "demo.mjs"), "utf8"),
+    ]);
+  });
+
+  test("runs with node and invokes only the allowed operation", () => {
+    const result = spawnSync(process.execPath, [join(example, "demo.mjs")], {
+      encoding: "utf8",
+    });
+    expect(result.stderr).toBe("");
+    expect(result.stdout).toBe("allow deny [ 'inspect' ]\n");
+  });
+
+  test("its cases pass: allowed, denied and unmatched", () => {
+    const result = spawnSync(
+      process.execPath,
+      [
+        "--import",
+        "tsx",
+        join(root, "src/cli.ts"),
+        "test",
+        join(example, "rules.yaml"),
+        "--cases",
+        join(example, "cases.yaml"),
+      ],
+      { encoding: "utf8" },
+    );
+    expect(result.stdout + result.stderr).toContain("3 of 3 passed");
+    expect(result.status).toBe(0);
+  });
 });

@@ -1,5 +1,7 @@
 # Runs, gates and budgets
 
+> **Preview reference.** Gates and budgets require APF engine feature level 3. The public 0.1.5 CLI supports the local policy quickstart. It does not include the run-history commands shown here.
+
 This page covers gates, budgets and receipts: rules that depend on what already happened in a piece of work, how the Claude Code hook records that history, and how to test it.
 
 A rule decides one action on its own. A gate decides an action given what has already happened in the same piece of work: "don't open the pull request until QA passed after the last code change". A budget limits how much an agent may do: "a builder step may make 60 tool calls".
