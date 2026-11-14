@@ -2,6 +2,8 @@
 
 Use `@nodrail/policy-engine` to compile YAML policies and evaluate the actions an AI agent proposes. The CLI, library and local Claude Code hook run without a server or account.
 
+Write and test your first tool permission rule with the [Agent Policy Format guide](https://nodrail.com/docs/apf).
+
 ## Try a policy locally
 
 Install the engine with Node.js 22 or later.

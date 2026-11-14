@@ -6,6 +6,8 @@ Write agent permissions in YAML, test the decisions locally and enforce them at 
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/Nodrail/nodrail-js/badge)](https://scorecard.dev/viewer/?uri=github.com/Nodrail/nodrail-js)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 
+Write and test your first tool permission rule with the [Agent Policy Format guide](https://nodrail.com/docs/apf).
+
 ## Try a policy locally
 
 Install the engine with Node.js 22 or later.
