@@ -1,6 +1,6 @@
 {
   "name": "@nodrail/client",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "TypeScript client for Nodrail Cloud. Check supported tool calls against workspace policies and coordinate human approvals.",
   "keywords": [
     "ai",

@@ -4,7 +4,7 @@ This page is the reference for rule files: every field a rule can have, how reso
 
 A rules file is a YAML list of `rule`, `list` and `macro` entries, plus `gate` and `budget` entries, which are described in [Runs, gates and budgets (preview)](runs.md). A `required_engine_version` entry says which engine level the file needs. Several files can be loaded in order, and later ones can change earlier ones.
 
-> **Level 3 preview.** Gates and budgets use run history supplied by the integration. The local quickstart uses level-2 rules and works with the public 0.1.5 engine.
+> **Level 3 preview.** Gates and budgets use run history supplied by the integration and need engine 0.2.0 or later. The local quickstart uses level-2 rules and works with any public release.
 
 ```yaml
 - required_engine_version: 1

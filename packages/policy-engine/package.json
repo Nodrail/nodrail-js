@@ -1,6 +1,6 @@
 {
   "name": "@nodrail/policy-engine",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Compile, test and evaluate Agent Policy Format (APF) rules locally. Includes the CLI, TypeScript evaluator and local Claude Code hook.",
   "keywords": [
     "ai",
