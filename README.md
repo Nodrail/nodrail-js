@@ -44,6 +44,10 @@ The Claude Code local hook reads your rules before covered tools run. You can al
 - [Embed the evaluator](packages/policy-engine/docs/library.md) or use the [published test cases](packages/policy-engine/tests/fixtures/conformance-v1.json) when building a compatible evaluator.
 - [Check integration coverage](https://nodrail.com/integrations), including the Cloud-connected Codex plugin.
 
+## GitHub merge check (pilot)
+
+We used the APF engine in a local adapter to evaluate QA evidence for a pull request. The adapter matched the receipt to the revision under review and posted a status to that commit. GitHub required the status on the pilot branch. A formatting-only push needed a fresh receipt before the PR was eligible to merge again. [Read the pilot case study](https://nodrail.com/guides/github-merge-check-ai-agent-qa) · [Inspect PR #11](https://github.com/Nodrail/agent-plugins/pull/11).
+
 ## Packages
 
 | Package                                            | When to use it                                                                                                  |
