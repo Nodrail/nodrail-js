@@ -4,6 +4,7 @@ Write agent permissions in YAML, test the decisions locally and enforce them at 
 
 [![CI](https://github.com/Nodrail/nodrail-js/actions/workflows/ci.yml/badge.svg)](https://github.com/Nodrail/nodrail-js/actions/workflows/ci.yml)
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/Nodrail/nodrail-js/badge)](https://scorecard.dev/viewer/?uri=github.com/Nodrail/nodrail-js)
+[![OpenSSF Best Practices](https://www.bestpractices.dev/projects/16692/badge)](https://www.bestpractices.dev/projects/16692)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 
 Write and test your first tool permission rule with the [Agent Policy Format guide](https://nodrail.com/docs/apf).
