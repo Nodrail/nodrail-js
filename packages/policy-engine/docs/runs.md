@@ -156,6 +156,12 @@ A reviewer usually compares the branch with `main`. The `repo-work` pack allows 
 
 The subagent's type, the `name` in the file's front matter, is the agent name gates and budgets use: `qa` here. A subagent that doesn't end with a receipt finishes with no verdict, so a gate waiting for it stays closed.
 
+### Does the receipt cover the current commit?
+
+A run gate checks the steps supplied by the integration. To require QA on the exact Git revision you plan to merge, the integration also needs to identify the reviewed commit.
+
+In Nodrail’s **GitHub merge check pilot**, an adapter checked the repository, PR, base SHA and head SHA before supplying QA evidence to APF. A new head needed its own receipt even when only whitespace changed. The target branch required the status the adapter posted. [Read the pilot case study](https://nodrail.com/guides/github-merge-check-ai-agent-qa) · [Inspect PR #11](https://github.com/Nodrail/agent-plugins/pull/11).
+
 ## Which agents can use them
 
 Gates and budgets don't depend on the model or its provider: Nodrail sees tool calls, not the model. What differs is how much of the run each integration records for you.
