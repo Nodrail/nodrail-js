@@ -28,8 +28,8 @@ importers:
         specifier: ^1.32.2
         version: 1.32.2(@cfworker/json-schema@4.1.6)(zod@4.6.7)
       '@openai/agents':
-        specifier: ^0.21.0
-        version: 0.21.0(ws@8.23.0)(zod@4.6.7)
+        specifier: ^0.22.0
+        version: 0.22.0(ws@8.23.0)(zod@4.6.7)
       '@types/node':
         specifier: ^26.6.6
         version: 26.6.6
@@ -389,6 +389,10 @@ packages:
     peerDependencies:
       hono: ^4 || ^5.0.0-0
 
+  '@isaacs/fs-minipass@4.0.1':
+    resolution: {integrity: sha512-wgm9Ehl2jpeqP3zw/7mo3kRHFp5MEDhqAdwy1fTGkHAwnkGOVsgpvQhL8B5n1qlb01jV3n/bI0ZfZp5lWA1k4w==}
+    engines: {node: '>=18.0.0'}
+
   '@jridgewell/resolve-uri@3.1.3':
     resolution: {integrity: sha512-lhTtjtoEArWBjismtfS761S9Hlyn+nIZqOZVYoZ1Xn82PMNMVnk+jj/NhC4fAXGTs7ydONcJiR5vyQBTMDu27g==}
     engines: {node: '>=6.0.0'}
@@ -468,26 +472,26 @@ packages:
       '@emnapi/core': ^1.7.1 || 2.0.0-beta.2
       '@emnapi/runtime': ^1.7.1 || 2.0.0-beta.2
 
-  '@openai/agents-core@0.21.0':
-    resolution: {integrity: sha512-P2jJhc85xrKpe9GUOHAVfPHqK52my49fD1CI0LnfYEvBUwZxJXQI6lgSwby9nWhvQECveM9OvBUglAXuArsHXw==}
+  '@openai/agents-core@0.22.0':
+    resolution: {integrity: sha512-gz7z2eIG+6mlScUdBG7v1k0w9SGC3KGBU5Wko9YXs8gMynBroQR6qnDGuKRzOgq2x8N9UJzn3b/KQpIAtvN9pA==}
     peerDependencies:
       zod: ^4.0.0
     peerDependenciesMeta:
       zod:
         optional: true
 
-  '@openai/agents-openai@0.21.0':
-    resolution: {integrity: sha512-Y1u1ek6FwKx8j+T7gRYcm4kKyN0irqsyZm0XUDZ+g+8s15tu4EhNwNJ92zOHGx7Vjkr2RugWBxTeNspHjw/lQw==}
+  '@openai/agents-openai@0.22.0':
+    resolution: {integrity: sha512-HJkhp6PkXfa9CIzZoMLuM16YQVV8H/zQOIc0dEcWeNe4VOoev+dJXjBzlFF8SZnlGEb+4u5XAbJ85YHYqFWr2g==}
     peerDependencies:
       zod: ^4.0.0
 
-  '@openai/agents-realtime@0.21.0':
-    resolution: {integrity: sha512-nI0jGkSdivlXzS7HXAB1EVplaeSyoAvfM2ofHheJDJdshs3UQl3x405nmTflKWye+wQrqemK4uxL06NIhgvjHg==}
+  '@openai/agents-realtime@0.22.0':
+    resolution: {integrity: sha512-orY61QWNz6QaNfcu6RqPfaJ2QtXLB4Yw3ErVfOzIcMo/UxPRlZejrSiv5MqTyCNqy/J9s2tKgqdrrRGdjdnucg==}
     peerDependencies:
       zod: ^4.0.0
 
-  '@openai/agents@0.21.0':
-    resolution: {integrity: sha512-NpJ74/dGbpYZiRYF474pCaBpxqh4A8+WHbZmaEZVQpRqieZAVH+MV4fesR9MtRGUZfpW5B91zuHzIilQp2iSxQ==}
+  '@openai/agents@0.22.0':
+    resolution: {integrity: sha512-ytI0Bebtd3at00nq+vTzkafdCqxbdD/xHEsIPCFdTQfjrXpGfeYQM8pPfdOnp0K4fnLshovHXEeQ/xXfg+SCPQ==}
     peerDependencies:
       zod: ^4.0.0
 
@@ -996,6 +1000,10 @@ packages:
     resolution: {integrity: sha512-XWAtwJ6OHO+tj0EKCs0Y2UamnyOxseZWltU4x2U2wh8g4AigdjwvtUjvLP2tqkA/avxHEtzxNaqGq/YGNwckKg==}
     engines: {node: '>=18'}
 
+  chownr@3.0.0:
+    resolution: {integrity: sha512-+IxzY9BZOQd/XuYPRmrvEVjF/nqj5kgT4kEq7VofrDoM1MxoRjEWkrCC3EtLi59TVawxTAn+orJwFQcrqEN1+g==}
+    engines: {node: '>=18'}
+
   content-disposition@2.0.1:
     resolution: {integrity: sha512-e+H0ZXHSWYrENhQzw1LPuP4oF5MzVKmDU6d3hxlvaPEYLLg62MxtQNPRx4SYSuYJSBUgnQIG4HIN2tEtNv7Dog==}
     engines: {node: '>=18'}
@@ -1371,6 +1379,14 @@ packages:
     resolution: {integrity: sha512-Lbgzdk0h4juoQ9fCKXW4by0UJqj+nOOrI9MJ1sSj4nI8aI2eo1qmvQEie4VD1glsS250n15LsWsYtCugiStS5A==}
     engines: {node: '>=18'}
 
+  minipass@7.1.3:
+    resolution: {integrity: sha512-tEBHqDnIoM/1rXME1zgka9g6Q2lcoCkxHLuc7ODJ5BxbP5d4c2Z5cGgtXAku59200Cx7diuHTOYfSBD8n6mm8A==}
+    engines: {node: '>=16 || 14 >=14.17'}
+
+  minizlib@3.1.0:
+    resolution: {integrity: sha512-KZxYo1BUkWD2TVFLr0MQoM8vUUigWD3LlD83a/75BqC+4qE0Hb1Vo5v1FgcfaNXvfXzr+5EhQ6ing/CaBijTlw==}
+    engines: {node: '>= 18'}
+
   ms@2.1.3:
     resolution: {integrity: sha512-6FlzubTLZG3J2a/NVCAleEhjzq5oxgHyaCU9yYXvcLsvoVaHJq/s5xXI6/XXP6tz7R9xAOtHnSO/tXtF3WRTlA==}
 
@@ -1597,6 +1613,10 @@ packages:
   std-env@4.3.0:
     resolution: {integrity: sha512-OtU/EgQ1kIm5KwqQpBC6ZEMXrZRui11w8zgfTWp8cdO9B8OaPsbA8bTHO2P+HNo1VlUTGMVBwPhydu6poeXiag==}
 
+  tar@7.5.22:
+    resolution: {integrity: sha512-MFO/QzvtAOmJbkhOaCTvbGcFN9L9b+JunIsDwaKljSOdcLMea3NJ1k9Usz/rjdfSXTq4dfzfeS7W4p4YOAAHeA==}
+    engines: {node: '>=18'}
+
   tinybench@6.2.3:
     resolution: {integrity: sha512-Al01C2JIBnO2CXCAPbpAl6sUiOZHeThGtHYNTa51JRw9PyWOCdr+9Ong05R4qg/Sk3+H645E8ov1h2c58ityNw==}
     engines: {node: '>=20.0.0'}
@@ -1753,6 +1773,10 @@ packages:
         optional: true
       utf-8-validate:
         optional: true
+
+  yallist@5.0.0:
+    resolution: {integrity: sha512-YgvUTfwqyc7UXVMrB+SImsVYSmTS8X/tSrtdNZMImM+n7+QTriRXyXim0mBrTXNeqzVF0KWGgHPeiyViFFrNDw==}
+    engines: {node: '>=18'}
 
   yaml@2.9.1:
     resolution: {integrity: sha512-3NxN8+78OdzbT7C/WjGsyfPAtJaN3FNDsWxv7Y7mcDsT/oOmgW8BpyQQFFBnvZE3j9Y2Sdz1ULFLezL7Eb2yFw==}
@@ -2020,6 +2044,10 @@ snapshots:
     dependencies:
       hono: 4.13.18
 
+  '@isaacs/fs-minipass@4.0.1':
+    dependencies:
+      minipass: 7.1.3
+
   '@jridgewell/resolve-uri@3.1.3': {}
 
   '@jridgewell/sourcemap-codec@1.6.0': {}
@@ -2133,11 +2161,12 @@ snapshots:
       '@tybys/wasm-util': 0.10.4
     optional: true
 
-  '@openai/agents-core@0.21.0(ws@8.23.0)(zod@4.6.7)':
+  '@openai/agents-core@0.22.0(ws@8.23.0)(zod@4.6.7)':
     dependencies:
       '@standard-schema/spec': 1.1.0
       debug: 4.4.3
       openai: 7.57.0(ws@8.23.0)(zod@4.6.7)
+      tar: 7.5.22
     optionalDependencies:
       '@modelcontextprotocol/client': 2.4.0
       zod: 4.6.7
@@ -2150,9 +2179,9 @@ snapshots:
       - undici
       - ws
 
-  '@openai/agents-openai@0.21.0(ws@8.23.0)(zod@4.6.7)':
+  '@openai/agents-openai@0.22.0(ws@8.23.0)(zod@4.6.7)':
     dependencies:
-      '@openai/agents-core': 0.21.0(ws@8.23.0)(zod@4.6.7)
+      '@openai/agents-core': 0.22.0(ws@8.23.0)(zod@4.6.7)
       openai: 7.57.0(ws@8.23.0)(zod@4.6.7)
       zod: 4.6.7
     transitivePeerDependencies:
@@ -2164,10 +2193,11 @@ snapshots:
       - undici
       - ws
 
-  '@openai/agents-realtime@0.21.0(zod@4.6.7)':
+  '@openai/agents-realtime@0.22.0(zod@4.6.7)':
     dependencies:
-      '@openai/agents-core': 0.21.0(ws@8.23.0)(zod@4.6.7)
+      '@openai/agents-core': 0.22.0(ws@8.23.0)(zod@4.6.7)
       '@types/ws': 8.18.2
+      openai: 7.57.0(ws@8.23.0)(zod@4.6.7)
       ws: 8.23.0
       zod: 4.6.7
     transitivePeerDependencies:
@@ -2180,11 +2210,11 @@ snapshots:
       - undici
       - utf-8-validate
 
-  '@openai/agents@0.21.0(ws@8.23.0)(zod@4.6.7)':
+  '@openai/agents@0.22.0(ws@8.23.0)(zod@4.6.7)':
     dependencies:
-      '@openai/agents-core': 0.21.0(ws@8.23.0)(zod@4.6.7)
-      '@openai/agents-openai': 0.21.0(ws@8.23.0)(zod@4.6.7)
-      '@openai/agents-realtime': 0.21.0(zod@4.6.7)
+      '@openai/agents-core': 0.22.0(ws@8.23.0)(zod@4.6.7)
+      '@openai/agents-openai': 0.22.0(ws@8.23.0)(zod@4.6.7)
+      '@openai/agents-realtime': 0.22.0(zod@4.6.7)
       openai: 7.57.0(ws@8.23.0)(zod@4.6.7)
       zod: 4.6.7
     transitivePeerDependencies:
@@ -2514,6 +2544,8 @@ snapshots:
   canonicalize@5.1.0: {}
 
   chai@6.3.0: {}
+
+  chownr@3.0.0: {}
 
   content-disposition@2.0.1: {}
 
@@ -2869,6 +2901,12 @@ snapshots:
     dependencies:
       mime-db: 1.54.0
 
+  minipass@7.1.3: {}
+
+  minizlib@3.1.0:
+    dependencies:
+      minipass: 7.1.3
+
   ms@2.1.3: {}
 
   mustache@4.2.0: {}
@@ -3102,6 +3140,14 @@ snapshots:
 
   std-env@4.3.0: {}
 
+  tar@7.5.22:
+    dependencies:
+      '@isaacs/fs-minipass': 4.0.1
+      chownr: 3.0.0
+      minipass: 7.1.3
+      minizlib: 3.1.0
+      yallist: 5.0.0
+
   tinybench@6.2.3: {}
 
   tinyexec@1.3.1: {}
@@ -3204,6 +3250,8 @@ snapshots:
   wrappy@1.0.2: {}
 
   ws@8.23.0: {}
+
+  yallist@5.0.0: {}
 
   yaml@2.9.1: {}
 
