@@ -4,11 +4,15 @@ Use one YAML file to answer three questions. May an agent inspect the working tr
 
 ## Install
 
-Use Node.js 22 or later and pnpm. Install the CLI, then open an empty directory for the example.
+Use Node.js 22 or later. Install the CLI, then open an empty directory for the example.
 
 ```sh
-pnpm add --global @nodrail/policy-engine
+npm i -g @nodrail/policy-engine
 ```
+
+With pnpm, run `pnpm setup` once so pnpm has a folder for global commands, then `pnpm add --global @nodrail/policy-engine`.
+
+This page uses `nodrail-policy`. If you use [`nodrail`](../../cli/docs/cli.md), Nodrail's one command line, write `nodrail policy` instead: it takes the same commands and flags and gives the same output and exit codes.
 
 ## Write rules
 
@@ -124,9 +128,21 @@ For a script that needs an exit code, use `check`. It exits with 0 on allow and 
 nodrail-policy check rules.yaml -- git status
 ```
 
-## Next
+## Share this policy with your team
 
-- [Use APF in your own harness](library.md#connect-a-custom-harness).
+This step needs a Nodrail Cloud workspace. Cloud reads the same Agent Policy Format, so the `rules.yaml` you just tested imports as it is.
+
+1. [Create a free workspace](https://app.nodrail.com/signup). Cloud Free includes 1,000 governed actions per workspace each month.
+2. Open **Policies**, choose **Import YAML** and upload `rules.yaml`.
+3. Choose **Preview** to see the rules the file adds, changes or removes, then **Publish rules**. The file replaces the environment's rules, so start from an empty environment or export the current rules first.
+4. In **Agents**, choose **Connect an agent** and follow the steps for the [Claude Code plugin](https://nodrail.com/docs/agent-plugins). Its covered calls are then decided by the shared rules, and calls the rules leave to a person wait in **Approvals** for your team.
+
+**Export YAML** brings the file back, so the copy in your repository and its `cases.yaml` stay the source you review. See [Using Nodrail Cloud](https://nodrail.com/docs/cloud#policies).
+
+## Where to go from here
+
+- [Integrate your own harness](library.md#connect-a-custom-harness).
 - [Look up rule fields](rules.md) or [check command matching](commands-and-tools.md).
 - [Read the security model](security-model.md).
+- [Add a ready-made policy to a repository](../../cli/docs/playbooks.md) with `nodrail add`.
 - [Preview the run-history reference](runs.md). Its gates and budgets require engine feature level 3.

@@ -18,6 +18,7 @@ import {
   fullPath,
   insideAll,
   insideCwd,
+  fileName,
   partsOf,
 } from "./paths.ts";
 
@@ -113,6 +114,7 @@ function fileCall(
     params: {
       path,
       path_parts: partsOf(path),
+      file_name: fileName(path),
       ...insideCwd(path, cwd),
       content_sha256: fingerprint(content(input)),
     },
@@ -270,6 +272,7 @@ function patchCall(
       params: {
         path: only,
         path_parts: partsOf(only),
+        file_name: fileName(only),
         ...insideCwd(only, cwd),
         content_sha256,
       },

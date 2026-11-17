@@ -1,0 +1,14 @@
+# Opening waits for QA, the checks and a review of the current candidate. The
+# adapter supplies only evidence for the candidate's repository, run, base and
+# head; evidence for an earlier head does not count.
+- gate: Require QA, checks and review on the candidate
+  id: reviewed-draft
+  agent: github
+  tool: github
+  operation: pr.open
+  resource: { kind: repository, match: exact, value: { binding: repository } }
+  requires:
+    - { agent: qa, verdict: pass, since: [dev] }
+    - { agent: gatekeeper, verdict: pass, since: [dev] }
+    - { agent: reviewer, verdict: ship, since: [dev] }
+  otherwise: deny

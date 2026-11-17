@@ -1,0 +1,83 @@
+{
+  "name": "@nodrail/cli",
+  "version": "0.1.0",
+  "description": "Your Nodrail workspace from the terminal: approvals, Activity, runs, Insights and rules, with a personal API token.",
+  "keywords": [
+    "ai",
+    "agents",
+    "ai-agents",
+    "approvals",
+    "human-in-the-loop",
+    "governance",
+    "cli",
+    "nodrail"
+  ],
+  "homepage": "https://github.com/Nodrail/nodrail-js/tree/main/packages/cli#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Nodrail/nodrail-js.git",
+    "directory": "packages/cli"
+  },
+  "bugs": {
+    "url": "https://github.com/Nodrail/nodrail-js/issues",
+    "email": "hello@nodrail.com"
+  },
+  "license": "Apache-2.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./api": "./src/api.ts"
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs && tsc -p tsconfig.build.json && node ../policy-engine/scripts/declarations.mjs dist",
+    "check": "tsc --noEmit",
+    "lint": "oxlint -c ../../.oxlintrc.json --type-aware -D typescript/no-floating-promises -D typescript/no-misused-promises src tests",
+    "test": "vitest run --coverage",
+    "test:pack": "node scripts/verify-pack.mjs",
+    "verify": "pnpm check && pnpm lint && pnpm test && pnpm test:pack"
+  },
+  "dependencies": {
+    "@nodrail/policy-engine": "workspace:^",
+    "yaml": "^2.9.1",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "@vitest/coverage-v8": "5.1.0",
+    "esbuild": "^0.28.2",
+    "oxlint": "^1.93.0",
+    "oxlint-tsgolint": "^7.0.2007",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vitest": "^5.1.0"
+  },
+  "files": [
+    "dist",
+    "catalog",
+    "docs",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE",
+    "SECURITY.md"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "publishConfig": {
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "./api": {
+        "types": "./dist/api.d.ts",
+        "default": "./dist/api.js"
+      }
+    },
+    "bin": {
+      "nodrail": "./dist/nodrail.mjs"
+    },
+    "access": "public",
+    "provenance": true
+  }
+}

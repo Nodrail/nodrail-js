@@ -1,0 +1,183 @@
+- required_engine_version: 2
+
+# Where credentials live. Reading or searching any of these is denied, and
+# deny beats allow, so this holds whatever else is added. A dot file with a
+# suffix counts as its base: .env.staging is .env.
+- list: secret_places
+  items:
+    - ".env"
+    - ".envrc"
+    - ".ssh"
+    - ".aws"
+    - ".gnupg"
+    - ".kube"
+    - ".docker"
+    - "gcloud"
+    - ".netrc"
+    - ".npmrc"
+    - ".pypirc"
+    - ".git-credentials"
+    - ".pgpass"
+    - ".vault-token"
+    - "id_rsa"
+    - "id_ecdsa"
+    - "id_ed25519"
+    - ".credentials.json"
+    - ".nodrail"
+    - "environ"
+    - "*.pem"
+    - "*.key"
+    - "*.p12"
+    - "*.pfx"
+
+- rule: Never read secrets
+  tool: files
+  operation: file.read
+  resource: { kind: file, match: any }
+  condition:
+    - { field: path_parts, op: contains, list: secret_places }
+  effect: deny
+
+- rule: Never search secrets
+  tool: files
+  operation: file.search
+  resource: { kind: file, match: any }
+  condition:
+    - { field: path_parts, op: contains, list: secret_places }
+  effect: deny
+
+# A file pattern such as .env* or *env picks out a secret without naming it.
+- rule: Never search with a pattern that reaches secrets
+  tool: files
+  operation: file.search
+  resource: { kind: file, match: any }
+  condition:
+    - { field: reaches_secrets, op: eq, value: true }
+  effect: deny
+
+- rule: Never read GitHub CLI tokens
+  tool: files
+  operation: file.read
+  resource: { kind: file, match: any }
+  condition:
+    - { field: path_parts, op: contains, value: ".config" }
+    - { field: path_parts, op: contains, value: "gh" }
+  effect: deny
+
+- rule: Never search GitHub CLI tokens
+  tool: files
+  operation: file.search
+  resource: { kind: file, match: any }
+  condition:
+    - { field: path_parts, op: contains, value: ".config" }
+    - { field: path_parts, op: contains, value: "gh" }
+  effect: deny
+
+- rule: Never read Codex sign-in
+  tool: files
+  operation: file.read
+  resource: { kind: file, match: any }
+  condition:
+    - { field: path_parts, op: contains, value: ".codex" }
+    - { field: path_parts, op: contains, value: "auth.json" }
+  effect: deny
+
+- rule: Never search Codex sign-in
+  tool: files
+  operation: file.search
+  resource: { kind: file, match: any }
+  condition:
+    - { field: path_parts, op: contains, value: ".codex" }
+    - { field: path_parts, op: contains, value: "auth.json" }
+  effect: deny
+
+- rule: Never read git config
+  tool: files
+  operation: file.read
+  resource: { kind: file, match: any }
+  condition:
+    - { field: path_parts, op: contains, value: ".git" }
+    - { field: path_parts, op: contains, value: "config" }
+  effect: deny
+
+- rule: Never search git config
+  tool: files
+  operation: file.search
+  resource: { kind: file, match: any }
+  condition:
+    - { field: path_parts, op: contains, value: ".git" }
+    - { field: path_parts, op: contains, value: "config" }
+  effect: deny
+
+# Reading and searching the project.
+- rule: Read files
+  tool: files
+  operation: file.read
+  resource: { kind: file, match: any }
+  effect: allow
+
+- rule: Search files
+  tool: files
+  operation: file.search
+  resource: { kind: file, match: any }
+  effect: allow
+
+# Commands that only look at things. Not git diff or git show: given a path or
+# a revision they print any file, secrets included.
+- list: looking_commands
+  items: [cd, ls, git status, git log]
+
+- rule: Look around
+  command: { list: looking_commands, match: prefix }
+  effect: allow
+
+- list: exact_looking_commands
+  items: [pwd, git branch, git diff, git diff --staged]
+
+- rule: Where am I
+  command: { list: exact_looking_commands }
+  effect: allow
+
+# Nodrail's own commands. Run by hand, the hook could write a step or a verdict
+# into the run ledger, and `nodrail` can approve requests, so they are for
+# you, not the agent. Starting the plugin hook through node or npx runs another
+# program, which no rule here allows.
+- list: nodrail_commands
+  items: [nodrail, nodrail-policy, nodrail-claude-hook]
+
+- rule: Never run Nodrail itself
+  command: { list: nodrail_commands, match: prefix }
+  effect: deny
+
+# Claude Code's own tools that only plan or talk to the person.
+- rule: Keep a task list
+  tool: claude-code
+  operation: todowrite
+  resource: { kind: tool, match: any }
+  effect: allow
+
+- rule: Ask the person a question
+  tool: claude-code
+  operation: askuserquestion
+  resource: { kind: tool, match: any }
+  effect: allow
+
+- rule: Plan before acting
+  tool: claude-code
+  operation: enterplanmode
+  resource: { kind: tool, match: any }
+  effect: allow
+
+- rule: Present a plan
+  tool: claude-code
+  operation: exitplanmode
+  resource: { kind: tool, match: any }
+  effect: allow
+
+# Starting a subagent. What the subagent then does is decided call by call,
+# like the main agent. Narrow this to the types you use, or gate one.
+- rule: Start subagents
+  tool: claude-code
+  operation: agent
+  resource: { kind: agent, match: any }
+  effect: allow

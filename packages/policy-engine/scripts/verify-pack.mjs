@@ -69,12 +69,15 @@ try {
 import { compilePolicies } from "@nodrail/policy-engine/yaml";
 import { receiptBlock, runKey } from "@nodrail/policy-engine/hook-runs";
 import { parseReceipt } from "@nodrail/policy-engine/receipts";
+import { runPolicyCommandLine, type Io } from "@nodrail/policy-engine/command-line";
 export const block: string | null = receiptBlock("x");
 export const key: string | null = runKey(".", null, {});
 export const read = parseReceipt(block ?? "");
 export const compiled = compilePolicies([{ name: "a.yaml", text: "" }]);
 export const typed: typeof simulate = simulate;
 export const shape: PolicyDocument | null = compiled.ok ? compiled.document : null;
+export const commandLine: (argv: string[], io?: Io) => Promise<number> =
+  runPolicyCommandLine;
 `,
   );
   writeFileSync(

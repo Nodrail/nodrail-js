@@ -1,4 +1,6 @@
-# Command line
+# CLI reference (nodrail-policy)
+
+`nodrail policy <command>` from [`@nodrail/cli`](../../cli/docs/cli.md) is the same command, with the same flags, output and exit codes.
 
 Use `nodrail-policy` to validate a file, inspect a decision, test expected outcomes or apply a policy before a command runs.
 

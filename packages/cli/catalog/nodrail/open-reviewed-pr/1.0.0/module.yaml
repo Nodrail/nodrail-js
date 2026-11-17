@@ -1,0 +1,22 @@
+kind: nodrail.module/v1
+name: "@nodrail/open-reviewed-pr"
+version: 1.0.0
+description: >-
+  A publisher agent may open draft pull requests in your repository after
+  QA, a gatekeeper and a reviewer have accepted the current candidate. Merging
+  stays denied, even after the pull request exists.
+parameters:
+  repository:
+    type: repository
+    description: The repository whose pull requests this governs, as owner/name.
+imports:
+  - modules/reviewed-draft.yaml
+  - policies/no-merge.yaml
+roles:
+  github: The publisher. Opens the draft pull request; never merges.
+  qa: Tests the candidate and reports pass or fail for that exact revision.
+  gatekeeper: Runs the mechanical checks on the candidate.
+  reviewer: Reviews the candidate and reports ship or not.
+skills:
+  - skills/author-apf-playbooks/SKILL.md
+  - skills/review-apf-permissions/SKILL.md

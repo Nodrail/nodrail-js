@@ -1,5 +1,46 @@
 # Changelog
 
+## 0.3.0
+
+Project manifests, a permission diff, and a safer reading of file paths.
+
+### Added
+
+- `resolveProject` (`@nodrail/policy-engine/yaml`) composes a project's
+  `nodrail.yaml` (`kind: nodrail.project/v1`): ordered imports of local rules
+  files, nested manifests and catalog modules with typed values (`with:
+  { repository: owner/name }`). A file shared by two imports is applied once.
+  Cycles, paths or links that leave the project folder, unknown publishers,
+  versions in the manifest and conflicting values are refused, each naming the
+  reference. It reads only what its host gives it, so it runs in a browser too.
+  `catalogEntry`, `canonicalId`, `parseModuleRef`, `bindingsUsed` and
+  `joinPath` are exported with it.
+- `permissionChanges(before, after)` and `renderPermissionChanges(changes)`
+  (also from the package root): what an edit does to permissions, grouped by
+  agent, operation and resource, as granted, revoked, tightened, loosened,
+  changed or needs review. A change that weakens a deny, a gate or a budget is
+  marked `!`. Checked against the evaluator with generated policies.
+- `@nodrail/policy-engine/command-line` exports `runPolicyCommandLine(argv,
+  io)`: `nodrail-policy` as a function, which `nodrail policy` runs.
+- File calls carry `file_name`, the file's own name, so a rule can allow files
+  by name without matching folders that share it.
+
+### Changed
+
+- The `read-only` starter pack also denies running `nodrail`, which can
+  approve requests. `repo-work` protects `nodrail.yaml`, `nodrail.lock.yaml`
+  and `.nodrail` like the other control places.
+- `nodrail-policy` with a rules file it can't read prints the reason and exits
+  2, instead of ending with an uncaught error.
+- `nodrail-policy --version` prints the engine's own version when bundled into
+  another command.
+
+### Fixed
+
+- A link to a file that doesn't exist yet is judged by its target. Writing
+  through it creates the target, which could otherwise pass a rule that
+  protects that place, such as `repo-work`'s shell startup files.
+
 ## 0.2.1
 
 Package metadata and documentation only; the engine, CLI and hook behave
