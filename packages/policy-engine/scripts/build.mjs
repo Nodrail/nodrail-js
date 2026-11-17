@@ -21,6 +21,7 @@ await build({
     "src/actions.ts",
     "src/receipts.ts",
     "src/hook-runs.ts",
+    "src/command-line.ts",
   ],
   outdir: "dist",
 });

@@ -1,5 +1,5 @@
 // The nodrail-policy command line run in-process, with its output captured.
-import { runCli, type Io } from "../src/command-line.ts";
+import { runPolicyCommandLine, type Io } from "../src/command-line.ts";
 
 export async function cli(args: string[], stdin = "") {
   const out: string[] = [];
@@ -11,6 +11,6 @@ export async function cli(args: string[], stdin = "") {
     writeError: (text) => err.push(text),
     readStdin: async () => stdin,
   };
-  const code = await runCli(args, io);
+  const code = await runPolicyCommandLine(args, io);
   return { code, stdout: out.join(""), stderr: err.join("") };
 }

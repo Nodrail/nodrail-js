@@ -47,5 +47,11 @@ export {
   type RunEvent,
 } from "./runs.ts";
 export { isChange, type ChangeSubject } from "./changes.ts";
+export {
+  permissionChanges,
+  type PermissionChange,
+  type PermissionImpact,
+} from "./permission-changes.ts";
+export { renderPermissionChanges } from "./permission-render.ts";
 export { legacySubagentRuleProblem, type RuleTarget } from "./upgrades.ts";
 export * from "./commands.ts";

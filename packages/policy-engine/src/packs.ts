@@ -99,10 +99,11 @@ ${pairRules}
   effect: allow
 
 # Nodrail's own commands. Run by hand, the hook could write a step or a verdict
-# into the run ledger, so they are for you, not the agent. Starting the plugin
-# hook through node or npx runs another program, which no rule here allows.
+# into the run ledger, and \`nodrail\` can approve requests, so they are for
+# you, not the agent. Starting the plugin hook through node or npx runs another
+# program, which no rule here allows.
 - list: nodrail_commands
-  items: [nodrail-policy, nodrail-claude-hook]
+  items: [nodrail, nodrail-policy, nodrail-claude-hook]
 
 - rule: Never run Nodrail itself
   command: { list: nodrail_commands, match: prefix }
@@ -181,6 +182,10 @@ const repoWorkRules = `
     - .zshrc
     - .zprofile
     - .zshenv
+    # Nodrail's own project files: the policy the agent is held to.
+    - nodrail.yaml
+    - nodrail.lock.yaml
+    - .nodrail
 
 - rule: Never write control files
   tool: files

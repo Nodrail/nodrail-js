@@ -1,0 +1,123 @@
+# What triage never does, in any repository, whatever else a project allows.
+
+- rule: Triage never runs issues.close
+  id: triage-no-issues-close
+  agent: triage
+  tool: github
+  operation: issues.close
+  resource: { kind: repository, match: any }
+  effect: deny
+
+- rule: Triage never runs issues.update
+  id: triage-no-issues-update
+  agent: triage
+  tool: github
+  operation: issues.update
+  resource: { kind: repository, match: any }
+  effect: deny
+
+- rule: Triage never runs issues.assign
+  id: triage-no-issues-assign
+  agent: triage
+  tool: github
+  operation: issues.assign
+  resource: { kind: repository, match: any }
+  effect: deny
+
+- rule: Triage never runs issues.delete
+  id: triage-no-issues-delete
+  agent: triage
+  tool: github
+  operation: issues.delete
+  resource: { kind: repository, match: any }
+  effect: deny
+
+- rule: Triage never runs pr.open
+  id: triage-no-pr-open
+  agent: triage
+  tool: github
+  operation: pr.open
+  resource: { kind: repository, match: any }
+  effect: deny
+
+- rule: Triage never runs pr.merge
+  id: triage-no-pr-merge
+  agent: triage
+  tool: github
+  operation: pr.merge
+  resource: { kind: repository, match: any }
+  effect: deny
+
+- rule: Triage never runs pr.push
+  id: triage-no-pr-push
+  agent: triage
+  tool: github
+  operation: pr.push
+  resource: { kind: repository, match: any }
+  effect: deny
+
+- rule: Triage never runs repositories.delete
+  id: triage-no-repositories-delete
+  agent: triage
+  tool: github
+  operation: repositories.delete
+  resource: { kind: repository, match: any }
+  effect: deny
+
+- rule: Triage never changes files (file.write)
+  id: triage-no-file-write
+  agent: triage
+  tool: files
+  operation: file.write
+  resource: { kind: file, match: any }
+  effect: deny
+
+- rule: Triage never changes files (file.edit)
+  id: triage-no-file-edit
+  agent: triage
+  tool: files
+  operation: file.edit
+  resource: { kind: file, match: any }
+  effect: deny
+
+- rule: Triage never changes files (file.patch)
+  id: triage-no-file-patch
+  agent: triage
+  tool: files
+  operation: file.patch
+  resource: { kind: file, match: any }
+  effect: deny
+
+- rule: Triage never changes files (notebook.edit)
+  id: triage-no-notebook-edit
+  agent: triage
+  tool: files
+  operation: notebook.edit
+  resource: { kind: file, match: any }
+  effect: deny
+
+# Triage needs no shell. A shell runs scripts other agents can write.
+
+- rule: Triage never uses the shell (command.run)
+  id: triage-no-command-run
+  agent: triage
+  tool: shell
+  operation: command.run
+  resource: { kind: command, match: any }
+  effect: deny
+
+- rule: Triage never uses the shell (command.compound)
+  id: triage-no-command-compound
+  agent: triage
+  tool: shell
+  operation: command.compound
+  resource: { kind: command, match: any }
+  effect: deny
+
+- rule: Triage never uses the shell (command.redacted)
+  id: triage-no-command-redacted
+  agent: triage
+  tool: shell
+  operation: command.redacted
+  resource: { kind: command, match: any }
+  effect: deny

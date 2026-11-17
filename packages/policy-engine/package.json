@@ -1,6 +1,6 @@
 {
   "name": "@nodrail/policy-engine",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "Compile, test and evaluate Agent Policy Format (APF) rules locally. Includes the CLI, TypeScript evaluator and local Claude Code hook.",
   "keywords": [
     "ai",
@@ -37,7 +37,8 @@
     "./yaml": "./src/yaml.ts",
     "./actions": "./src/actions.ts",
     "./receipts": "./src/receipts.ts",
-    "./hook-runs": "./src/hook-runs.ts"
+    "./hook-runs": "./src/hook-runs.ts",
+    "./command-line": "./src/command-line.ts"
   },
   "scripts": {
     "check": "tsc --noEmit",
@@ -59,8 +60,8 @@
     "@vitest/coverage-v8": "5.1.0",
     "esbuild": "^0.28.2",
     "fast-check": "^4.10.2",
-    "oxlint": "^1.92.0",
-    "oxlint-tsgolint": "^7.0.2006",
+    "oxlint": "^1.93.0",
+    "oxlint-tsgolint": "^7.0.2007",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2",
     "vitest": "^5.1.0"
@@ -106,6 +107,10 @@
       "./hook-runs": {
         "types": "./dist/hook-runs.d.ts",
         "default": "./dist/hook-runs.js"
+      },
+      "./command-line": {
+        "types": "./dist/command-line.d.ts",
+        "default": "./dist/command-line.js"
       }
     },
     "bin": {

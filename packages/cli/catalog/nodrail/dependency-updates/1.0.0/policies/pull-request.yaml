@@ -1,0 +1,42 @@
+- required_engine_version: 3
+
+# A draft pull request in your repository, once the checks have passed on
+# the deps agent's latest change.
+- rule: Open a draft pull request
+  id: deps-open-draft
+  agent: deps
+  tool: github
+  operation: pr.open
+  resource: { kind: repository, match: exact, value: { binding: repository } }
+  condition:
+    - { field: draft, op: eq, value: true }
+    - { field: targetScope, op: eq, value: candidate }
+  effect: allow
+
+- gate: Checks pass on the latest dependency change
+  id: deps-checks
+  agent: deps
+  tool: github
+  operation: pr.open
+  resource: { kind: repository, match: exact, value: { binding: repository } }
+  requires:
+    - { agent: gatekeeper, verdict: pass, since: [deps] }
+  otherwise: deny
+
+- rule: Never merge
+  id: deps-no-merge
+  agent: deps
+  tool: github
+  operation: pr.merge
+  resource: { kind: repository, match: any }
+  effect: deny
+
+# The deps agent may not start the checkers that vouch for its own work.
+
+- rule: The deps agent never starts gatekeeper
+  id: deps-no-start-gatekeeper
+  agent: deps
+  tool: claude-code
+  operation: agent
+  resource: { kind: agent, match: exact, value: gatekeeper }
+  effect: deny

@@ -1,0 +1,41 @@
+# Lockfile refreshes, exactly as written: no install scripts run, and pnpm
+# skips its config hook. Anything else, a full install included, isn't here.
+- list: lockfile_commands
+  items:
+    - pnpm install --lockfile-only --ignore-scripts --ignore-pnpmfile
+    - npm install --package-lock-only --ignore-scripts
+
+- rule: Refresh lockfiles
+  id: deps-lockfile-commands
+  agent: deps
+  command: { list: lockfile_commands }
+  effect: allow
+
+# A commit runs the repository's git hooks, which package.json can set up.
+- rule: Commit with a person
+  id: deps-commit
+  agent: deps
+  command: { prefix: git commit }
+  effect: require_approval
+
+# A push leaves the machine: a person approves it, reading the full command.
+- rule: Push with a person
+  id: deps-push
+  agent: deps
+  command: { prefix: git push }
+  effect: require_approval
+
+- list: force_push_commands
+  items:
+    - git push --force
+    - git push --force-with-lease
+    - git push --force-if-includes
+    - git push -f
+    - git push --mirror
+    - git push --delete
+
+- rule: Never force-push
+  id: deps-no-force-push
+  agent: deps
+  command: { list: force_push_commands, match: prefix }
+  effect: deny

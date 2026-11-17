@@ -1,0 +1,19 @@
+kind: nodrail.module/v1
+name: "@nodrail/dependency-updates"
+version: 1.0.0
+description: >-
+  A deps agent may change JavaScript lockfiles inside the project and refresh
+  them without running scripts. Changes to package.json, commits and pushes
+  wait for a person. It may open a draft pull request in your repository once
+  the checks pass on its latest change, and never merges or force-pushes.
+parameters:
+  repository:
+    type: repository
+    description: The repository the draft pull request is opened in, as owner/name.
+imports:
+  - policies/files.yaml
+  - policies/commands.yaml
+  - policies/pull-request.yaml
+roles:
+  deps: Updates lockfiles, proposes package.json changes; opens a draft pull request.
+  gatekeeper: Runs the checks on the deps agent's latest change.

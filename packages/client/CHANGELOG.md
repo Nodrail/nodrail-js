@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.0
+
+Released with `@nodrail/policy-engine` 0.3.0, which it uses; the client and its
+hook behave as in 0.2.1. Its dependencies are updated.
+
 ## 0.2.1
 
 Package metadata and documentation only; the client and its hook behave

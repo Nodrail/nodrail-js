@@ -3,6 +3,7 @@ import { readFile, readdir, stat } from "node:fs/promises";
 import { extname, join } from "node:path";
 import { parseArgs } from "node:util";
 import { parse } from "yaml";
+import { version } from "../package.json";
 import { z } from "zod";
 import { describeArguments, describeToolCall } from "./actions.ts";
 import { decideToolCall, toDescriptor, type Identity } from "./local-hook.ts";
@@ -328,14 +329,6 @@ const commands = new Map<string, (run: Run) => number | Promise<number>>([
   ["hook", hookCommand],
 ]);
 
-async function printVersion() {
-  const manifest: unknown = JSON.parse(
-    await readFile(new URL("../package.json", import.meta.url), "utf8"),
-  );
-  io.log((manifest as { version: string }).version);
-  return 0;
-}
-
 function printPack(name: string | undefined) {
   const pack = starterPacks[name as StarterPackName] as StarterPack | undefined;
   if (!pack) {
@@ -359,7 +352,7 @@ export async function runCli(
     options,
   });
   if (values.help) return (io.log(usage), 0);
-  if (values.version) return printVersion();
+  if (values.version) return (io.log(version), 0);
   const [command = "", ...paths] = positionals;
   if (command === "init") return printPack(paths[0]);
   if (command === "runs") return runsCommand(paths, io);
@@ -380,4 +373,21 @@ export async function runCli(
     now: new Date(values.now ?? Date.now()),
     paths,
   });
+}
+
+/**
+ * The whole nodrail-policy command line: runs one command and answers its exit
+ * code, reporting what the command did not handle (a missing file, a bad
+ * flag) as one line on stderr and 2. `nodrail policy` runs this too.
+ */
+export async function runPolicyCommandLine(
+  argv: string[],
+  output: Io = processIo,
+): Promise<number> {
+  try {
+    return await runCli(argv, output);
+  } catch (error) {
+    output.error(error instanceof Error ? error.message : String(error));
+    return 2;
+  }
 }
