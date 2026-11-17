@@ -9,8 +9,12 @@ Write and test your first tool permission rule with the [Agent Policy Format gui
 Install the engine with Node.js 22 or later.
 
 ```sh
-pnpm add --global @nodrail/policy-engine
+npm i -g @nodrail/policy-engine
 ```
+
+With pnpm, run `pnpm setup` once first, then `pnpm add --global @nodrail/policy-engine`.
+
+[`@nodrail/cli`](https://www.npmjs.com/package/@nodrail/cli) installs `nodrail`, Nodrail's one command line. `nodrail policy validate`, `eval` and every other command here behave exactly as `nodrail-policy` does, and `nodrail add` builds a repository's policy from ready-made modules.
 
 In an empty directory, save this as `rules.yaml`.
 
@@ -56,12 +60,13 @@ It decides; it doesn't enforce. A hook or your own code has to act on the answer
 
 | Guide                                            |                                                |
 | ------------------------------------------------ | ---------------------------------------------- |
-| [Getting started](docs/getting-started.md)       | Write rules and connect Claude Code            |
+| [Try APF locally](docs/getting-started.md)       | Write rules and connect Claude Code            |
 | [Rules](docs/rules.md)                           | Everything a rule file can contain             |
 | [Runs, gates and budgets (preview)](docs/runs.md)          | Rules about what already happened in a run     |
 | [Commands and tools](docs/commands-and-tools.md) | How each kind of call is described and matched |
-| [Command line](docs/cli.md)                      | Every `nodrail-policy` command                 |
-| [Library](docs/library.md)                       | Use the engine from TypeScript                 |
+| [CLI reference (nodrail-policy)](docs/cli.md)    | Every `nodrail-policy` command                 |
+| [CLI reference (nodrail)](https://nodrail.com/docs/cli) | `nodrail`: projects, policies and Cloud        |
+| [Integrate your own harness](docs/library.md)    | Use the engine from TypeScript                 |
 | [Security model](docs/security-model.md)         | What is and isn't guaranteed                   |
 
 ## Nodrail

@@ -1,0 +1,27 @@
+- required_engine_version: 2
+
+# What triage may do, only in your repository.
+
+- rule: Read issues
+  id: triage-issues-read
+  agent: triage
+  tool: github
+  operation: issues.read
+  resource: { kind: repository, match: exact, value: { binding: repository } }
+  effect: allow
+
+- rule: Comment on issues
+  id: triage-issues-comment
+  agent: triage
+  tool: github
+  operation: issues.comment
+  resource: { kind: repository, match: exact, value: { binding: repository } }
+  effect: allow
+
+- rule: Label issues
+  id: triage-issues-label
+  agent: triage
+  tool: github
+  operation: issues.label
+  resource: { kind: repository, match: exact, value: { binding: repository } }
+  effect: allow

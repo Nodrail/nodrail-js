@@ -771,7 +771,8 @@ ${extra}`;
 
 describe("the package boundary", () => {
   const source = fileURLToPath(new URL("../src/", import.meta.url));
-  const allowed = /^(\.\/|node:|zod$|yaml$|canonicalize$)/;
+  // The package's own manifest too, for --version: bundling inlines it.
+  const allowed = /^(\.\/|node:|zod$|yaml$|canonicalize$|\.\.\/package\.json$)/;
 
   test.each(readdirSync(source))(
     "%s imports nothing from the product",

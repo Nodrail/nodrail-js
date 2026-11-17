@@ -251,6 +251,31 @@ describe("paths", () => {
     );
   });
 
+  test("file_name is the real file's own name, not a folder's", () => {
+    const nameOf = (file_path: string) =>
+      describeToolCall("Write", { file_path, content: "" })?.params.file_name;
+    expect(nameOf(join(folder, "pnpm-lock.yaml"))).toBe("pnpm-lock.yaml");
+    expect(nameOf(join(folder, "pnpm-lock.yaml", "run.js"))).toBe("run.js");
+    // A link named like a lockfile is judged by what it points at, even
+    // before that exists: writing through the link would create it.
+    symlinkSync(join(folder, "src.ts"), join(folder, "yarn.lock"));
+    expect(nameOf(join(folder, "yarn.lock"))).toBe("src.ts");
+  });
+
+  test("a link to a file not there yet is judged by its target", () => {
+    symlinkSync(
+      join(folder, ".claude", "settings.json"),
+      join(folder, "notes.txt"),
+    );
+    expect(pathOf(join(folder, "notes.txt"))).toBe(
+      join(folder, ".claude", "settings.json"),
+    );
+    // A loop of links is left as written, and can't be written through.
+    symlinkSync(join(folder, "loop-b"), join(folder, "loop-a"));
+    symlinkSync(join(folder, "loop-a"), join(folder, "loop-b"));
+    expect(pathOf(join(folder, "loop-a"))).toBe(join(folder, "loop-a"));
+  });
+
   test("a home path is the home folder", () => {
     expect(pathOf("~/.ssh/authorized_keys")).toBe(
       join(realpathSync.native(homedir()), ".ssh", "authorized_keys"),

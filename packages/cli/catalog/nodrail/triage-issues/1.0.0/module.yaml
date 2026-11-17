@@ -1,0 +1,17 @@
+kind: nodrail.module/v1
+name: "@nodrail/triage-issues"
+version: 1.0.0
+description: >-
+  A triage agent may read issues in your repository, comment on them and
+  label them. It cannot close, assign or delete issues, open or merge pull
+  requests, use the shell, or change files. Add @nodrail/read-only before it to let
+  every agent read the code with secrets kept out.
+parameters:
+  repository:
+    type: repository
+    description: The repository whose issues the agent triages, as owner/name.
+imports:
+  - policies/triage.yaml
+  - policies/limits.yaml
+roles:
+  triage: Reads, comments on and labels issues; changes nothing else.

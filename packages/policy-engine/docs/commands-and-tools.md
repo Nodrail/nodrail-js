@@ -97,6 +97,7 @@ File calls carry these params:
 | --- | --- |
 | `path` | The resolved path. Paths over 4,096 characters or 256 levels deep, and patches of more than 1,000 files, can't be described, so they're blocked |
 | `path_parts` | Every folder and file name in the path, as above |
+| `file_name` | Reads, writes, edits and single-file patches only: the file's own name, the last part of the path, exactly as written. Unlike `path_parts`, a folder with that name doesn't match, so use it to allow files by name: `{ field: file_name, op: in, list: lockfiles }` |
 | `inside_cwd` | `true` when the path is inside the folder the agent works in. Missing when that folder isn't known, and a missing value never helps an allow |
 | `reaches_secrets` | Searches only: `true` when the file pattern could pick out a place where credentials live, such as `.env*`, `*env` or `{.env,x}` |
 

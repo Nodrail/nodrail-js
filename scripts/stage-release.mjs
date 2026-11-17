@@ -16,7 +16,7 @@ import { join } from "node:path";
 
 // Staging needs npm 11.15 or later, so it's pinned rather than taken from Node.
 const NPM = "npm@12.2.2";
-const PACKAGES = ["packages/policy-engine", "packages/client"];
+const PACKAGES = ["packages/policy-engine", "packages/client", "packages/cli"];
 const dryRun = process.argv.includes("--dry-run");
 
 const npm = (args, options = {}) =>

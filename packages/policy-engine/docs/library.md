@@ -1,4 +1,4 @@
-# Library
+# Integrate your own harness
 
 This page shows how to use the engine from TypeScript: compile rule files, decide a call, and describe tool calls the way the hooks do.
 
@@ -33,7 +33,7 @@ Read `outcome` for the decision and `matchedRuleId` for the rule that matched. W
 | Import                             | Contains                                            | Runs on                |
 | ---------------------------------- | --------------------------------------------------- | ---------------------- |
 | `@nodrail/policy-engine`           | Evaluator, schemas, simulator, command judging, run history types and schemas (level 3 preview) | Any JavaScript runtime |
-| `@nodrail/policy-engine/yaml`      | `compilePolicies`, `renderPolicies`, `starterPacks` | Any JavaScript runtime |
+| `@nodrail/policy-engine/yaml`      | `compilePolicies`, `renderPolicies`, `starterPacks`, `permissionChanges`, `renderPermissionChanges` | Any JavaScript runtime |
 | `@nodrail/policy-engine/simulator` | `simulate` on its own                               | Any JavaScript runtime |
 | `@nodrail/policy-engine/actions`   | `describeToolCall`, `describeArguments`, `redact`   | Node                   |
 | `@nodrail/policy-engine/protocol`  | Canonical digests for the Nodrail runtime protocol  | Node                   |

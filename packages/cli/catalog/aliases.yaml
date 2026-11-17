@@ -1,0 +1,3 @@
+# Other names for catalog modules. A name here and the module's own id mean
+# the same dependency: the manifest and lock always record the id.
+"@nodrail/pr_policy.yaml": "@nodrail/open-reviewed-pr"

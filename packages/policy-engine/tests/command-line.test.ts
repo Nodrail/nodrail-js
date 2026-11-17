@@ -119,11 +119,18 @@ describe("validate and compile", () => {
     expect(result.stderr).toContain("broken.yaml:1");
   });
 
-  // The command turns this into exit 2, which blocks when it's a hook.
+  // Exit 2, which blocks when it's a hook.
   test("a missing file stops with an error", async () => {
-    await expect(
-      cli(["validate", join(folder, "missing.yaml")]),
-    ).rejects.toThrow(/ENOENT/);
+    const result = await cli(["validate", join(folder, "missing.yaml")]);
+    expect(result.code).toBe(2);
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toMatch(/^ENOENT.*missing\.yaml'\n$/);
+  });
+
+  test("an unknown flag is a usage error", async () => {
+    const result = await cli(["validate", rules, "--nope"]);
+    expect(result.code).toBe(2);
+    expect(result.stderr).toContain("--nope");
   });
 
   test("compile prints the policy document", async () => {

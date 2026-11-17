@@ -1,0 +1,92 @@
+- required_engine_version: 2
+
+# Lockfiles, matched by the file's own name, anywhere in the project.
+- list: lockfiles
+  items:
+    - package-lock.json
+    - npm-shrinkwrap.json
+    - pnpm-lock.yaml
+    - yarn.lock
+    - bun.lock
+
+- rule: Change lockfiles (file.write)
+  id: deps-lockfile-file-write
+  agent: deps
+  tool: files
+  operation: file.write
+  resource: { kind: file, match: any }
+  condition:
+    - { field: file_name, op: in, list: lockfiles }
+    - { field: inside_cwd, op: eq, value: true }
+  effect: allow
+
+- rule: Change lockfiles (file.edit)
+  id: deps-lockfile-file-edit
+  agent: deps
+  tool: files
+  operation: file.edit
+  resource: { kind: file, match: any }
+  condition:
+    - { field: file_name, op: in, list: lockfiles }
+    - { field: inside_cwd, op: eq, value: true }
+  effect: allow
+
+# package.json also holds scripts, the package manager and commit-hook
+# commands, all of which run code. A person reviews each change.
+- rule: Change package.json with a person (file.write)
+  id: deps-manifest-file-write
+  agent: deps
+  tool: files
+  operation: file.write
+  resource: { kind: file, match: any }
+  condition:
+    - { field: file_name, op: eq, value: package.json }
+    - { field: inside_cwd, op: eq, value: true }
+  effect: require_approval
+
+# package.json also holds scripts, the package manager and commit-hook
+# commands, all of which run code. A person reviews each change.
+- rule: Change package.json with a person (file.edit)
+  id: deps-manifest-file-edit
+  agent: deps
+  tool: files
+  operation: file.edit
+  resource: { kind: file, match: any }
+  condition:
+    - { field: file_name, op: eq, value: package.json }
+    - { field: inside_cwd, op: eq, value: true }
+  effect: require_approval
+
+# Installed packages and git's own files run code or hold history.
+- list: never_places
+  items: [node_modules, .git]
+
+- rule: Never change installed packages or git (file.write)
+  id: deps-never-file-write
+  agent: deps
+  tool: files
+  operation: file.write
+  resource: { kind: file, match: any }
+  condition:
+    - { field: path_parts, op: contains, list: never_places }
+  effect: deny
+
+- rule: Never change installed packages or git (file.edit)
+  id: deps-never-file-edit
+  agent: deps
+  tool: files
+  operation: file.edit
+  resource: { kind: file, match: any }
+  condition:
+    - { field: path_parts, op: contains, list: never_places }
+  effect: deny
+
+- rule: Never change installed packages or git (file.patch)
+  id: deps-never-file-patch
+  agent: deps
+  tool: files
+  operation: file.patch
+  resource: { kind: file, match: any }
+  condition:
+    - { field: path_parts, op: contains, list: never_places }
+  effect: deny
