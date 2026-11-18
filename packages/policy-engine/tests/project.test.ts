@@ -5,8 +5,8 @@ import {
   joinPath,
   resolveProject,
   type Catalog,
-  type ProjectHost,
 } from "../src/yaml";
+import { memoryHost } from "./support/project-host";
 
 const deny = (operation: string) => `- rule: Deny ${operation}
   tool: github
@@ -51,24 +51,13 @@ const catalog: Catalog = [
   },
 ];
 
-/** A project folder in memory; `links` maps a path to where it really is. */
-function host(
-  files: Record<string, string>,
-  links: Record<string, string | undefined> = {},
-): ProjectHost {
-  return {
-    read: (path) => files[path],
-    real: (path) => (path in links ? links[path] : path),
-  };
-}
-
 const manifest = (...imports: string[]) =>
   `kind: nodrail.project/v1\nimports:\n${imports.map((entry) => `  - ${entry}`).join("\n")}\n`;
 
 const resolve = (
   files: Record<string, string>,
   extra: Partial<Parameters<typeof resolveProject>[0]> = {},
-) => resolveProject({ host: host(files), catalog, ...extra });
+) => resolveProject({ host: memoryHost(files), catalog, ...extra });
 
 const messages = (result: ReturnType<typeof resolveProject>) =>
   result.problems.map((problem) => `${problem.ref}: ${problem.message}`);
@@ -265,7 +254,7 @@ describe("refusing a project", () => {
 
   test("a link out of the folder", () => {
     const result = resolveProject({
-      host: host(
+      host: memoryHost(
         { "nodrail.yaml": manifest("./link.yaml") },
         { "link.yaml": undefined },
       ),
@@ -295,7 +284,7 @@ describe("refusing a project", () => {
       },
     ];
     const result = resolveProject({
-      host: host({ "nodrail.yaml": manifest('"@nodrail/broken"') }),
+      host: memoryHost({ "nodrail.yaml": manifest('"@nodrail/broken"') }),
       catalog: broken,
     });
     expect(messages(result)).toEqual([

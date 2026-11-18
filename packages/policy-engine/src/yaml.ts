@@ -36,8 +36,22 @@ export {
 export {
   MODULE_KIND,
   PROJECT_KIND,
+  RUNTIMES,
   type ModuleManifest,
   type ProjectImport,
+  type ProjectManifest,
+  type Runtime,
 } from "./project-manifest.ts";
-export { bindingsUsed } from "./project-bind.ts";
+export {
+  RESOURCE_API,
+  RESOURCE_KINDS,
+  type ProjectSetup,
+  type ResourceKind,
+  type SetupAgent,
+  type SetupBinding,
+  type SetupPolicy,
+  type SetupTeam,
+} from "./project-resources.ts";
+export { bindingsUsed, renameAgents } from "./project-bind.ts";
+export { SETUP_PLACES, teamRules } from "./project-team.ts";
 export { joinPath } from "./project-paths.ts";

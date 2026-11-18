@@ -1,9 +1,12 @@
-import { readFileSync, realpathSync } from "node:fs";
+import { readdirSync, readFileSync, realpathSync } from "node:fs";
 import { join, relative, sep } from "node:path";
 import type { ProjectHost } from "@nodrail/policy-engine/yaml";
 
 const missing = (error: unknown) =>
   (error as NodeJS.ErrnoException).code === "ENOENT";
+/** Not a file to read: nothing there, or a folder. */
+const notAFile = (error: unknown) =>
+  missing(error) || (error as NodeJS.ErrnoException).code === "EISDIR";
 
 /**
  * The project folder for the resolver. Paths are `/`-separated from the
@@ -17,9 +20,29 @@ export function folderHost(root: string): ProjectHost {
       try {
         return readFileSync(join(base, path), "utf8");
       } catch (error) {
-        if (missing(error)) return undefined;
+        if (notAFile(error)) return undefined;
         throw error;
       }
+    },
+    list(path) {
+      let entries;
+      try {
+        entries = readdirSync(join(base, path), { withFileTypes: true });
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+        if (code === "ENOENT" || code === "ENOTDIR") return undefined;
+        throw error;
+      }
+      // Links are listed too; reading one goes through real(), which refuses
+      // any that lead out of the folder.
+      return entries
+        .filter(
+          (entry) =>
+            (entry.isFile() || entry.isSymbolicLink()) &&
+            /\.ya?ml$/.test(entry.name),
+        )
+        .map((entry) => `${path}/${entry.name}`)
+        .sort();
     },
     real(path) {
       const inside = relative(base, realPath(join(base, path)));

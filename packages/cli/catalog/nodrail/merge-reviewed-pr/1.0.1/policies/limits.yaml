@@ -1,0 +1,93 @@
+# What the merger never does, whatever else a project allows.
+
+# The merger needs no shell. A shell runs scripts other agents can write.
+
+- rule: The merger never uses the shell (command.run)
+  id: merger-no-command-run
+  agent: merger
+  tool: shell
+  operation: command.run
+  resource: { kind: command, match: any }
+  effect: deny
+
+- rule: The merger never uses the shell (command.compound)
+  id: merger-no-command-compound
+  agent: merger
+  tool: shell
+  operation: command.compound
+  resource: { kind: command, match: any }
+  effect: deny
+
+- rule: The merger never uses the shell (command.redacted)
+  id: merger-no-command-redacted
+  agent: merger
+  tool: shell
+  operation: command.redacted
+  resource: { kind: command, match: any }
+  effect: deny
+
+- rule: The merger never pushes through the adapter
+  id: merger-no-adapter-push
+  agent: merger
+  tool: github
+  operation: pr.push
+  resource: { kind: repository, match: any }
+  effect: deny
+
+- rule: The merger never changes files (file.write)
+  id: merger-no-file-write
+  agent: merger
+  tool: files
+  operation: file.write
+  resource: { kind: file, match: any }
+  effect: deny
+
+- rule: The merger never changes files (file.edit)
+  id: merger-no-file-edit
+  agent: merger
+  tool: files
+  operation: file.edit
+  resource: { kind: file, match: any }
+  effect: deny
+
+- rule: The merger never changes files (file.patch)
+  id: merger-no-file-patch
+  agent: merger
+  tool: files
+  operation: file.patch
+  resource: { kind: file, match: any }
+  effect: deny
+
+- rule: The merger never changes files (notebook.edit)
+  id: merger-no-notebook-edit
+  agent: merger
+  tool: files
+  operation: notebook.edit
+  resource: { kind: file, match: any }
+  effect: deny
+
+# The merger may not start the checkers that vouch for its own work.
+
+- rule: The merger never starts qa
+  id: merger-no-start-qa
+  agent: merger
+  tool: claude-code
+  operation: agent
+  resource: { kind: agent, match: exact, value: qa }
+  effect: deny
+
+- rule: The merger never starts gatekeeper
+  id: merger-no-start-gatekeeper
+  agent: merger
+  tool: claude-code
+  operation: agent
+  resource: { kind: agent, match: exact, value: gatekeeper }
+  effect: deny
+
+- rule: The merger never starts reviewer
+  id: merger-no-start-reviewer
+  agent: merger
+  tool: claude-code
+  operation: agent
+  resource: { kind: agent, match: exact, value: reviewer }
+  effect: deny

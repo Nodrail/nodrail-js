@@ -1,0 +1,12 @@
+- required_engine_version: 3
+
+# The merger may merge in your repository. The gate in review.yaml decides
+# when. To have a person approve each merge too, override this rule's effect
+# with require_approval in a file of your own.
+- rule: Merge reviewed pull requests
+  id: merge-reviewed
+  agent: merger
+  tool: github
+  operation: pr.merge
+  resource: { kind: repository, match: exact, value: { binding: repository } }
+  effect: allow

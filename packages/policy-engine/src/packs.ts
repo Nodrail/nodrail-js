@@ -116,6 +116,38 @@ ${pairRules}
   resource: { kind: tool, match: any }
   effect: allow
 
+# Claude Code's task tools, and the search that loads deferred tools such as
+# these. A tool it loads is still decided call by call when it is used.
+- rule: Load tools by search
+  tool: claude-code
+  operation: toolsearch
+  resource: { kind: tool, match: any }
+  effect: allow
+
+- rule: Create a task
+  tool: claude-code
+  operation: taskcreate
+  resource: { kind: tool, match: any }
+  effect: allow
+
+- rule: Update a task
+  tool: claude-code
+  operation: taskupdate
+  resource: { kind: tool, match: any }
+  effect: allow
+
+- rule: List tasks
+  tool: claude-code
+  operation: tasklist
+  resource: { kind: tool, match: any }
+  effect: allow
+
+- rule: Read a task
+  tool: claude-code
+  operation: taskget
+  resource: { kind: tool, match: any }
+  effect: allow
+
 - rule: Ask the person a question
   tool: claude-code
   operation: askuserquestion

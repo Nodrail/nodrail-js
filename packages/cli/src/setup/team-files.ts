@@ -1,0 +1,153 @@
+import { lstatSync, readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import type { ProjectSetup, SetupAgent } from "@nodrail/policy-engine/yaml";
+
+/** Where the effective policy goes, for the hook to read. */
+export const EFFECTIVE_FILE = ".nodrail/effective.apf.yaml";
+
+/** The files the hook keeps from being changed, from the project folder. */
+export const PROTECT_LIST = ".nodrail/protected.txt";
+
+/** A file nodrail writes whole and owns. */
+export type DesiredFile = { path: string; content: Buffer; why: string };
+
+const MAX_SKILL_FILES = 200;
+const MAX_SKILL_BYTES = 1_000_000;
+
+/**
+ * What every host gets from a team: its members, the skills they use copied
+ * under `skillsFolder`, and the effective policy. Each host adds its own
+ * agent files and hook around this.
+ */
+export function teamFiles(input: {
+  root: string;
+  setup: ProjectSetup;
+  effective: string;
+  /** Every local file the policy was read from. */
+  inputs: string[];
+  skillsFolder: string;
+  /** The host's own folders, where its agent files and hooks live. */
+  hostPlaces: string[];
+}) {
+  const { root, setup, effective, skillsFolder } = input;
+  const team = setup.team!;
+  const problems: string[] = [];
+  const folders = new Map<string, string>();
+  const members = setup.agents.filter((agent) =>
+    team.members.includes(agent.name),
+  );
+  /** Each member's skills, by the name the host knows them by. */
+  const skills = new Map<string, string[]>();
+  for (const agent of members)
+    skills.set(
+      agent.name,
+      agent.skills.map((folder) => {
+        const name = folder.split("/").pop()!;
+        const earlier = folders.get(name);
+        if (earlier !== undefined && earlier !== folder)
+          problems.push(
+            `Two skills are named ${name}: ${earlier} and ${folder}. Rename one folder.`,
+          );
+        folders.set(name, folder);
+        return name;
+      }),
+    );
+  const files: DesiredFile[] = [];
+  for (const [name, folder] of folders)
+    files.push(
+      ...skillFiles(root, folder, `${skillsFolder}/${name}`, problems),
+    );
+  files.push(
+    {
+      path: EFFECTIVE_FILE,
+      content: Buffer.from(effective),
+      why: "the effective policy the hook reads",
+    },
+    {
+      path: PROTECT_LIST,
+      content: Buffer.from(protectList(input, members)),
+      why: "the setup's files, which the hook keeps from agents",
+    },
+  );
+  return {
+    team,
+    members,
+    skills,
+    files,
+    problems,
+    skipped: setup.agents
+      .filter((agent) => !team.members.includes(agent.name))
+      .map((agent) => agent.name),
+  };
+}
+
+/**
+ * Every file the setup is made from, and the host's own folders: an agent
+ * that could change one could give itself another agent's powers at the next
+ * apply. The hook refuses any file tool that would change them.
+ */
+function protectList(
+  input: { inputs: string[]; hostPlaces: string[] },
+  members: SetupAgent[],
+) {
+  const paths = new Set([
+    "nodrail.yaml",
+    "nodrail.lock.yaml",
+    ".nodrail",
+    ...input.hostPlaces,
+    ...input.inputs,
+    ...members.flatMap((agent) => [
+      ...(agent.instructions ? [agent.instructions] : []),
+      ...agent.skills,
+    ]),
+  ]);
+  return `# Written by nodrail apply. The setup's files, from the project folder:
+# the policy hook keeps agents from changing them.
+${[...paths].sort().join("\n")}
+`;
+}
+
+/** An agent's own instructions, or a line naming it when it has none. */
+export function instructionsOf(root: string, agent: SetupAgent, team: string) {
+  const body = agent.instructions
+    ? readFileSync(join(root, agent.instructions), "utf8")
+    : `You are ${agent.name}, on team ${team}.\n`;
+  return body.endsWith("\n") ? body : `${body}\n`;
+}
+
+export const byPath = (a: DesiredFile, b: DesiredFile) =>
+  a.path < b.path ? -1 : 1;
+
+/** A skill folder's files, copied as they are. Links are refused. */
+function skillFiles(
+  root: string,
+  folder: string,
+  target: string,
+  problems: string[],
+) {
+  const files: DesiredFile[] = [];
+  const name = target.split("/").pop()!;
+  const walk = (relative: string) => {
+    for (const entry of readdirSync(join(root, folder, relative)).sort()) {
+      const inside = relative ? `${relative}/${entry}` : entry;
+      const stat = lstatSync(join(root, folder, inside));
+      if (stat.isSymbolicLink())
+        problems.push(
+          `${folder}/${inside} is a link; skills are copied without links.`,
+        );
+      else if (stat.isDirectory()) walk(inside);
+      else if (stat.size > MAX_SKILL_BYTES)
+        problems.push(`${folder}/${inside} is over 1 MB.`);
+      else
+        files.push({
+          path: `${target}/${inside}`,
+          content: readFileSync(join(root, folder, inside)),
+          why: `skill ${name}`,
+        });
+    }
+  };
+  walk("");
+  if (files.length > MAX_SKILL_FILES)
+    problems.push(`${folder} has over ${MAX_SKILL_FILES} files.`);
+  return files;
+}

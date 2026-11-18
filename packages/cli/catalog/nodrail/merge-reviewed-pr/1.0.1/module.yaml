@@ -1,0 +1,21 @@
+kind: nodrail.module/v1
+name: "@nodrail/merge-reviewed-pr"
+version: 1.0.1
+description: >-
+  A merger agent may merge pull requests in your repository, and only after
+  QA, the checks and a review have passed on the current head. It never
+  pushes, edits files, uses the shell or starts its own checkers.
+parameters:
+  repository:
+    type: repository
+    description: The repository whose pull requests this governs, as owner/name.
+imports:
+  - policies/merge.yaml
+  - policies/review.yaml
+  - policies/limits.yaml
+roles:
+  merger: Merges reviewed pull requests through the adapter; nothing else.
+  qa: Tests the head and reports pass or fail for that exact revision.
+  gatekeeper: Runs the mechanical checks on the head.
+  reviewer: Reviews the head and reports ship or not.
+  dev: Changes the head. Its later work resets the checkers' verdicts, so they check again.
