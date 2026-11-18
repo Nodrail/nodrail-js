@@ -45,6 +45,14 @@ nodrail-policy eval rules.yaml \
 
 `--unmatched ask` asks a person when no rule covers a call. The default blocks it. `--agent` and `--installation` set who the rules see.
 
+`--protect-list <file>` also protects the files and folders the list names, one per line from the project folder (the folder that holds the list's own folder, as in `.nodrail/protected.txt`), the list itself, and `~/.nodrail`, where nodrail stages its writes. Lines starting with `#` are skipped. A list that can't be read blocks every call. `nodrail apply` writes this list for a team's setup. With a list, the hook also denies any shell command that names one of these paths, or a folder in the project that holds one, and any command that runs Nodrail itself by any path or through a package runner, whatever the rules allow. A shell command can write any file it names, so even a read is refused. A word naming the whole project folder, as in `git add .`, doesn't count.
+
+A shell command that only reads one file, or searches a folder, in a shape the hook knows exactly is also judged as that file read or search, and the stricter of the two decisions holds: a deny over a review over an allow. So the file rules decide `cat src/app.ts` as they decide the Read tool, secrets included, and a rule about the command itself keeps its meaning. The shapes are `cat`, `head`, `tail` (not `-f`), `nl -ba`, `wc`, `sed -n '<lines>p'` and `grep` on one file; `ls`; and `rg`, with or without `--files`, with flags that only shape the output and one optional `-g` glob. A path with a wildcard or a leading `~` is left a command, because the shell expands it first; an `rg` pattern or glob may hold wildcards only where it is quoted. `rg --hidden`, `-u`, `--no-ignore` and `grep -r` stay commands too: they read dotfiles such as `.env` without naming them. Codex reads files this way.
+
+`--host codex` is for Codex, which can't ask a person: it treats an `ask` answer as a failed hook and runs the call. With it, a call that needs a person's review is denied, and the reason says a person must review it.
+
+When Claude Code or Codex says which agent made a call, its subagent's type or the session's `claude --agent`, the rules see that agent instead: the host sets it from the agent definition it started, and the model can't change it. `--agent` then names the entry agent, for calls the host doesn't label. So rules with `agent:` apply per subagent, and a rule on `tool: claude-code`, `operation: agent` decides which agents another may start.
+
 The rule files and folders given to `hook` are protected: a file tool that would write, edit, patch or delete one of them, or a file inside one of the folders, is denied before the rules are read.
 
 **Level 3 preview.** The run-aware Claude Code integration also records subagent starts and finishes. See [Run history in Claude Code (preview)](runs.md#claude-code).

@@ -972,6 +972,80 @@ describe("command rules", () => {
   });
 });
 
+describe("who the local hook says is calling", () => {
+  const team = documentOf(
+    compile(`
+- rule: The editor reads drafts
+  agent: editor
+  command: { prefix: show-draft }
+  effect: allow
+- rule: The publisher publishes
+  agent: publisher
+  command: { prefix: publish }
+  effect: require_approval
+- rule: The editor never publishes
+  agent: editor
+  command: { prefix: publish }
+  effect: deny
+- rule: The entry agent may start the editor only
+  agent: lead
+  tool: claude-code
+  operation: agent
+  resource: { kind: agent, match: exact, value: editor }
+  effect: allow
+`),
+  );
+  const call = (command: string, agent_type?: string) =>
+    JSON.stringify({
+      hook_event_name: "PreToolUse",
+      tool_name: "Bash",
+      tool_input: { command },
+      ...(agent_type ? { agent_type, agent_id: `id-${agent_type}` } : {}),
+    });
+  const start = (subagent_type: string) =>
+    JSON.stringify({
+      hook_event_name: "PreToolUse",
+      tool_name: "Agent",
+      tool_input: { subagent_type, prompt: "go" },
+    });
+  const outcome = (stdin: string, agent?: string) => {
+    const { stdout } = decideToolCall(stdin, {
+      document: team,
+      now,
+      unmatched: "deny",
+      ...(agent ? { agent } : {}),
+    });
+    return stdout
+      ? (
+          JSON.parse(stdout) as {
+            hookSpecificOutput: { permissionDecision: string };
+          }
+        ).hookSpecificOutput.permissionDecision
+      : "allow";
+  };
+
+  test("a subagent is judged by the rules for the agent the host says it is", () => {
+    expect(outcome(call("publish draft-1", "publisher"))).toBe("ask");
+    expect(outcome(call("publish draft-1", "editor"))).toBe("deny");
+    expect(outcome(call("show-draft 1", "editor"))).toBe("allow");
+    expect(outcome(call("show-draft 1", "publisher"))).toBe("deny");
+  });
+
+  test("the host's name wins over the hook's --agent, which names the entry agent", () => {
+    expect(outcome(call("publish draft-1", "editor"), "publisher")).toBe(
+      "deny",
+    );
+    expect(outcome(call("publish draft-1"), "publisher")).toBe("ask");
+    // Named as the host names subagents, whatever its case.
+    expect(outcome(call("publish draft-1", "Publisher"))).toBe("ask");
+  });
+
+  test("an agent starts only the agents its rules allow", () => {
+    expect(outcome(start("editor"), "lead")).toBe("allow");
+    expect(outcome(start("publisher"), "lead")).toBe("deny");
+  });
+});
+
 describe("the local hook", () => {
   const event = (tool_name: string, tool_input: unknown, extra = {}) =>
     JSON.stringify({

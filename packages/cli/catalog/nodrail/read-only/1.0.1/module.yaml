@@ -1,0 +1,10 @@
+kind: nodrail.module/v1
+name: "@nodrail/read-only"
+version: 1.0.1
+description: >-
+  Every agent may read and search the project and run commands that only
+  look, with credentials kept out of reach. Everything else is left to the
+  rest of your policy, or blocked. The same rules as `nodrail policy init
+  read-only`.
+imports:
+  - policies/read-only.yaml

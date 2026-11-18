@@ -1,6 +1,6 @@
 // The nodrail-policy command line, run in-process so every path is measured.
 // Separate-process runs are covered by the docs and package tests.
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test } from "vitest";
@@ -297,5 +297,135 @@ describe("hook", () => {
 
   test("rules that can't load block with exit 2", async () => {
     expect((await cli(["hook", broken], event("git status"))).code).toBe(2);
+  });
+
+  describe("--protect-list", () => {
+    // A project whose setup files are listed, and rules that allow any write.
+    const project = mkdtempSync(join(tmpdir(), "nodrail-protect-"));
+    const anyWrite = write(
+      "any-write.yaml",
+      `- rule: Write anything
+  tool: files
+  operation: file.write
+  resource: { kind: file, match: any }
+  effect: allow
+`,
+    );
+    mkdirSync(join(project, ".nodrail"));
+    mkdirSync(join(project, "skills/style"), { recursive: true });
+    const list = join(project, ".nodrail/protected.txt");
+    writeFileSync(
+      list,
+      "# The setup's own files\nresources/team.yaml\n\nskills/style\n",
+    );
+    const writing = (path: string) =>
+      JSON.stringify({
+        hook_event_name: "PreToolUse",
+        tool_name: "Write",
+        tool_input: { file_path: join(project, path), content: "x" },
+      });
+
+    test.each(["resources/team.yaml", "skills/style/SKILL.md"])(
+      "keeps %s from being written, whatever the rules allow",
+      async (path) => {
+        const result = await cli(
+          ["hook", anyWrite, "--protect-list", list],
+          writing(path),
+        );
+        expect(result.stdout).toContain('"deny"');
+      },
+    );
+
+    test("leaves the rest to the rules", async () => {
+      const result = await cli(
+        ["hook", anyWrite, "--protect-list", list],
+        writing("src/app.ts"),
+      );
+      expect(result).toMatchObject({ code: 0, stdout: "" });
+    });
+
+    test("a list that can't be read blocks with exit 2", async () => {
+      const result = await cli(
+        ["hook", anyWrite, "--protect-list", join(project, "missing.txt")],
+        writing("src/app.ts"),
+      );
+      expect(result.code).toBe(2);
+      expect(result.stderr).toContain("can't read the protect list");
+    });
+
+    // Shell commands: a project with a setup, and rules that allow any command.
+    const anyCommand = write(
+      "any-command.yaml",
+      `- rule: Any command
+  tool: shell
+  operation: command.run
+  resource: { kind: command, match: any }
+  effect: allow
+- rule: Any compound
+  tool: shell
+  operation: command.compound
+  resource: { kind: command, match: any }
+  effect: allow
+`,
+    );
+    mkdirSync(join(project, "resources"), { recursive: true });
+    const running = (command: string) =>
+      JSON.stringify({
+        hook_event_name: "PreToolUse",
+        tool_name: "Bash",
+        tool_input: { command },
+        cwd: project,
+      });
+    const shell = (command: string) =>
+      cli(["hook", anyCommand, "--protect-list", list], running(command));
+
+    test.each([
+      "cp /tmp/x resources/team.yaml",
+      "sed -i s/a/b/ resources/team.yaml",
+      "echo '{}' > .nodrail/protected.txt",
+      "rm -r resources",
+      "git checkout -- skills/style",
+      "./node_modules/.bin/nodrail apply --yes",
+      "npx @nodrail/cli apply --yes",
+      "cd sub && ../nodrail-policy hook x",
+      "cp evil ~/.nodrail/writes/x/setup.json",
+    ])("denies %s, whatever the rules allow", async (command) => {
+      const result = await shell(command);
+      expect(result.stdout).toContain('"deny"');
+      expect(result.stdout).toContain("part of the setup this hook enforces");
+    });
+
+    test.each(["npm test", "git add .", "git status", "cat src/app.ts"])(
+      "leaves %s to the rules",
+      async (command) => {
+        expect(await shell(command)).toMatchObject({ code: 0, stdout: "" });
+      },
+    );
+  });
+
+  describe("--host codex", () => {
+    const review = write(
+      "review.yaml",
+      `- rule: Pushes need a person
+  command: { prefix: git push }
+  effect: require_approval
+`,
+    );
+    test("a review is denied, saying a person must approve it", async () => {
+      const asked = await cli(["hook", review], event("git push"));
+      expect(asked.stdout).toContain('"ask"');
+      const codex = await cli(
+        ["hook", review, "--host", "codex"],
+        event("git push"),
+      );
+      expect(codex.stdout).toContain('"deny"');
+      expect(codex.stdout).toContain("needs a person to review");
+      expect(codex.stdout).toContain("This host can't ask a person");
+      const unmatched = await cli(
+        ["hook", review, "--host", "codex", "--unmatched", "ask"],
+        event("ls"),
+      );
+      expect(unmatched.stdout).toContain('"deny"');
+    });
   });
 });

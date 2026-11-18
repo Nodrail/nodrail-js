@@ -11,8 +11,9 @@ export const MANIFEST_FILE = "nodrail.yaml";
 export const LOCK_FILE = "nodrail.lock.yaml";
 const LOCK_SCHEMA = 1;
 
-export const sha256 = (text: string) =>
-  createHash("sha256").update(text, "utf8").digest("hex");
+/** Text is hashed as UTF-8; bytes as they are. */
+export const sha256 = (data: string | Uint8Array) =>
+  createHash("sha256").update(data).digest("hex");
 
 const hashed = z.object({ path: z.string(), sha256: z.string() }).strict();
 

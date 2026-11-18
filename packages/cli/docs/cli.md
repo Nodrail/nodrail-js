@@ -30,6 +30,8 @@ Run these in the folder that holds `nodrail.yaml`, usually the root of your repo
 | `add <@nodrail/module \| ./file>` | Adds a catalog module or a local file, and updates the lock    | 0 done, 1 refused                           |
 | `policy lock`                     | Shows the permission changes since the last lock, records them | 0 done or up to date, 1 refused             |
 | `policy export --frozen`          | Prints the locked policy as one APF file                       | 0 printed, 1 anything differs from the lock |
+| `plan` (preview)                  | Shows what `nodrail apply` would set up for the team           | 0 could apply, 1 something blocks it        |
+| `apply` (preview)                 | Sets the team up on its host, after showing the plan           | 0 done or nothing to do, 1 refused          |
 
 Usage mistakes exit with 2, such as `policy export` without `--frozen`.
 
@@ -82,6 +84,67 @@ A shell redirect empties the target file before `nodrail` runs. In CI, export to
 ```sh
 nodrail policy export --frozen > effective.apf.yaml.tmp && mv effective.apf.yaml.tmp effective.apf.yaml
 ```
+
+### `plan` (preview)
+
+```sh
+nodrail plan
+nodrail plan --json
+```
+
+`plan` reads the [team's resources](playbooks.md#give-the-roles-to-your-agents-preview) and shows what `nodrail apply` would set up for the host `runtime` names. It only reads: it writes no file and installs nothing. For `runtime: claude-code` it plans:
+
+| File | What it holds |
+| --- | --- |
+| `.claude/agents/<name>.md` | Each team member: its description, model, skills to preload, and its instructions as the body |
+| `.claude/skills/<skill>/` | Each member's skill folders, copied |
+| `.nodrail/effective.apf.yaml` | The locked policy, exactly what `policy export --frozen` prints |
+| `.claude/settings.json` | `"agent"` set to the team's entry agent, and a `PreToolUse` hook running `nodrail policy hook` on that policy with `onFailure: "block"`. Other settings and hooks stay as they are. |
+
+Each file is marked `+` to create, `~` to update, `-` to remove, `=` unchanged, or `!` when apply would refuse. A file that already holds exactly what nodrail would write is `=` and stays yours: nodrail never removes it later. Settings behind a link, or with `disableAllHooks` on, are `!`. apply updates or removes only files it wrote, as recorded in `.nodrail/setup-state.json`, and only while they still hold what it wrote. A file already there that nodrail didn't write, one edited since, a path through a link, and an `"agent"` setting someone else chose are all `!`.
+
+It also checks that the policy matches the lock, that `claude` 2.1.295 or later and `nodrail` are on `PATH` (the hook runs `nodrail`; with `onFailure: "block"`, a missing one blocks every tool call), and that skills hold no links. `plan` exits with 1 when anything is marked `!`.
+
+For `runtime: codex` it plans:
+
+| File | What it holds |
+| --- | --- |
+| `.codex/config.toml` | The entry agent's instructions as `developer_instructions`, and its model. The session you start is the entry agent. |
+| `.codex/agents/<name>.toml` | Each other member: name, description, instructions and model |
+| `.agents/skills/<skill>/` | Each member's skill folders, copied |
+| `.codex/hooks.json` | A `PreToolUse` hook running `nodrail policy hook` on the policy |
+| `.nodrail/effective.apf.yaml` | The locked policy, as for Claude Code |
+
+nodrail owns these files whole: one that is already there and wasn't written by nodrail is `!`. A rule that needs a person's review is a deny on Codex, because Codex can't ask: the hook runs with `--host codex`. It checks for `codex` 0.169.0 or later.
+
+Codex runs a project's config and hooks only after you trust them, and nodrail never does that for you. Until you have, Codex runs your agents without the policy. Once `apply` has written the files:
+
+1. Open `codex` in the folder and trust it.
+2. Run `/hooks` in Codex and trust nodrail's hook.
+
+`plan` and `apply` ask Codex whether it runs nodrail's hook here, through `codex app-server`, without changing anything. Until it does, `plan` says which step is missing and `apply` exits with 1 after writing the files. The hook names the policy by its full path, because Codex runs hooks in the folder you started it in; after moving the project, run `apply` again and trust the hook again. When Codex can't run `nodrail` at all, the hook answers with a deny, so Codex blocks the call rather than letting it through. Codex reads files through its shell (`cat`, `sed -n`, `rg`): the hook judges those as the file reads they are, so a policy that allows reading files lets Codex read them, and the same secret rules hold. Codex on Windows isn't set up yet.
+
+### `apply` (preview)
+
+```sh
+nodrail apply
+nodrail apply --yes
+```
+
+`apply` shows the same plan, asks before changing anything, and makes exactly those changes. It refuses while anything is marked `!`, and changes nothing then. Without a terminal it needs `--yes`, which you give once you have read `nodrail plan`; `--json` needs `--yes` too.
+
+It runs as the project's only writer, like `add` and `lock`: a second `nodrail` waits its turn and names the one at work. Inside, it plans again, and if anything differs from what you were shown, it stops without changing anything. Every change is staged first in a journal in your home folder, then made one file at a time, with `.nodrail/setup-state.json` last. If it stops partway, the next `nodrail apply` or `nodrail policy lock` finishes it. A file someone changes while it runs is left alone and named.
+
+Run it again after changing a resource, a skill or a binding, and lock the policy first: it updates only the files that changed and removes the ones no longer needed, such as a member who left the team. With nothing to change it writes nothing.
+
+With `start: true` in `nodrail.yaml` and a terminal, it then opens the host. Otherwise run `claude` or `codex` in the folder: it starts as the entry agent, behind the policy hook. For Codex, `apply` is done only once Codex runs nodrail's hook; see above.
+
+A session that is already open keeps the agent files, skills and settings it started with, and `apply` says when it changed any: start a new session to use them. The policy is different: the hook reads it at every tool call, so a policy change applies to open sessions from their next call.
+
+To go back to an earlier setup, put back the resources, skills and policy files as they were, for example with `git checkout <commit> -- nodrail.yaml nodrail.lock.yaml resources skills policies`, then run `nodrail apply`. The setup is made from those files alone, so `apply` writes the earlier files back exactly. Files that were yours before nodrail never changed, so there is nothing of yours to restore.
+
+The policy has to cover every call your agents make, including the ones your own instructions ask for. If your user-wide instructions, such as `~/.codex/AGENTS.md` or `~/.claude/CLAUDE.md`, have agents run a command at the start, that command is blocked like any other until a rule allows it.
+
 
 ## Policy commands
 

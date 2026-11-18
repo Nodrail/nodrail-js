@@ -208,10 +208,36 @@ export async function exportFrozen(args: string[], io: Io) {
     throw new UsageError(
       "Export reads only a reviewed lock: use `nodrail policy export --frozen`.",
     );
-  const root = io.cwd;
-  if (writeInProgress({ root, home: io.home }))
+  const { text } = frozenPolicy({ root: io.cwd, home: io.home });
+  io.out(text.replace(/\n$/, ""));
+  return 0;
+}
+
+/**
+ * The locked policy as one APF file, offline, only when every file still
+ * matches the lock; otherwise a CliError that says why and what to run.
+ */
+/** What a setup is made from: its resources, and every local file read. */
+export const setupOf = (plan: ProjectPlan) => ({
+  setup: plan.resolution.setup,
+  inputs: plan.resolution.inputs.flatMap((input) =>
+    input.kind === "local" ? [input.path] : [],
+  ),
+});
+
+export function frozenPolicy({
+  root,
+  home,
+  held = false,
+}: {
+  root: string;
+  home: string;
+  /** This process holds the project, so its own write isn't someone else's. */
+  held?: boolean;
+}) {
+  if (!held && writeInProgress({ root, home }))
     throw new CliError(
-      "A change to this project was interrupted or is under way. Run `nodrail policy lock` to settle it.",
+      "A change to this project was interrupted or is under way. Run `nodrail policy lock` or `nodrail apply` to settle it.",
     );
   const project = readProject(root);
   if (project.manifest === null)
@@ -241,6 +267,5 @@ export async function exportFrozen(args: string[], io: Io) {
   const problem = drift(project.lock, plan.lock);
   if (problem)
     throw new CliError(`${problem}. Run \`nodrail policy lock\` to review it.`);
-  io.out(plan.effective!.text.replace(/\n$/, ""));
-  return 0;
+  return { text: plan.effective!.text, ...setupOf(plan) };
 }

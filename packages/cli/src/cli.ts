@@ -5,10 +5,11 @@ import { activity, insights, run, runs } from "./commands/read.ts";
 import { policy } from "./commands/policy.ts";
 import { add } from "./commands/project.ts";
 import { rules } from "./commands/rules.ts";
+import { apply, plan } from "./commands/setup.ts";
 import { commandFor, type Command, type Values } from "./context.ts";
 import { describeFailure, exitCodeOf, UsageError, type Io } from "./io.ts";
 
-export const VERSION = "0.1.0";
+export const VERSION = "0.2.0";
 
 const options = {
   json: { type: "boolean" },
@@ -48,6 +49,8 @@ const commands: Record<string, Entry> = {
   insights: { run: insights, options: ["days"] },
   rules: { run: rules, options: ["yes"] },
   add: { run: add, options: [] },
+  plan: { run: plan, options: [] },
+  apply: { run: apply, options: ["yes"] },
 };
 
 export const HELP = `nodrail — your Nodrail workspace from the terminal
@@ -71,6 +74,8 @@ Project policy (offline, no account; run where nodrail.yaml is)
   add <module | ./file>  Add a catalog module (@nodrail/…) or a rules file
   policy lock            Review the permission changes and record them
   policy export --frozen The locked policy as one APF file, or an error
+  plan                   What \`nodrail apply\` would set up for the team (preview)
+  apply                  Set up the team on its host, after showing the plan (preview)
 
 Policies (offline, no account), the same as nodrail-policy
   policy init <pack>     A starter rules file: read-only or repo-work

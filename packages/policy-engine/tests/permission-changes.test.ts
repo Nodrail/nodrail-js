@@ -1,8 +1,8 @@
 // What an edit to a policy does to permissions, as `nodrail policy lock` shows
 // it to a reviewer. Removing a deny or a gate requirement must never go quiet.
 import { describe, expect, test } from "vitest";
+import { compiled } from "./support/compiled";
 import {
-  compilePolicies,
   permissionChanges,
   renderPermissionChanges,
   type PermissionChange,
@@ -13,12 +13,6 @@ import type {
   PolicyGate,
   PolicyRule,
 } from "../src/policies";
-
-const compiled = (text: string): PolicyDocument => {
-  const result = compilePolicies([{ name: "rules.yaml", text }]);
-  if (!result.ok) throw new Error(JSON.stringify(result.issues));
-  return result.document;
-};
 
 const diff = (before: string | null, after: string) =>
   permissionChanges(before === null ? null : compiled(before), compiled(after));

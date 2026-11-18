@@ -41,7 +41,7 @@ nodrail add @nodrail/open-reviewed-pr
 ```
 
 ```text
-Added @nodrail/open-reviewed-pr@1.0.0
+Added @nodrail/open-reviewed-pr@1.0.1
 Changed: nodrail.yaml, nodrail.lock.yaml
   @nodrail/open-reviewed-pr: configuration required. Set with.repository in nodrail.yaml.
 Permissions: pending until every module has its values.
@@ -123,12 +123,12 @@ So an export always matches the policy someone reviewed and committed. To change
 
 ### Versions
 
-`nodrail add @nodrail/open-reviewed-pr` takes the catalog's version. `nodrail add @nodrail/open-reviewed-pr@1.0.0` asks for that exact version; a version the catalog doesn't have is refused, and nothing changes. Once locked, a module stays at its version.
+`nodrail add @nodrail/open-reviewed-pr` takes the catalog's newest version. `nodrail add @nodrail/open-reviewed-pr@1.0.0` asks for that exact version; a version the catalog doesn't have is refused, and nothing changes. Once locked, a module stays at its version, even when a newer `nodrail` brings a newer one: to move to it, add it with its version, such as `@1.0.1`, and review the change.
 
 If a module's files at the locked version don't match the hashes in the lock, `lock` and `export --frozen` both stop:
 
 ```text
-nodrail: @nodrail/open-reviewed-pr@1.0.0 doesn't match nodrail.lock.yaml (policies/open.yaml). The installed package was changed; reinstall nodrail, or ask for another version with `nodrail add @nodrail/open-reviewed-pr@<version>`.
+nodrail: @nodrail/open-reviewed-pr@1.0.1 doesn't match nodrail.lock.yaml (policies/open.yaml). The installed package was changed; reinstall nodrail, or ask for another version with `nodrail add @nodrail/open-reviewed-pr@<version>`.
 ```
 
 That is an error, never an update. The same version must always mean the same files.
@@ -229,6 +229,83 @@ Permissions:
 
 The same `override` can replace a field, such as `otherwise`, or append to a rule's `condition` or `tags`. A replacement can weaken a module's deny or gate: the review marks it `!`. See [Layering files](../../policy-engine/docs/rules.md#layering-files) for every form.
 
+## Give the roles to your agents (preview)
+
+A module's rules name roles, such as `github` or `qa`, not your agents. To run a playbook with your own agents, declare them as resources and bind the module's roles to them. `nodrail.yaml` points at the resources:
+
+```yaml
+kind: nodrail.project/v1
+runtime: claude-code
+resources: ./resources
+imports:
+  - ref: "@nodrail/open-reviewed-pr"
+    with:
+      repository: acme/widgets
+```
+
+`resources` is a file, a folder of `.yaml` files, or a list of both. Each document in them is one resource:
+
+```yaml
+apiVersion: apf.nodrail.com/v1alpha1
+kind: Agent
+metadata: { name: publisher }
+spec:
+  description: Opens the draft pull request once the candidate is checked.
+  instructions: ./agents/publisher.md
+  skills: [./skills/release-notes]
+---
+apiVersion: apf.nodrail.com/v1alpha1
+kind: Team
+metadata: { name: release }
+spec:
+  entry: lead
+  members: [lead, publisher, tester, gate, critic, builder]
+  handoffs:
+    - { from: lead, to: publisher }
+---
+apiVersion: apf.nodrail.com/v1alpha1
+kind: PolicyBinding
+metadata: { name: open-prs }
+spec:
+  policy: "@nodrail/open-reviewed-pr"
+  roles:
+    github: publisher
+    qa: tester
+    gatekeeper: gate
+    reviewer: critic
+    dev: builder
+```
+
+| Kind | What it declares |
+| --- | --- |
+| `Agent` | One agent: its name, `description`, `instructions` (a Markdown file), `skills` (folders with a `SKILL.md`) and `model`. Paths start with `./` and are read from the resource's file. |
+| `Team` | The agents that work together, the `entry` agent a session starts as, and the `handoffs`: who may start whom. |
+| `Policy` | A rules file of your own, `spec: { source: ./policies/x.yaml }`. It does nothing until a binding names it. |
+| `PolicyBinding` | Which agent plays each role a module or Policy names. |
+
+A binding renames the roles everywhere the policy names an agent: a rule's `agent`, a gate's `requires` and `since`, a budget's `step_agent`, and a `kind: agent` resource, such as which agents a role may start. The lock covers the resource files like any other, so a changed binding stops `export --frozen` until it is reviewed and locked again.
+
+`lock` refuses a binding when:
+
+- the policy names an agent that no role maps and no team member is called. `@nodrail/open-reviewed-pr` and `@nodrail/merge-reviewed-pr` also name `dev`, the agent whose later work resets the checkers' verdicts; map it too.
+- a role it maps is one the policy never names, which is usually a typo.
+- two names the policy uses would be one agent: two roles mapped to one agent, or a role mapped to an agent the policy already names for another. That agent would vouch for its own work.
+- a role goes to an agent that isn't on the team.
+
+The team adds rules of its own to the effective policy, after everything else:
+
+- each member may start the members it hands off to, and no other member, itself included. The team's handoffs are the only way work moves between its agents. Agents that aren't on the team, such as a host's built-in ones, are left to the rest of the policy.
+- no agent may write, edit, patch or delete the setup: `.claude`, `.codex`, `.agents`, `.nodrail`, `nodrail.yaml` and `nodrail.lock.yaml`. An agent that could rewrite an agent definition could make itself that agent.
+- no agent may run `nodrail` or `nodrail-policy`, so none can lock and apply a setup it changed.
+
+These are denies, and deny wins, so no other file can widen them. `nodrail apply` also lists every file the setup is made from (the resources, your own policy files, the agents' instructions and skills) in `.nodrail/protected.txt`, and the hook refuses any file tool that would change one, whatever the rules say.
+
+The hook also denies any shell command that names one of those files, or runs Nodrail by any path, whatever the rules allow. Whole-project commands such as `git checkout .` or `rm -r .` don't name a setup file, so a policy that allows them can still undo the setup: allow the commands your agents need, not the shell.
+
+An agent's instructions and skills can't live in `.claude`, `.codex`, `.agents` or `.nodrail`: nodrail writes those folders.
+
+`runtime` (`claude-code` or `codex`) and `start` are for setting up the host. [`nodrail plan`](cli.md#plan-preview) shows what would be set up, without changing anything, and [`nodrail apply`](cli.md#apply-preview) sets it up, on Claude Code or Codex. Only the root `nodrail.yaml` may declare them, and a module nobody binds compiles exactly as before.
+
 ## Activate an export
 
 Agents follow a playbook only through an enforcement point that reads the export. Which one depends on the calls the playbook covers.
@@ -249,7 +326,7 @@ nodrail policy hook effective.apf.yaml
 - **A module is only as good as its enforcement point.** A GitHub module's guarantees cover the calls that go through a trusted adapter, with evidence that adapter supplies. Calls that bypass it aren't seen.
 - **Agent names are reported, not authenticated.** `github`, `merger` or `triage` are the names your integration gives the caller. Read [the security model](../../policy-engine/docs/security-model.md) before relying on them.
 - **Gates need engine level 3**, which is a preview. Receipts are self-reported: a gate proves a step reported a verdict, not that the work was good.
-- **With the local hook, checkers vouch for themselves.** A session's agent name comes from the hook's `--agent` flag, so every subagent in that session shares it, and a verdict is whatever the checker's last message said. The modules stop the gated roles (`github`, `merger`, `deps`) from starting their own checkers, but a guarantee that QA, the checks and review really ran on the candidate needs an adapter that collects that evidence on the host, outside the agent's reach.
-- **Protect the policy itself.** Agents shouldn't be able to edit `nodrail.yaml`, `nodrail.lock.yaml`, the files they import, or the exported policy. The `repo-work` starter pack protects the first two; `nodrail policy lock` compares with the lock as last committed in git, so a change an agent made and locked shows up in the review.
+- **With the local hook, checkers vouch for themselves.** The hook judges a subagent's call as the subagent Claude Code or Codex says made it, and the session's other calls as its `--agent`. A verdict, though, is whatever the checker's last message said. The modules stop the gated roles (`github`, `merger`, `deps`) from starting their own checkers, but a guarantee that QA, the checks and review really ran on the candidate needs an adapter that collects that evidence on the host, outside the agent's reach.
+- **Protect the policy itself.** Agents shouldn't be able to edit `nodrail.yaml`, `nodrail.lock.yaml`, the files they import, the resources and the agent definitions they set up, or the exported policy. A team set up with `nodrail apply` protects all of these from file tools; without one, the `repo-work` starter pack protects the first two; `nodrail policy lock` compares with the lock as last committed in git, so a change an agent made and locked shows up in the review.
 - **The lock covers files, not people.** It proves the export matches what was committed. Who may change `nodrail.yaml`, the lock and the deployed export is up to your repository's review rules. Keep them out of the agent's reach.
 - **The catalog comes with `nodrail`.** The modules you can add are the ones bundled in your installed version. There is no registry, and nothing is downloaded.

@@ -1,0 +1,13 @@
+# Merging waits for QA, the checks and a review of the current head. The
+# adapter supplies only evidence for that head; a push after QA resets it.
+- gate: Require QA, checks and review on the head before merging
+  id: reviewed-merge
+  agent: merger
+  tool: github
+  operation: pr.merge
+  resource: { kind: repository, match: exact, value: { binding: repository } }
+  requires:
+    - { agent: qa, verdict: pass, since: [dev] }
+    - { agent: gatekeeper, verdict: pass, since: [dev] }
+    - { agent: reviewer, verdict: ship, since: [dev] }
+  otherwise: deny

@@ -15,6 +15,9 @@ import { fileURLToPath } from "node:url";
 const here = dirname(fileURLToPath(import.meta.url));
 const cli = resolve(here, "..");
 const engine = resolve(cli, "../policy-engine");
+const { version: expected } = JSON.parse(
+  readFileSync(join(cli, "package.json"), "utf8"),
+);
 
 const shell = process.platform === "win32";
 const run = (command, args, cwd) =>
@@ -81,7 +84,7 @@ function checkCli(folder) {
     env,
     shell,
   });
-  if (version.status !== 0 || version.stdout.trim() !== "0.1.0")
+  if (version.status !== 0 || version.stdout.trim() !== expected)
     fail(`nodrail --version: ${version.stdout}${version.stderr}`);
   const help = spawnSync(bin, ["--help"], {
     cwd: folder,

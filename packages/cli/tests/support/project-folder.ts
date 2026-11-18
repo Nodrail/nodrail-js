@@ -1,0 +1,32 @@
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { fakeIo } from "./fake-io.ts";
+
+/**
+ * A project folder on disk with these files, and `nodrail` run in it.
+ * Offline: any network use fails the test.
+ */
+export function projectFolder(
+  files: Record<string, string> = {},
+  env?: Record<string, string>,
+) {
+  const cwd = mkdtempSync(join(tmpdir(), "nodrail-project-"));
+  // The person's home, where nodrail stages writes, the same for every run.
+  const home = mkdtempSync(join(tmpdir(), "nodrail-home-"));
+  const write = (path: string, text: string) => {
+    mkdirSync(join(cwd, path, ".."), { recursive: true });
+    writeFileSync(join(cwd, path), text);
+  };
+  for (const [path, text] of Object.entries(files)) write(path, text);
+  const fetch = (() => {
+    throw new Error("network used");
+  }) as unknown as typeof globalThis.fetch;
+  const read = (path: string) => readFileSync(join(cwd, path), "utf8");
+  const run = async (...argv: string[]) => {
+    const terminal = fakeIo({ cwd, home, fetch, env });
+    const code = await terminal.run(...argv);
+    return { code, out: terminal.stdout(), err: terminal.stderr() };
+  };
+  return { cwd, home, read, write, run };
+}

@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.0
+
+Released with `@nodrail/policy-engine` 0.4.0, which it uses. The hook
+describes Codex's agent calls as that version does: starting one
+(`collaborationspawn_agent`, `spawn_agent`) is `tool: codex`,
+`operation: agent` on its `agent_type`, and the other collaboration calls are
+`tool: codex` with their own operation. Before, they read as unknown Claude
+Code tools. Otherwise the client and its hook behave as in 0.3.0.
+
 ## 0.3.0
 
 Released with `@nodrail/policy-engine` 0.3.0, which it uses; the client and its

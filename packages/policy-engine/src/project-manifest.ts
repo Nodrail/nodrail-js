@@ -37,13 +37,46 @@ const importEntry = z.union([
     .strict(),
 ]);
 
+/** The hosts `nodrail plan` and `nodrail apply` can set up. */
+export const RUNTIMES = ["claude-code", "codex"] as const;
+export type Runtime = (typeof RUNTIMES)[number];
+
+/**
+ * A resource's name: the agent name hosts and runs use, already in the form
+ * `agentName` gives, so a rule, a gate and the host all spell it one way.
+ */
+export const resourceName = z
+  .string()
+  .regex(
+    /^[a-z0-9][a-z0-9_-]{0,62}$/,
+    "Lowercase letters, digits, - and _, starting with a letter or digit",
+  );
+
+/** A file or folder in the project, written from the file that names it. */
+export const localRef = z
+  .string()
+  .max(300)
+  .regex(/^\.\.?\/[A-Za-z0-9._/-]*$/, "A path that starts with ./");
+
+/** What nodrail.yaml alone may say: the setup `plan` and `apply` make. */
+export const setupFields = {
+  runtime: z.enum(RUNTIMES).optional(),
+  /** The Team to start; optional when the resources hold one. */
+  team: resourceName.optional(),
+  /** Resource files, or folders whose .yaml files are all resources. */
+  resources: z.union([localRef, z.array(localRef).max(50)]).optional(),
+  start: z.boolean().optional(),
+};
+
 /** nodrail.yaml, or a local manifest it imports. */
 export const projectManifest = z
   .object({
     kind: z.literal(PROJECT_KIND),
     imports: z.array(importEntry).max(200).default([]),
+    ...setupFields,
   })
   .strict();
+export type ProjectManifest = z.infer<typeof projectManifest>;
 
 const parameter = z
   .object({
