@@ -1,0 +1,33 @@
+- rule: Keep merge outside the publisher role
+  id: no-merge
+  agent: github
+  tool: github
+  operation: pr.merge
+  resource: { kind: repository, match: any }
+  effect: deny
+
+# The publisher may not start the checkers that vouch for its own work.
+
+- rule: The publisher never starts qa
+  id: github-no-start-qa
+  agent: github
+  tool: claude-code
+  operation: agent
+  resource: { kind: agent, match: exact, value: qa }
+  effect: deny
+
+- rule: The publisher never starts gatekeeper
+  id: github-no-start-gatekeeper
+  agent: github
+  tool: claude-code
+  operation: agent
+  resource: { kind: agent, match: exact, value: gatekeeper }
+  effect: deny
+
+- rule: The publisher never starts reviewer
+  id: github-no-start-reviewer
+  agent: github
+  tool: claude-code
+  operation: agent
+  resource: { kind: agent, match: exact, value: reviewer }
+  effect: deny

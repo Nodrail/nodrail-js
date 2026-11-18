@@ -10,6 +10,7 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import { CliError } from "../io.ts";
+import { hasJournal, replayJournal } from "./journal.ts";
 import { LOCK_FILE, MANIFEST_FILE, sha256 } from "./lockfile.ts";
 
 /** The only files a project write ever replaces. */
@@ -88,6 +89,18 @@ function staged(folder: string): Record<string, string> | null {
  * the project keeps its previous files. Either way it is whole again.
  */
 function recover(place: Place, folder: string) {
+  if (hasJournal(folder)) {
+    // An apply's journal: finish it if it was marked ready, else drop it.
+    // Its last entry is the setup state, so a stop partway leaves files the
+    // next plan sees as already right or as not nodrail's, never as owned.
+    // The folder goes even if finishing fails, so the project isn't held.
+    try {
+      replayJournal(place.root, folder);
+    } finally {
+      rmSync(folder, { recursive: true, force: true });
+    }
+    return;
+  }
   const files = staged(folder);
   if (files)
     for (const [name, text] of Object.entries(files))
@@ -99,16 +112,32 @@ function recover(place: Place, folder: string) {
 export const writeInProgress = (place: Place) =>
   existsSync(stagingFolder(place));
 
+/**
+ * Puts the lock folder in place whole, its owner already inside: prepared
+ * beside it, then renamed. Another nodrail never sees it without an owner,
+ * so it can't take a live writer for a dead one. False when it exists.
+ */
+function claim(folder: string) {
+  const prepared = `${folder}.${process.pid}.claim`;
+  rmSync(prepared, { recursive: true, force: true });
+  mkdirSync(prepared);
+  writeFileSync(join(prepared, "owner"), String(process.pid), { flush: true });
+  try {
+    renameSync(prepared, folder);
+    return true;
+  } catch (error) {
+    rmSync(prepared, { recursive: true, force: true });
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "EEXIST" || code === "ENOTEMPTY" || code === "EPERM")
+      return false;
+    throw error;
+  }
+}
+
 function takeLock(place: Place, folder: string) {
   mkdirSync(join(folder, ".."), { recursive: true });
   for (let attempt = 0; attempt < 2; attempt += 1) {
-    try {
-      mkdirSync(folder);
-      writeFileSync(join(folder, "owner"), String(process.pid));
-      return;
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-    }
+    if (claim(folder)) return;
     const owner = Number(readOr(join(folder, "owner")));
     if (owner && owner !== process.pid && alive(owner))
       throw new CliError(
@@ -131,9 +160,7 @@ export function writeProject(
   place: Place,
   change: () => Record<string, string> | null,
 ) {
-  const folder = stagingFolder(place);
-  takeLock(place, folder);
-  try {
+  holdProject(place, (folder) => {
     const files = change() ?? {};
     const names = Object.keys(files);
     if (names.some((name) => !WRITABLE.has(name)))
@@ -154,8 +181,20 @@ export function writeProject(
       });
       for (const name of names) replace(place.root, name, files[name]!);
     }
+  });
+}
+
+/**
+ * Runs `work` as the project's only writer, with the staging folder for its
+ * writes. Whatever it staged and marked ready is the project afterwards, even
+ * if it stopped partway: the finish below, or the next writer, completes it.
+ */
+export function holdProject<T>(place: Place, work: (folder: string) => T): T {
+  const folder = stagingFolder(place);
+  takeLock(place, folder);
+  try {
+    return work(folder);
   } finally {
-    // Past `ready`, the new files are the project: finish putting them in place.
     recover(place, folder);
   }
 }

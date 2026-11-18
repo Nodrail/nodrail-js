@@ -219,6 +219,25 @@ function trimShellSpace(line: string) {
   return line.slice(start, end);
 }
 
+/**
+ * The words of one plain command, as a shell would split them: null for a
+ * chain, shell syntax, an assignment in front, or quoting that never closes.
+ * Unlike classifyCommand, a program that can run others is still returned:
+ * the caller decides which exact shapes it reads.
+ */
+export function plainWords(line: string): string[] | null {
+  const text = trimShellSpace(line);
+  if (
+    chainParts(text) ||
+    shellSyntax.test(text) ||
+    unusualWhitespace.test(text)
+  )
+    return null;
+  const words = splitWords(text);
+  if (!words?.length || assignment.test(words[0] ?? "")) return null;
+  return words;
+}
+
 /** Judges a line a shell would run. */
 export function classifyCommand(line: string): CommandShape {
   const text = trimShellSpace(line);

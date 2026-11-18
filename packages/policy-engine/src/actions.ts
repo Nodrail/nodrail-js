@@ -5,6 +5,8 @@ import {
 } from "./commands.ts";
 import { fingerprint } from "./protocol.ts";
 import { agentName } from "./names.ts";
+import { codexDescribers } from "./codex-actions.ts";
+import { nonEmptyText } from "./text.ts";
 import {
   bounded,
   MAX_INLINE_INPUT,
@@ -29,8 +31,7 @@ import type { ActionDescriptor, JsonValue } from "./protocol.ts";
 
 const MAX_RESOURCE = 512;
 const MAX_COMMAND_ID = MAX_RESOURCE - 42;
-export const nonEmptyText = (value: unknown) =>
-  typeof value === "string" && value ? value : null;
+export { nonEmptyText } from "./text.ts";
 
 export type ToolInput = Record<string, unknown>;
 
@@ -97,7 +98,7 @@ type FileTool = {
   content: (input: ToolInput) => unknown;
 };
 
-function fileCall(
+export function fileCall(
   { operation, pathField, content }: FileTool,
   input: ToolInput,
   cwd: string | null,
@@ -136,7 +137,7 @@ function globRoot(pattern: string) {
  * file pattern names, so a pattern like /home/me/.ssh/* or **\/.env can't
  * search where a rule forbids reading.
  */
-function searchCall(
+export function searchCall(
   input: ToolInput,
   cwd: string | null,
   filePattern: unknown,
@@ -353,7 +354,7 @@ function subagentCall(input: ToolInput): ActionDescriptor {
 }
 
 const whatIsWritten = (input: ToolInput) => input.content;
-const wholeInput = (input: ToolInput) => input;
+export const wholeInput = (input: ToolInput) => input;
 
 type Describe = (
   input: ToolInput,
@@ -367,6 +368,7 @@ const describers = new Map<string, Describe>([
   ["Agent", (input) => subagentCall(input)],
   // Claude Code's earlier name for Agent, with the same subagent_type.
   ["Task", (input) => subagentCall(input)],
+  ...codexDescribers,
   ["PowerShell", (input, _cwd, name) => shellCall(name, input)],
   [
     "Write",

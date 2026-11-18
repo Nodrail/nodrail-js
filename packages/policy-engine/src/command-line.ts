@@ -8,7 +8,7 @@ import { z } from "zod";
 import { describeArguments, describeToolCall } from "./actions.ts";
 import { decideToolCall, toDescriptor, type Identity } from "./local-hook.ts";
 import { runHook } from "./run-hook.ts";
-import { protectedPaths } from "./rules-guard.ts";
+import { protectedPaths, setupGuard } from "./rules-guard.ts";
 import { caseRun, toRunContext } from "./case-runs.ts";
 import { runsCommand } from "./runs-cli.ts";
 import type { ActionDescriptor } from "./protocol.ts";
@@ -37,6 +37,8 @@ Commands:
   exec -- <program> [args]   Run it only if the rules allow it
   hook                 Claude Code hook; reads the event from stdin
     --unmatched deny|ask   When no rule covers a call (default deny)
+    --protect-list <file>  Also keep the files it lists from being changed
+    --host codex           Codex can't ask a person: reviews become denies
     With gates or budgets, also SubagentStart and SubagentStop, and the run
     is recorded in the repository's git folder.
   runs [list | show <run> | report]   What the run ledger recorded
@@ -168,6 +170,8 @@ const options = {
   cases: { type: "string" },
   command: { type: "string" },
   unmatched: { type: "string" },
+  "protect-list": { type: "string" },
+  host: { type: "string" },
   help: { type: "boolean", short: "h" },
   version: { type: "boolean", short: "v" },
 } as const;
@@ -275,10 +279,22 @@ function gateCommand({ command, values, program, document, now }: Run) {
 }
 
 async function hookCommand({ values, document, now, paths }: Run) {
+  let setup: ReturnType<typeof setupGuard> | null = null;
+  try {
+    if (values["protect-list"]) setup = setupGuard(values["protect-list"]);
+  } catch (error) {
+    // Unprotected would be worse than stopped: 2 is what blocks.
+    io.writeError(
+      `Nodrail: can't read the protect list: ${(error as Error).message}\n`,
+    );
+    return 2;
+  }
   const options = {
     document,
     now,
-    protect: protectedPaths(paths),
+    protect: [...protectedPaths(paths), ...(setup?.paths ?? [])],
+    setup,
+    canAsk: values.host !== "codex",
     unmatched:
       values.unmatched === "ask" ? ("ask" as const) : ("deny" as const),
     ...identityOf(values),

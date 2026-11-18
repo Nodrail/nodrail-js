@@ -1,5 +1,64 @@
 # Changelog
 
+## 0.4.0
+
+### Added
+
+- Setup resources (preview, `apf.nodrail.com/v1alpha1`): `nodrail.yaml` may
+  say `runtime`, `team`, `resources` and `start`, and the resources declare
+  `Agent`, `Team`, `Policy` and `PolicyBinding`. `resolveProject` reads them
+  into `setup` and locks their files. A `PolicyBinding` renames the roles a
+  module or Policy names to the team's agents, in `agent`, gate `requires` and
+  `since`, budget `step_agent` and `kind: agent` resources. It refuses a name
+  nobody plays, a role the policy doesn't name, two roles for one agent, and an
+  agent off the team. A project without resources resolves as before.
+- A started Team adds its own rules, last: each member may start only the
+  members it hands off to, and no agent may change `.claude`, `.codex`,
+  `.agents`, `.nodrail`, `nodrail.yaml` or `nodrail.lock.yaml`. Both are
+  denies, on Claude Code and on Codex. Codex's calls on agents already
+  started (wait, send input, close…) are allowed. `teamRules` and
+  `SETUP_PLACES` are exported.
+- The hook reads Codex's own agent calls: starting one
+  (`collaborationspawn_agent`, `spawn_agent`) is `tool: codex`,
+  `operation: agent` on its `agent_type`, as `claude-code` `agent` is for
+  Claude Code; the other collaboration calls are `tool: codex` with their own
+  operation, such as `wait_agent`. Before, Codex handoffs read as unknown
+  Claude Code tools.
+- A started Team's rules also deny agents running `nodrail`,
+  `nodrail-policy` and `nodrail-claude-hook`, so none can lock and apply a
+  setup it changed.
+- `hook --protect-list <file>` protects the files a list names, as it
+  protects its rule files: any file tool that would change one is denied,
+  and a list that can't be read blocks.
+- With `--protect-list`, the hook also denies shell commands naming a setup
+  file, the list, `~/.nodrail`, or Nodrail itself by any path, whatever the
+  rules allow.
+- `hook --host codex` denies a call that needs a review, with the reason:
+  Codex treats an `ask` answer as a failed hook and runs the call.
+- A binding is refused when two names its policy uses would be one agent,
+  including a role mapped onto an agent the policy already names. Role names
+  like `constructor` are plain names. An agent's instructions and skills
+  can't come from `.claude`, `.codex`, `.agents` or `.nodrail`.
+- The hook also judges a shell command that only reads one file or searches
+  a folder (`cat`, `head`, `tail`, `nl`, `wc`, `sed -n '<lines>p'`, `grep` on
+  one file, `ls`, `rg`) as that file read or search, and the stricter
+  decision holds. The file rules, secrets included, decide reads made through
+  a shell as they decide the Read and Grep tools, and rules about commands
+  keep their meaning. Paths the shell would expand, hidden-file searches and
+  recursive grep stay commands. This is how Codex reads files.
+- The read-only and repo-work packs allow Claude Code's task tools
+  (`TaskCreate`, `TaskUpdate`, `TaskList`, `TaskGet`) and `ToolSearch`.
+- `ProjectHost.list`, optional, lists a folder's `.yaml` files for
+  `resources: ./folder`. `renameAgents` is exported.
+
+### Changed
+
+- The local hook judges each call as the agent Claude Code or Codex says made
+  it: a subagent's type, or the session's `claude --agent`. `--agent` names
+  the entry agent, for calls the host doesn't label. Before, every call in a
+  session was judged as `--agent`. A rule for that agent no longer covers its
+  subagents' calls; give them their own rules.
+
 ## 0.3.0
 
 Project manifests, a permission diff, and a safer reading of file paths.

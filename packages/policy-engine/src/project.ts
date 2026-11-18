@@ -1,5 +1,5 @@
 import { parse } from "yaml";
-import { bindFile, bindingsUsed } from "./project-bind.ts";
+import { bindFile, bindingsUsed, renameAgents } from "./project-bind.ts";
 import {
   bindingProblem,
   importOf,
@@ -7,10 +7,20 @@ import {
   moduleManifest,
   PROJECT_KIND,
   projectManifest,
+  setupFields,
   standIns,
   type ModuleManifest,
   type ProjectImport,
+  type ProjectManifest,
 } from "./project-manifest.ts";
+import {
+  emptySetup,
+  unplayedRoles,
+  type ProjectSetup,
+  type SetupBinding,
+} from "./project-resources.ts";
+import { membersOf, readSetup } from "./project-setup.ts";
+import { teamRules } from "./project-team.ts";
 import {
   catalogEntry,
   parseModuleRef,
@@ -26,6 +36,11 @@ export type ProjectHost = {
   read(path: string): string | undefined;
   /** Its real path with links followed, or undefined if that leaves the folder. */
   real(path: string): string | undefined;
+  /**
+   * The .yaml and .yml files directly in a folder, as project paths, sorted;
+   * undefined when the path isn't a folder. Without it, resources are files.
+   */
+  list?(path: string): string[] | undefined;
 };
 
 /** One file the policy was built from, with its exact text. */
@@ -63,6 +78,8 @@ export type ProjectResolution = {
   edges: { from: string; to: string }[];
   modules: ModuleUse[];
   problems: ProjectProblem[];
+  /** The agents, team and bindings nodrail.yaml's resources declare. */
+  setup: ProjectSetup;
 };
 
 type Options = {
@@ -91,9 +108,14 @@ class Resolver {
     edges: [],
     modules: [],
     problems: [],
+    setup: emptySetup(),
   };
   private readonly seen = new Set<string>();
   private readonly visiting: string[] = [];
+  /** Each bound policy's binding, by module id or Policy name. */
+  private readonly bindings = new Map<string, SetupBinding>();
+  /** The agent names each bound policy's files use, by module id or name. */
+  private readonly used = new Map<string, Set<string>>();
 
   private readonly options: Options;
 
@@ -161,7 +183,97 @@ class Resolver {
     const manifest = projectManifest.safeParse(value);
     if (!manifest.success)
       return this.problem(ref, from, "The manifest's fields are not valid");
+    const root = from === "";
+    const setup = Object.keys(setupFields).filter(
+      (field) => field in manifest.data,
+    );
+    if (!root && setup.length > 0)
+      this.problem(ref, from, `Only nodrail.yaml says ${setup.join(", ")}`);
+    if (root) this.readSetup(manifest.data, path);
     this.imports(manifest.data.imports.map(importOf), path);
+    if (root) this.boundPolicies();
+  }
+
+  /** Reads the resources before any import, so bound ones are renamed. */
+  private readSetup(manifest: ProjectManifest, path: string) {
+    const { result, options } = this;
+    const bindings = readSetup(
+      {
+        host: options.host,
+        catalog: options.catalog,
+        setup: result.setup,
+        inputs: result.inputs,
+        problem: (ref, from, message) => this.problem(ref, from, message),
+      },
+      manifest,
+      path,
+    );
+    for (const [target, binding] of bindings) {
+      this.bindings.set(target, binding);
+      this.used.set(target, new Set());
+    }
+  }
+
+  /**
+   * The rules of a bound policy, with its roles renamed to the team's agents.
+   * The names it uses are checked once all of it is read.
+   */
+  private renamed(target: string, text: string, ref: string, from: string) {
+    const binding = this.bindings.get(target);
+    if (binding === undefined) return text;
+    const renamed = renameAgents(text, binding.roles);
+    for (const message of renamed.problems)
+      this.problem(ref, from, `${message}; a PolicyBinding can't rename those`);
+    for (const name of renamed.names) this.used.get(target)?.add(name);
+    return renamed.text;
+  }
+
+  /** Policies bound by name, after the imports, in their bindings' order. */
+  private boundPolicies() {
+    const { setup } = this.result;
+    for (const [target, binding] of this.bindings) {
+      const policy = setup.policies.find((each) => each.name === target);
+      if (policy) this.policySource(policy.source, target, policy.file);
+      else if (!this.result.modules.some((use) => use.id === target))
+        this.problem(
+          binding.name,
+          binding.file,
+          `${target} isn't imported; add it to imports first`,
+        );
+      const used = this.used.get(target) ?? new Set<string>();
+      for (const message of unplayedRoles(binding, used, membersOf(setup)))
+        this.problem(binding.name, binding.file, message);
+    }
+    // Last, the started team's own rules: who may start whom, setup kept safe.
+    if (setup.team === null) return;
+    const name = `team/${setup.team.name}.apf.yaml`;
+    const text = teamRules(setup.team);
+    this.result.sources.push({ name, text });
+    this.result.checking.push({ name, text });
+  }
+
+  private policySource(path: string, name: string, from: string) {
+    if (this.seen.has(path))
+      return this.problem(
+        path,
+        from,
+        "Already imported unbound; import it or bind it, not both",
+      );
+    if (!this.enter(path, path, from)) return;
+    const text = this.options.host.read(path);
+    const value =
+      text === undefined ? undefined : this.parsed(text, path, from);
+    if (text === undefined) this.problem(path, from, "No such file");
+    else if (value !== undefined && !isApf(value))
+      this.problem(path, from, "A Policy's source is a rules file");
+    else if (value !== undefined) {
+      this.result.inputs.push({ kind: "local", path, text });
+      this.result.edges.push({ from, to: path });
+      const bound = this.renamed(name, text, path, from);
+      this.result.sources.push({ name: path, text: bound });
+      this.result.checking.push({ name: path, text: bound });
+    }
+    this.leave(path);
   }
 
   imports(entries: ProjectImport[], from: string) {
@@ -318,6 +430,7 @@ class Resolver {
     const unknown = bindingsUsed(text).find((name) => !(name in declared));
     if (unknown)
       return this.problem(path, key, `Uses undeclared value ${unknown}`);
+    text = this.renamed(use.id, text, path, key);
     const name = `${use.id}/${path}`;
     const standIn = Object.fromEntries(
       Object.entries(declared).map(([key, { type }]) => [key, standIns[type]]),

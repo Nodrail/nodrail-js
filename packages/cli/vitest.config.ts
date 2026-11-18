@@ -10,7 +10,12 @@ export default defineConfig({
       // Process wiring around the tested modules: the real terminal and entry.
       exclude: ["src/bin.ts", "src/terminal.ts"],
       reporter: ["text-summary"],
-      thresholds: { statements: 90, branches: 80, functions: 90, lines: 90 },
+      // Measured where the whole suite runs. On Windows the Codex tests are
+      // skipped, as Codex isn't set up there, so the rest runs unmeasured.
+      thresholds:
+        process.platform === "win32"
+          ? undefined
+          : { statements: 90, branches: 80, functions: 90, lines: 90 },
     },
   },
 });

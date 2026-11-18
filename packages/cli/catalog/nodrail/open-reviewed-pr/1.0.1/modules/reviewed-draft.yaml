@@ -1,0 +1,4 @@
+kind: nodrail.module/v1
+imports:
+  - prepare-draft.yaml
+  - ../policies/review.yaml

@@ -3,6 +3,7 @@ import { join } from "node:path";
 import {
   resolveProject,
   type Catalog,
+  type ProjectHost,
   type ProjectResolution,
 } from "@nodrail/policy-engine/yaml";
 import { CliError } from "../io.ts";
@@ -60,10 +61,11 @@ export function planProject(input: {
   const catalog = input.catalog ?? bundledCatalog();
   const files = folderHost(input.root);
   // The manifest under review may not be written yet: read it from here.
-  const host = {
-    read: (path: string) =>
+  const host: ProjectHost = {
+    read: (path) =>
       path === MANIFEST_FILE ? input.manifest : files.read(path),
-    real: (path: string) => (path === MANIFEST_FILE ? path : files.real(path)),
+    real: (path) => (path === MANIFEST_FILE ? path : files.real(path)),
+    list: (path) => files.list?.(path),
   };
   const resolution = resolveProject({
     host,

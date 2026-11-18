@@ -1,0 +1,16 @@
+- required_engine_version: 3
+
+# The only pull request the publisher may open: a draft, in your repository,
+# from a candidate. `targetScope` comes from the host's adapter, which sets it
+# to `candidate` only for branches it maps as reviewable candidates; the agent
+# cannot supply it.
+- rule: Open a reviewed draft
+  id: open-draft
+  agent: github
+  tool: github
+  operation: pr.open
+  resource: { kind: repository, match: exact, value: { binding: repository } }
+  condition:
+    - { field: draft, op: eq, value: true }
+    - { field: targetScope, op: eq, value: candidate }
+  effect: allow

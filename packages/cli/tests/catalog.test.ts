@@ -6,7 +6,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { simulate } from "@nodrail/policy-engine";
 import { describeToolCall } from "@nodrail/policy-engine/actions";
-import { compilePolicies, starterPacks } from "@nodrail/policy-engine/yaml";
+import {
+  compilePolicies,
+  renameAgents,
+  starterPacks,
+} from "@nodrail/policy-engine/yaml";
+import { parse } from "yaml";
 import { describe, expect, test } from "vitest";
 import { bundledCatalog } from "../src/project/catalog.ts";
 import {
@@ -288,10 +293,12 @@ describe("@nodrail/dependency-updates", () => {
 });
 
 describe("@nodrail/read-only", () => {
-  test("is the read-only starter pack, byte for byte", () => {
-    const module = bundledCatalog().find(
-      (entry) => entry.id === "@nodrail/read-only",
-    );
+  test("its newest version is the read-only starter pack, byte for byte", () => {
+    const module = bundledCatalog()
+      .filter((entry) => entry.id === "@nodrail/read-only")
+      .sort((a, b) =>
+        b.version.localeCompare(a.version, undefined, { numeric: true }),
+      )[0];
     expect(module?.files["policies/read-only.yaml"]).toBe(
       starterPacks["read-only"].text,
     );
@@ -317,6 +324,34 @@ describe("the whole catalog", () => {
       "@nodrail/read-only",
       "@nodrail/triage-issues",
     ]);
+  });
+
+  // A binding must map every agent a module's rules name, so a module must
+  // say what each one does. Published versions never change; the newest
+  // version of each is the one held to this.
+  test("each module's newest version declares every agent its rules name", () => {
+    for (const id of ids) {
+      const [newest] = bundledCatalog()
+        .filter((module) => module.id === id)
+        .sort((a, b) =>
+          b.version.localeCompare(a.version, undefined, { numeric: true }),
+        );
+      const declared = Object.keys(
+        (parse(newest!.files["module.yaml"]!) as { roles?: object }).roles ??
+          {},
+      );
+      const named = new Set(
+        Object.entries(newest!.files)
+          .filter(([path]) => path.endsWith(".yaml"))
+          .map(([, text]) => text)
+          .filter((text) => Array.isArray(parse(text)))
+          .flatMap((text) => renameAgents(text, {}).names),
+      );
+      expect(
+        [...named].filter((name) => !declared.includes(name)),
+        id,
+      ).toEqual([]);
+    }
   });
 
   test("every module installs together with every other one", async () => {

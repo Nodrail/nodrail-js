@@ -1,20 +1,14 @@
-import {
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  symlinkSync,
-  writeFileSync,
-} from "node:fs";
+import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
 import { compilePolicies } from "@nodrail/policy-engine/yaml";
 import { simulate } from "@nodrail/policy-engine";
 import { describe, expect, test } from "vitest";
 import { stagingFolder } from "../src/project/store.ts";
 import { stepEvents } from "../../policy-engine/tests/support/run-events.ts";
-import { fakeIo } from "./support/fake-io.ts";
+import { heldByAnother, killed } from "./support/writers.ts";
+import { projectFolder } from "./support/project-folder.ts";
 
 const TEAM = `# Our own rules.
 - rule: Never delete issues
@@ -24,26 +18,10 @@ const TEAM = `# Our own rules.
   effect: deny
 `;
 
-/** A project folder, offline: any network use fails the test. */
+/** A project folder, offline, that can also bind the module's repository. */
 function project(files: Record<string, string> = {}) {
-  const cwd = mkdtempSync(join(tmpdir(), "nodrail-project-"));
-  // The person's home, where nodrail stages writes, the same for every run.
-  const home = mkdtempSync(join(tmpdir(), "nodrail-home-"));
-  for (const [path, text] of Object.entries(files)) {
-    mkdirSync(join(cwd, path, ".."), { recursive: true });
-    writeFileSync(join(cwd, path), text);
-  }
-  const fetch = (() => {
-    throw new Error("network used");
-  }) as unknown as typeof globalThis.fetch;
-  const read = (path: string) => readFileSync(join(cwd, path), "utf8");
-  const write = (path: string, text: string) =>
-    writeFileSync(join(cwd, path), text);
-  const run = async (...argv: string[]) => {
-    const terminal = fakeIo({ cwd, home, fetch });
-    const code = await terminal.run(...argv);
-    return { code, out: terminal.stdout(), err: terminal.stderr() };
-  };
+  const folder = projectFolder(files);
+  const { read, write } = folder;
   const bind = (repository: string) =>
     write(
       "nodrail.yaml",
@@ -52,7 +30,7 @@ function project(files: Record<string, string> = {}) {
         `repository: ${repository}`,
       ),
     );
-  return { cwd, home, read, write, run, bind };
+  return { ...folder, bind };
 }
 
 /** A project with the official module bound to `repository` and locked. */
@@ -75,7 +53,7 @@ describe("nodrail add", () => {
     const p = project();
     const first = await p.run("add", "@nodrail/pr_policy.yaml");
     expect(first.code).toBe(0);
-    expect(first.out).toContain("Added @nodrail/open-reviewed-pr@1.0.0");
+    expect(first.out).toContain("Added @nodrail/open-reviewed-pr@1.0.1");
     expect(first.out).toContain("configuration required");
     expect(p.read("nodrail.yaml")).toContain(
       '- ref: "@nodrail/open-reviewed-pr"',
@@ -112,11 +90,11 @@ imports:
     const result = await p.run("add", "@nodrail/open-reviewed-pr@9.9.9");
     expect(result.code).toBe(1);
     expect(result.err).toContain(
-      "@nodrail/open-reviewed-pr@9.9.9 is not in this catalog (it has 1.0.0)",
+      "@nodrail/open-reviewed-pr@9.9.9 is not in this catalog (it has 1.0.1, 1.0.0)",
     );
     expect(snapshot(p)).toEqual(before);
     expect(
-      (await p.run("add", "@nodrail/open-reviewed-pr@1.0.0")).out,
+      (await p.run("add", "@nodrail/open-reviewed-pr@1.0.1")).out,
     ).toContain("Nothing changed.");
   });
 
@@ -255,6 +233,19 @@ describe("nodrail policy lock and export --frozen", () => {
     expect(result.err).toContain("nodrail.yaml changed since it was locked");
   });
 
+  test("a locked version stays until a newer one is asked for", async () => {
+    const p = project();
+    await p.run("add", "@nodrail/open-reviewed-pr@1.0.0");
+    p.bind("acme/widgets");
+    expect((await p.run("policy", "lock")).code).toBe(0);
+    // Locking again keeps 1.0.0, though the catalog has 1.0.1.
+    await p.run("policy", "lock");
+    expect(p.read("nodrail.lock.yaml")).toMatch(/version: 1\.0\.0/);
+    const upgrade = await p.run("add", "@nodrail/open-reviewed-pr@1.0.1");
+    expect(upgrade.code).toBe(0);
+    expect(p.read("nodrail.lock.yaml")).toMatch(/version: 1\.0\.1/);
+  });
+
   test("a package that changed at the same version fails integrity", async () => {
     const p = await locked();
     p.write(
@@ -273,7 +264,7 @@ describe("nodrail policy lock and export --frozen", () => {
       const result = await p.run(...argv);
       expect(result.code).toBe(1);
       expect(result.err).toContain(
-        "@nodrail/open-reviewed-pr@1.0.0 doesn't match nodrail.lock.yaml (policies/open.yaml)",
+        "@nodrail/open-reviewed-pr@1.0.1 doesn't match nodrail.lock.yaml (policies/open.yaml)",
       );
     }
   });
@@ -356,6 +347,88 @@ describe("nodrail policy lock and export --frozen", () => {
   });
 });
 
+describe("a team's resources", () => {
+  const api = "apiVersion: apf.nodrail.com/v1alpha1";
+  const agents = ["lead", "publisher", "tester", "gate", "critic", "builder"]
+    .map((name) => `${api}\nkind: Agent\nmetadata: { name: ${name} }\n`)
+    .join("---\n");
+  const resources = {
+    "resources/agents.yaml": agents,
+    "resources/team.yaml": `${api}
+kind: Team
+metadata: { name: release }
+spec:
+  entry: lead
+  members: [lead, publisher, tester, gate, critic, builder]
+  handoffs: [{ from: lead, to: publisher }]
+---
+${api}
+kind: PolicyBinding
+metadata: { name: open-prs }
+spec:
+  policy: "@nodrail/open-reviewed-pr"
+  roles: { github: publisher, qa: tester, gatekeeper: gate, reviewer: critic, dev: builder }
+`,
+  };
+
+  async function team() {
+    const p = project(resources);
+    expect((await p.run("add", "@nodrail/open-reviewed-pr")).code).toBe(0);
+    p.write(
+      "nodrail.yaml",
+      `runtime: claude-code\nresources: ./resources\n${p.read("nodrail.yaml")}`,
+    );
+    p.bind("acme/widgets");
+    return p;
+  }
+
+  test("a folder of resources binds the playbook's roles to the team", async () => {
+    const p = await team();
+    const lock = await p.run("policy", "lock");
+    expect(lock.err).toBe("");
+    expect(lock.code).toBe(0);
+    expect(p.read("nodrail.lock.yaml")).toContain("resources/team.yaml");
+    const { out, code } = await p.run("policy", "export", "--frozen");
+    expect(code).toBe(0);
+    expect(out).toContain("agent: publisher");
+    expect(out).not.toMatch(/agent: (github|qa|gatekeeper|reviewer)\b/);
+    expect(
+      compilePolicies([{ name: "effective.apf.yaml", text: out }]).ok,
+    ).toBe(true);
+    // Adding another module keeps the setup nodrail.yaml declares.
+    expect((await p.run("add", "@nodrail/read-only")).code).toBe(0);
+    expect(p.read("nodrail.yaml")).toContain("runtime: claude-code");
+  });
+
+  test("a changed binding stops the export until it is locked again", async () => {
+    const p = await team();
+    expect((await p.run("policy", "lock")).code).toBe(0);
+    p.write(
+      "resources/team.yaml",
+      resources["resources/team.yaml"].replace(
+        "github: publisher",
+        "github: lead",
+      ),
+    );
+    const stale = await p.run("policy", "export", "--frozen");
+    expect(stale.code).toBe(1);
+    expect(stale.err).toContain(
+      "resources/team.yaml changed since it was locked",
+    );
+  });
+
+  test("a role nobody plays is refused before anything is written", async () => {
+    const p = await team();
+    p.write(
+      "resources/team.yaml",
+      resources["resources/team.yaml"].replace(", dev: builder", ""),
+    );
+    const result = await p.run("policy", "lock");
+    expect(result.code).toBe(1);
+    expect(result.err).toContain("names dev, which no agent plays");
+  });
+});
+
 const CLOSE = TEAM.replace("Never delete issues", "Never close issues").replace(
   "issues.delete",
   "issues.close",
@@ -403,30 +476,18 @@ describe("reviewing against what was committed", () => {
 });
 
 describe("a write killed partway", () => {
-  // Node itself with tsx as its loader: .bin/tsx is a shell script, which
-  // Windows can't run directly.
-  const tsx = pathToFileURL(
-    fileURLToPath(
-      new URL("../node_modules/tsx/dist/loader.mjs", import.meta.url),
-    ),
-  ).href;
-  const helper = fileURLToPath(
-    new URL("./support/crashing-nodrail.ts", import.meta.url),
-  );
-  /** Runs a real `nodrail` that dies at `step`, leaving whatever it left. */
-  const killed = (
-    { cwd, home }: { cwd: string; home: string },
-    step: string,
-    ...argv: string[]
-  ) =>
-    spawnSync(process.execPath, ["--import", tsx, helper, ...argv], {
-      cwd,
-      // HOME on Unix, USERPROFILE on Windows: where nodrail stages writes.
-      env: { ...process.env, HOME: home, USERPROFILE: home, CRASH_ON: step },
-      encoding: "utf8",
-    }).status;
+  // The first rename claims the lock; the next ones put files in place.
+  test("killed while claiming the lock, the next nodrail takes it", async () => {
+    const p = await locked();
+    const before = snapshot(p);
+    p.write("close.yaml", CLOSE);
+    expect(killed(p, "rename:1", "add", "./close.yaml")).toBe(9);
+    // Nothing was staged: nodrail.yaml and the lock are as they were.
+    expect(snapshot(p)).toEqual(before);
+    expect((await p.run("add", "./close.yaml")).code).toBe(0);
+  });
 
-  test.each(["rename:1", "rename:2"])(
+  test.each(["rename:2", "rename:3"])(
     "after every new file was written (killed at %s), the new state wins",
     async (step) => {
       const p = await locked();
@@ -490,10 +551,7 @@ describe("a write killed partway", () => {
 
   test("a writer that is still running holds the project", async () => {
     const p = await locked();
-    const folder = stagingFolder({ root: p.cwd, home: p.home });
-    mkdirSync(folder, { recursive: true });
-    // This test's own parent process stands in for another running nodrail.
-    writeFileSync(join(folder, "owner"), String(process.ppid));
+    heldByAnother(p);
     const result = await p.run("policy", "lock");
     expect(result.err).toContain("is changing this project");
   });
