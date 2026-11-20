@@ -72,6 +72,10 @@ export function telemetryObserver(input: {
   warn: (text: string) => void;
 }): Reporter | null {
   let folder: string;
+  let machine: string;
+  // Reporting never decides: anything that keeps it from starting, the
+  // machine id's folder included, turns it off with a warning, and the
+  // policy's answer stands.
   try {
     telemetryFile.parse(JSON.parse(readFileSync(input.file, "utf8")));
     folder = spoolFolder(homedir(), input.file);
@@ -81,12 +85,19 @@ export function telemetryObserver(input: {
     );
     return null;
   }
+  try {
+    machine = machineId(homedir());
+  } catch (error) {
+    input.warn(
+      `Nodrail: telemetry is off: can't keep this machine's id in ~/.nodrail: ${(error as Error).message}\n`,
+    );
+    return null;
+  }
   const revision = createHash("sha256")
     .update(JSON.stringify(input.document))
     .digest("hex")
     .slice(0, 16);
   const policy = policyRevision(input.paths ?? []);
-  const machine = machineId(homedir());
   const started = now();
   const queue = (span: SpanRecord) => {
     try {

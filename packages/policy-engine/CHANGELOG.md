@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.5.1
+
+### Fixed
+
+- Telemetry never decides: when the machine id can't be kept in
+  `~/.nodrail` (for example, `.nodrail` is a file or isn't writable), the
+  hook turned an allowed call into a block (exit 2). Telemetry now turns
+  off with a warning and the rules' answer stands.
+- A cut or malformed OTLP protobuf answer (`0a 02` with nothing after it)
+  read as "all spans kept". Every length is checked against what arrived;
+  such an answer leaves the spans unknown, never sent.
+
 ## 0.5.0
 
 GitHub Copilot CLI as a third host, and the reporting contract v2.

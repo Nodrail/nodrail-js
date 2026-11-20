@@ -433,6 +433,20 @@ describe("what can go wrong around sending", () => {
   });
 });
 
+/** A project whose telemetry points at a port nothing listens on. */
+function unreachableTelemetry() {
+  const project = mkdtempSync(join(tmpdir(), "nodrail-project-"));
+  const file = join(project, "telemetry.json");
+  writeFileSync(
+    file,
+    JSON.stringify({
+      project: "p",
+      traces: { endpoint: "http://127.0.0.1:9/v1/traces" },
+    }),
+  );
+  return { project, file };
+}
+
 describe("the hook's observer", () => {
   const judged = (stdout: string) => ({
     result: { stdout, stderr: "", exitCode: 0 },
@@ -453,17 +467,46 @@ describe("the hook's observer", () => {
     expect(warnings[0]).toContain("Nodrail: telemetry is off: can't read");
   });
 
+  test.each([
+    ["git status", false],
+    ["git push", true],
+  ])(
+    "a machine id that can't be kept leaves `%s` as the rules decide",
+    async (command, denied) => {
+      // ~/.nodrail is a file: the machine id has nowhere to go.
+      const home = mkdtempSync(join(tmpdir(), "nodrail-home-"));
+      writeFileSync(join(home, ".nodrail"), "");
+      const { project, file } = unreachableTelemetry();
+      const rules = join(project, "rules.yaml");
+      writeFileSync(
+        rules,
+        "- rule: Status\n  command: { prefix: git status }\n  effect: allow\n- rule: Push\n  command: { prefix: git push }\n  effect: deny\n",
+      );
+      const restoreHome = homeAt(home);
+      try {
+        const answer = await cli(
+          ["hook", rules, "--telemetry", file],
+          JSON.stringify({
+            hook_event_name: "PreToolUse",
+            tool_name: "Bash",
+            tool_input: { command },
+            cwd: project,
+          }),
+        );
+        expect(answer.code).toBe(0);
+        expect(answer.stdout.includes('"deny"')).toBe(denied);
+        expect(answer.stderr).toContain(
+          "telemetry is off: can't keep this machine's id",
+        );
+      } finally {
+        restoreHome();
+      }
+    },
+  );
+
   test("records what the host was told, and a failure only warns", () => {
     const home = mkdtempSync(join(tmpdir(), "nodrail-home-"));
-    const project = mkdtempSync(join(tmpdir(), "nodrail-project-"));
-    const file = join(project, "telemetry.json");
-    writeFileSync(
-      file,
-      JSON.stringify({
-        project: "p",
-        traces: { endpoint: "http://127.0.0.1:9/v1/traces" },
-      }),
-    );
+    const { file } = unreachableTelemetry();
     const restoreHome = homeAt(home);
     const warnings: string[] = [];
     try {

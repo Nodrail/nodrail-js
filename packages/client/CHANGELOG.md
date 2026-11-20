@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.1
+
+Released with `@nodrail/policy-engine` 0.5.1, which it uses: the hook it
+bundles carries that version's two telemetry fixes. Otherwise the client
+behaves as in 0.5.0.
+
 ## 0.5.0
 
 Released with `@nodrail/policy-engine` 0.5.0, which it uses. The hook it

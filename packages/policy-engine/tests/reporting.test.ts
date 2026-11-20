@@ -146,6 +146,35 @@ describe("what the receiver answered", () => {
     });
   });
 
+  // A cut or malformed protobuf answer proves nothing: unknown, never sent.
+  test.each([
+    [[0x0a, 0x02]],
+    [[0x0a, 0x03, 0x12, 0x05, 0x78]],
+    [[0x0a, 0x02, 0x08, 0x80]],
+    [[0x0a, 0x80]],
+    [[0x0a, 0x00, 0xff]],
+  ])("a cut protobuf answer %j counts as unknown", async (bytes) => {
+    const response = new Response(Uint8Array.from(bytes), {
+      headers: { "content-type": "application/x-protobuf" },
+    });
+    expect(await deliveryOf(response, 3)).toMatchObject({
+      accepted: 0,
+      rejected: 0,
+      unknown: 3,
+    });
+  });
+
+  test("an empty partial success is a valid answer: all kept", async () => {
+    const response = new Response(Uint8Array.from([0x0a, 0x00]), {
+      headers: { "content-type": "application/x-protobuf" },
+    });
+    expect(await deliveryOf(response, 3)).toMatchObject({
+      accepted: 3,
+      rejected: 0,
+      unknown: 0,
+    });
+  });
+
   test.each([408, 429, 500, 503])("%s is retried", async (status) => {
     expect((await deliveryOf(new Response("", { status }), 3)).kind).toBe(
       "retry",
