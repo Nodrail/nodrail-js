@@ -12,13 +12,17 @@ export function memoryHost(
     read: (path) => files[path],
     real: (path) => (path in links ? links[path] : path),
     list: (path) => {
-      const inside = Object.keys(files).filter(
-        (file) =>
-          file.startsWith(`${path}/`) &&
-          !file.slice(path.length + 1).includes("/") &&
-          /\.ya?ml$/.test(file),
+      // A folder exists when something is in it, as on a disk.
+      const under = Object.keys(files).filter((file) =>
+        file.startsWith(`${path}/`),
       );
-      return inside.length > 0 ? inside.sort() : undefined;
+      if (under.length === 0) return undefined;
+      return under
+        .filter(
+          (file) =>
+            !file.slice(path.length + 1).includes("/") && /\.ya?ml$/.test(file),
+        )
+        .sort();
     },
   };
 }

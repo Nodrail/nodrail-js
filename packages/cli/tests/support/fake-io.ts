@@ -16,6 +16,8 @@ type Setup = {
   polls?: number;
   home?: string;
   cwd?: string;
+  /** How a detached child runs this command line again. */
+  self?: string[];
 };
 
 /** A terminal in memory, with its own empty home folder. */
@@ -72,6 +74,7 @@ export function fakeIo(setup: Setup = {}) {
     clear: () => {
       clears += 1;
     },
+    ...(setup.self ? { self: setup.self } : {}),
   };
   return {
     io,

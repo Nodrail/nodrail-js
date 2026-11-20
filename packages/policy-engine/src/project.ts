@@ -8,6 +8,7 @@ import {
   PROJECT_KIND,
   projectManifest,
   setupFields,
+  invalidField,
   standIns,
   type ModuleManifest,
   type ProjectImport,
@@ -19,7 +20,7 @@ import {
   type ProjectSetup,
   type SetupBinding,
 } from "./project-resources.ts";
-import { membersOf, readSetup } from "./project-setup.ts";
+import { dataProblems, membersOf, readSetup } from "./project-setup.ts";
 import { teamRules } from "./project-team.ts";
 import {
   catalogEntry,
@@ -182,7 +183,7 @@ class Resolver {
       );
     const manifest = projectManifest.safeParse(value);
     if (!manifest.success)
-      return this.problem(ref, from, "The manifest's fields are not valid");
+      return this.problem(ref, from, invalidField(manifest.error.issues));
     const root = from === "";
     const setup = Object.keys(setupFields).filter(
       (field) => field in manifest.data,
@@ -247,7 +248,7 @@ class Resolver {
     // Last, the started team's own rules: who may start whom, setup kept safe.
     if (setup.team === null) return;
     const name = `team/${setup.team.name}.apf.yaml`;
-    const text = teamRules(setup.team);
+    const text = teamRules(setup.team, setup);
     this.result.sources.push({ name, text });
     this.result.checking.push({ name, text });
   }
@@ -460,10 +461,9 @@ function sorted(values: Record<string, string>) {
  */
 export function resolveProject(options: Options): ProjectResolution {
   const resolver = new Resolver(options);
-  resolver.local(
-    options.manifest ?? "nodrail.yaml",
-    options.manifest ?? "nodrail.yaml",
-    "",
-  );
+  const manifest = options.manifest ?? "nodrail.yaml";
+  resolver.local(manifest, manifest, "");
+  // Once everything is read: what the lock covers is known.
+  dataProblems(resolver.result, manifest);
   return resolver.result;
 }

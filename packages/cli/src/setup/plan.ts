@@ -1,7 +1,10 @@
-import { execFileSync } from "node:child_process";
-import { accessSync, constants, readFileSync } from "node:fs";
-import { delimiter, join } from "node:path";
-import type { ProjectSetup } from "@nodrail/policy-engine/yaml";
+import { HOST_NAMES } from "./state.ts";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import type {
+  ProjectSetup,
+  SetupConnection,
+} from "@nodrail/policy-engine/yaml";
 import { frozenPolicy, setupOf } from "../commands/project.ts";
 import type { Env } from "../config.ts";
 import { CliError } from "../io.ts";
@@ -9,24 +12,58 @@ import { folderHost } from "../project/host.ts";
 import { MANIFEST_FILE, sha256 } from "../project/lockfile.ts";
 import { planProject, readProject } from "../project/project.ts";
 import { codexSetup, MIN_CODEX } from "./codex.ts";
+import { copilotHookChecks, copilotSetup, MIN_COPILOT } from "./copilot.ts";
+import { onPath, versionCheck } from "./tools.ts";
+
+export { atLeast, findOnPath } from "./tools.ts";
 import {
   claudeCodeSetup,
-  HOOK_PREFIX,
+  EFFECTIVE_FILE,
   MIN_CLAUDE,
-  SETTINGS_FILE,
   type DesiredFile,
   type DesiredSettings,
 } from "./claude-code.ts";
-import { readState, STATE_FILE, type SetupState } from "./state.ts";
+import { claudeSteps } from "./claude-settings.ts";
+import { managedChecks } from "./managed.ts";
+import { goneDataNotes, pinChecks, telemetryNote } from "./connections.ts";
+import { runningHere, testedCheck } from "./tested.ts";
+import {
+  claudePluginNote,
+  codexInstallChecks,
+  originChecks,
+} from "./plugins.ts";
+import {
+  lockedRevision,
+  missingStateNote,
+  otherHostNotes,
+  type Revision,
+} from "./status.ts";
+import {
+  hostState,
+  otherOwners,
+  readState,
+  STATE_FILE,
+  type Runtime,
+  type SetupState,
+} from "./state.ts";
 
 export type StepAction = "create" | "update" | "keep" | "remove" | "conflict";
 /** One file and what apply would do to it. */
 export type Step = { path: string; action: StepAction; why: string };
 /** Something the host needs, and whether it's there. */
-export type Check = { name: string; ok: boolean; detail: string };
+/**
+ * A check `plan` shows. One not ok blocks; one unverified doesn't, but says
+ * what wasn't proven here.
+ */
+export type Check = {
+  name: string;
+  ok: boolean;
+  detail: string;
+  unverified?: boolean;
+};
 
 export type SetupPlan = {
-  runtime: "claude-code" | "codex";
+  runtime: Runtime;
   team: string;
   entry: string;
   /** Whether nodrail.yaml asks to start the host once it is set up. */
@@ -38,8 +75,19 @@ export type SetupPlan = {
   notes: string[];
   /** What apply would write, in the order of `steps`. */
   files: DesiredFile[];
-  settings: Record<string, unknown> | null;
+  /** Files shared with the person's own entries, as apply would write them. */
+  merged: Record<string, Record<string, unknown>>;
+  /** The tool connections, for the checks that start them. */
+  connections: SetupConnection[];
+  /** Where decisions are sent, for the secret checks and the status. */
+  telemetry: ProjectSetup["telemetry"];
   state: SetupState | null;
+  /** The reviewed revision the setup is made from, as the lock records it. */
+  revision: Revision;
+  /** Claude Code: the marketplaces and plugins its settings switch on. */
+  claudePlugins: { marketplaces: string[]; enabled: string[] };
+  /** The setup's plugins, for the hook command and the checks. */
+  plugins: ProjectSetup["plugins"];
 };
 
 /** Whether apply could go ahead: every check passes, nothing conflicts. */
@@ -59,73 +107,216 @@ export function planSetup(input: {
   env: Env;
   /** Planned by `apply` while it holds the project. */
   held?: boolean;
+  /** The host `--runtime` names, when nodrail.yaml lists more than one. */
+  runtime?: string;
+  /** Where an administrator's files are, for tests: by default, the system's. */
+  managed?: { claude?: string; codex?: string; profile?: string };
 }): SetupPlan {
   const { root } = input;
   const checks: Check[] = [];
   const policy = lockedPolicy(input, checks);
   const { setup } = policy;
-  if (setup.runtime === null)
-    throw new CliError(
-      `${MANIFEST_FILE} doesn't say which host to set up. Add runtime: claude-code.`,
-    );
+  const runtime = chooseRuntime(setup.runtimes, input.runtime);
   if (setup.team === null)
     throw new CliError(`${MANIFEST_FILE} has no Team to start.`);
   const base = {
-    runtime: setup.runtime,
+    runtime,
     team: setup.team.name,
     entry: setup.team.entry,
     start: setup.start,
     checks,
     state: readState(root),
+    revision: lockedRevision(root),
   };
   const effective = policy.text ?? "";
-  const nodrail = onPath("nodrail", input.env, "the policy hook runs it");
-  const host =
-    setup.runtime === "codex"
-      ? {
-          ...codexSetup({ root, setup, effective, inputs: policy.inputs }),
-          settings: null,
-          check: versionCheck("codex", MIN_CODEX, "install Codex", input.env),
-        }
-      : {
-          ...claudeCodeSetup({ root, setup, effective, inputs: policy.inputs }),
-          check: versionCheck(
-            "claude",
-            MIN_CLAUDE,
-            "install Claude Code",
-            input.env,
-          ),
-        };
-  checks.push(host.check, nodrail);
+  const host = hostSetup(runtime, {
+    root,
+    setup,
+    effective,
+    inputs: policy.inputs,
+    env: input.env,
+  });
+  checks.push(...hostChecks(input, runtime, setup, host.check));
+  checks.push(
+    ...managedChecks(runtime, {
+      root,
+      setup,
+      settings: host.settings,
+      managed: input.managed,
+    }),
+  );
   // Without a locked policy there is none to write.
   const files =
     policy.text === null
       ? host.files.filter((file) => !file.path.startsWith(".nodrail/"))
       : host.files;
-  const steps = files.map((file) => fileStep(root, base.state, file));
-  for (const [path, hash] of Object.entries(base.state?.files ?? {}))
+  const owner = { state: base.state, runtime };
+  const steps = files.map((file) => fileStep(root, owner, file));
+  for (const [path, hash] of Object.entries(
+    hostState(base.state, runtime)?.files ?? {},
+  ))
     if (!files.some((file) => file.path === path))
-      steps.push(goneStep(root, path, hash));
-  let settings: Record<string, unknown> | null = null;
-  if (host.settings) {
-    const step = settingsStep(root, base.state, host.settings);
-    steps.push(step.step);
-    settings = step.value;
-  }
+      steps.push(goneStep(root, owner, path, hash));
+  const merged: Record<string, Record<string, unknown>> = {};
+  if (host.settings)
+    for (const { step, value } of claudeSteps(
+      root,
+      hostState(base.state, runtime)?.settings,
+      host.settings,
+    )) {
+      steps.push(step);
+      if (value) merged[step.path] = value;
+    }
   return {
     ...base,
     steps,
     problems: host.problems,
     notes: [
-      ...host.skipped.map(
-        (name) =>
-          `Agent ${name} isn't on team ${setup.team!.name}; it isn't set up.`,
-      ),
-      `apply records what it writes in ${STATE_FILE}.`,
+      ...notesFor(input.home, root, setup, host.skipped),
+      ...(runtime === "claude-code" ? claudePluginNote(setup) : []),
+      ...stateNotes({ ...base, runtime }, steps),
+      ...goneDataNotes(hostState(base.state, runtime)?.data, setup),
     ],
     files,
-    settings,
+    merged,
+    connections: setup.connections,
+    telemetry: setup.telemetry,
+    claudePlugins: pluginNames(host.settings),
+    plugins: setup.plugins,
   };
+}
+
+/** What the host needs, and whether its program is there. */
+function hostSetup(
+  runtime: Runtime,
+  input: {
+    root: string;
+    setup: ProjectSetup;
+    effective: string;
+    inputs: string[];
+    env: Env;
+  },
+) {
+  const { env, ...rest } = input;
+  if (runtime === "copilot")
+    return {
+      ...copilotSetup(rest),
+      settings: null,
+      check: versionCheck("copilot", MIN_COPILOT, "install Copilot CLI", env),
+    };
+  return runtime === "codex"
+    ? {
+        ...codexSetup(rest),
+        settings: null,
+        check: versionCheck("codex", MIN_CODEX, "install Codex", env),
+      }
+    : {
+        ...claudeCodeSetup(rest),
+        check: versionCheck("claude", MIN_CLAUDE, "install Claude Code", env),
+      };
+}
+
+/** The host's checks: its program, nodrail, Codex's plugins, the profile. */
+function hostChecks(
+  input: { root: string; home: string; env: Env },
+  runtime: Runtime,
+  setup: ProjectSetup,
+  host: Check,
+) {
+  return [
+    host,
+    onPath("nodrail", input.env, "the policy hook runs it"),
+    ...(runtime === "copilot" ? copilotHookChecks(input) : []),
+    ...(runtime === "codex"
+      ? codexInstallChecks({
+          root: input.root,
+          setup,
+          env: input.env,
+          home: input.home,
+        })
+      : []),
+    ...profileCheck(setup, runtime, host),
+    ...pinChecks(setup),
+    ...originChecks(setup),
+  ];
+}
+
+/** Claude Code's marketplaces and plugins its settings switch on. */
+const pluginNames = (settings: DesiredSettings | null) => ({
+  marketplaces: Object.keys(settings?.plugins.marketplaces ?? {}),
+  enabled: Object.keys(settings?.plugins.enabled ?? {}),
+});
+
+/** The tested-versions check, when nodrail.yaml names them. */
+function profileCheck(setup: ProjectSetup, runtime: Runtime, host: Check) {
+  const running = runningHere(runtime, host.ok ? host.detail : null);
+  const tested = testedCheck(setup.tested, runtime, running);
+  return tested ? [tested] : [];
+}
+
+/** What the plan says about the other host here, and a missing state. */
+function stateNotes(
+  base: { runtime: Runtime; state: SetupState | null; revision: Revision },
+  steps: Step[],
+) {
+  return [
+    ...otherHostNotes({
+      ...base,
+      policyChanges: steps.some(
+        (step) => step.path === EFFECTIVE_FILE && step.action === "update",
+      ),
+    }),
+    ...missingStateNote(
+      base.state,
+      steps
+        .filter((step) => step.action === "conflict")
+        .map((step) => step.path),
+    ),
+  ];
+}
+
+/** What the plan says beside its steps: who is left out, and telemetry. */
+function notesFor(
+  home: string,
+  root: string,
+  setup: ProjectSetup,
+  skipped: string[],
+) {
+  const telemetry = telemetryNote(home, root, setup);
+  return [
+    ...skipped.map(
+      (name) =>
+        `Agent ${name} isn't on team ${setup.team!.name}; it isn't set up.`,
+    ),
+    `apply records what it writes in ${STATE_FILE}.`,
+    ...(telemetry ? [telemetry] : []),
+  ];
+}
+
+/**
+ * The host to set up: the one nodrail.yaml names, or, when it lists both,
+ * the one `--runtime` picks. A host it doesn't list is refused.
+ */
+export function chooseRuntime(
+  listed: readonly Runtime[],
+  asked: string | undefined,
+): Runtime {
+  if (listed.length === 0)
+    throw new CliError(
+      `${MANIFEST_FILE} doesn't say which host to set up. Add runtime: claude-code, runtime: codex, or runtimes: [claude-code, codex].`,
+    );
+  if (asked === undefined) {
+    if (listed.length === 1) return listed[0]!;
+    throw new CliError(
+      `${MANIFEST_FILE} sets up ${listed.map((name) => HOST_NAMES[name]).join(" and ")}: say which with ${listed.map((name) => `--runtime ${name}`).join(" or ")}.`,
+    );
+  }
+  const found = listed.find((name) => name === asked);
+  if (found === undefined)
+    throw new CliError(
+      `${MANIFEST_FILE} doesn't set up ${asked}; it lists ${listed.join(", ")}.`,
+    );
+  return found;
 }
 
 /** The locked policy, or the setup alone with a failed check saying why. */
@@ -134,12 +325,13 @@ function lockedPolicy(
   checks: Check[],
 ): { text: string | null; setup: ProjectSetup; inputs: string[] } {
   try {
-    const frozen = frozenPolicy(input);
+    const { workspace, ...frozen } = frozenPolicy(input);
     checks.push({
       name: "policy",
       ok: true,
       detail: "matches nodrail.lock.yaml",
     });
+    if (workspace) checks.push({ name: "workspace", ...workspace });
     return frozen;
   } catch (error) {
     if (!(error instanceof CliError)) throw error;
@@ -156,7 +348,10 @@ function lockedPolicy(
 }
 
 /** The file's bytes, null when there is none, "folder" when a folder is. */
-function readBytes(root: string, path: string): Buffer | null | "folder" {
+export function readBytes(
+  root: string,
+  path: string,
+): Buffer | null | "folder" {
   try {
     return readFileSync(join(root, path));
   } catch (error) {
@@ -167,11 +362,10 @@ function readBytes(root: string, path: string): Buffer | null | "folder" {
   }
 }
 
-function fileStep(
-  root: string,
-  state: SetupState | null,
-  file: DesiredFile,
-): Step {
+/** The state, and the host whose files a step is about. */
+type Owner = { state: SetupState | null; runtime: Runtime };
+
+function fileStep(root: string, owner: Owner, file: DesiredFile): Step {
   const { path, why } = file;
   // Never through a link: it could lead to a file outside the project.
   if (folderHost(root).real(path) !== path)
@@ -186,7 +380,13 @@ function fileStep(
     return { path, action: "conflict", why: `${why}; a folder is there` };
   const now = sha256(disk);
   if (now === sha256(file.content)) return { path, action: "keep", why };
-  const written = state?.files[path];
+  // A file both hosts need, last written for the other one, is nodrail's
+  // too while it holds what was written.
+  const written =
+    hostState(owner.state, owner.runtime)?.files[path] ??
+    otherOwners(owner.state, owner.runtime, path).find(
+      (other) => other.hash === now,
+    )?.hash;
   if (written === undefined)
     return {
       path,
@@ -202,179 +402,38 @@ function fileStep(
   return { path, action: "update", why };
 }
 
-function goneStep(root: string, path: string, hash: string): Step {
-  const disk = readBytes(root, path);
-  if (disk === null) return { path, action: "keep", why: "already removed" };
-  if (disk === "folder" || sha256(disk) !== hash)
+function goneStep(
+  root: string,
+  owner: Owner,
+  path: string,
+  hash: string,
+): Step {
+  const others = otherOwners(owner.state, owner.runtime, path);
+  if (others.length > 0)
     return {
       path,
-      action: "conflict",
-      why: "no longer needed, but edited since nodrail wrote it",
+      action: "keep",
+      why: `no longer needed here; kept for ${others.map((other) => HOST_NAMES[other.host]).join(" and ")}`,
     };
-  return { path, action: "remove", why: "no longer needed" };
-}
-
-/**
- * Claude Code's settings with nodrail's entries set and everything else kept:
- * `agent`, and one PreToolUse hook found by its command.
- */
-function settingsStep(
-  root: string,
-  state: SetupState | null,
-  want: DesiredSettings,
-): { step: Step; value: Record<string, unknown> | null } {
-  const path = SETTINGS_FILE;
-  const why = `start as ${want.agent}; the policy hook`;
-  const read = readSettings(root, path);
-  const refusal =
-    typeof read === "string"
-      ? read
-      : settingsRefusal(read.current, state, want);
-  if (refusal !== null || typeof read === "string")
-    return {
-      step: { path, action: "conflict", why: `${why}; ${refusal}` },
-      value: null,
-    };
-  const { disk, current } = read;
-  const hooks = (current.hooks ?? {}) as Record<string, unknown>;
-  const groups = Array.isArray(hooks.PreToolUse)
-    ? (hooks.PreToolUse as unknown[])
-    : [];
-  const value = {
-    ...current,
-    agent: want.agent,
-    hooks: { ...hooks, PreToolUse: [...withoutOurs(groups), want.hook] },
-  };
-  const action: StepAction =
-    disk === null
-      ? "create"
-      : JSON.stringify(value) === JSON.stringify(current)
-        ? "keep"
-        : "update";
-  return { step: { path, action, why }, value };
-}
-
-/**
- * Claude Code's settings as they are, or why nodrail can't edit them: a link,
- * as in a dotfiles setup, which writing would replace; or not a JSON object.
- */
-function readSettings(root: string, path: string) {
-  if (folderHost(root).real(path) !== path)
-    return "the path goes through a link";
-  const disk = readBytes(root, path);
-  if (disk === null) return { disk, current: {} as Record<string, unknown> };
-  try {
-    if (disk === "folder") throw new Error("a folder");
-    const parsed: unknown = JSON.parse(disk.toString("utf8"));
-    if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed))
-      throw new Error("not an object");
-    return { disk, current: parsed as Record<string, unknown> };
-  } catch {
-    return "it isn't a JSON object";
-  }
-}
-
-/** Why settings that read fine still can't take nodrail's entries, or null. */
-function settingsRefusal(
-  current: Record<string, unknown>,
-  state: SetupState | null,
-  want: DesiredSettings,
-) {
-  if (
-    current.agent !== undefined &&
-    current.agent !== want.agent &&
-    current.agent !== state?.settings.agent
-  )
-    return `agent is set to ${JSON.stringify(current.agent)}, not by nodrail`;
-  if (current.disableAllHooks === true)
-    return "disableAllHooks is on, so no hook would run";
-  return null;
-}
-
-const isOurs = (hook: unknown) =>
-  typeof hook === "object" &&
-  hook !== null &&
-  typeof (hook as { command?: unknown }).command === "string" &&
-  (hook as { command: string }).command.startsWith(HOOK_PREFIX);
-
-/**
- * The hook groups with nodrail's own hooks taken out, and a group left empty
- * by that dropped. Everyone else's hooks stay where they were.
- */
-function withoutOurs(groups: unknown[]) {
-  return groups.flatMap((group) => {
-    const inner = (group as { hooks?: unknown }).hooks;
-    if (!Array.isArray(inner) || !inner.some(isOurs)) return [group];
-    const rest = inner.filter((hook) => !isOurs(hook));
-    return rest.length > 0 ? [{ ...(group as object), hooks: rest }] : [];
+  return removalStep(root, path, hash, {
+    edited: "no longer needed, but edited since nodrail wrote it",
+    removed: "no longer needed",
   });
 }
 
-const windows = process.platform === "win32";
-
-/** The first executable called `name` on PATH, or null; on Windows, with PATHEXT. */
-export function findOnPath(name: string, env: Env) {
-  const endings = windows
-    ? (env.PATHEXT ?? ".COM;.EXE;.BAT;.CMD").split(";").filter(Boolean)
-    : [""];
-  for (const folder of (env.PATH ?? env.Path ?? "")
-    .split(delimiter)
-    .filter(Boolean))
-    for (const ending of endings) {
-      const path = join(folder, name + ending);
-      try {
-        accessSync(path, constants.X_OK);
-        return path;
-      } catch {
-        // Not here.
-      }
-    }
-  return null;
-}
-
-function onPath(name: string, env: Env, why: string): Check {
-  const path = findOnPath(name, env);
-  return path
-    ? { name, ok: true, detail: path }
-    : { name, ok: false, detail: `not on PATH; ${why}` };
-}
-
-const parts = (version: string) => version.split(".").map(Number);
-export function atLeast(version: string, minimum: string) {
-  const [a, b] = [parts(version), parts(minimum)];
-  for (let index = 0; index < 3; index++)
-    if ((a[index] ?? 0) !== (b[index] ?? 0))
-      return (a[index] ?? 0) > (b[index] ?? 0);
-  return true;
-}
-
-/** A tool on PATH at `minimum` or later, by its `--version`. */
-function versionCheck(
-  name: string,
-  minimum: string,
-  install: string,
-  env: Env,
-): Check {
-  const path = findOnPath(name, env);
-  if (path === null)
-    return { name, ok: false, detail: `not on PATH; ${install}` };
-  let output = "";
-  try {
-    output = execFileSync(windows ? `"${path}"` : path, ["--version"], {
-      encoding: "utf8",
-      env: env as NodeJS.ProcessEnv,
-      timeout: 15_000,
-      stdio: ["ignore", "pipe", "ignore"],
-      // A .cmd runs only through the shell; the arguments are fixed.
-      shell: windows,
-    });
-  } catch {
-    return { name, ok: false, detail: `${path} --version failed` };
-  }
-  const version = /\d+\.\d+\.\d+/.exec(output)?.[0];
-  if (!version)
-    return { name, ok: false, detail: `unexpected version: ${output.trim()}` };
-  return atLeast(version, minimum)
-    ? { name, ok: true, detail: version }
-    : { name, ok: false, detail: `${version}; needs ${minimum} or later` };
+/**
+ * Taking out a file nodrail wrote: nothing to do when it's gone, and kept,
+ * as a conflict, when it was edited since.
+ */
+export function removalStep(
+  root: string,
+  path: string,
+  hash: string,
+  why: { edited: string; removed: string },
+): Step {
+  const disk = readBytes(root, path);
+  if (disk === null) return { path, action: "keep", why: "already removed" };
+  if (disk === "folder" || sha256(disk) !== hash)
+    return { path, action: "conflict", why: why.edited };
+  return { path, action: "remove", why: why.removed };
 }

@@ -238,6 +238,10 @@ What the hook does with each event:
 
 Starting a subagent is `tool: claude-code`, `operation: agent`, with the subagent's type as an `agent` resource. Claude Code's earlier name for the tool, `Task`, is described the same way. Types are named the way runs name agents: lowercase, with anything but letters, digits, `_` and `-` turned into `-`, so `vercel:deployment-expert` is `vercel-deployment-expert`. A start with no type is `general-purpose`.
 
+Loading a skill (Claude Code's `Skill` tool) is `tool: claude-code`, `operation: skill`, with the skill as a `skill` resource, named the same way except that a plugin's `:` stays: `Vercel:Deploy` is `vercel:deploy`, so `resource: { kind: skill, match: prefix, value: "vercel:" }` names every skill of the `vercel` plugin. A Team's rules let each member load the skills its Agent lists, and the skills of the plugins it may use; the rest of the policy decides any other skill.
+
+A plugin's MCP tools are read like a connection's, by the server's name: Claude Code calls them `mcp__plugin_<plugin>_<server>__<tool>`, Codex `mcp__<server>__<tool>`. A call whose plugin isn't the one that declares the server, or, on Claude Code, a bare `mcp__<server>__` call to a plugin's server, isn't read as it.
+
 Two types that differ only in those characters get the same name: `team:qa` and `team-qa` are both `team-qa`, and a gate waiting for one is met by the other. Give the subagents you gate on names that stay apart.
 
 ### Upgrading rules for subagents

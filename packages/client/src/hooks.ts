@@ -34,7 +34,7 @@ export {
   type HookResult,
 } from "@nodrail/policy-engine/actions";
 
-export const HOOK_VERSION = "0.4.0";
+export const HOOK_VERSION = "0.5.0";
 
 /**
  * Longer than the wait for a person, and short enough that withdrawing the

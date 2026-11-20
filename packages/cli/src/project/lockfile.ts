@@ -6,10 +6,14 @@ import {
 } from "@nodrail/policy-engine/yaml";
 import { Document, isScalar, parse, Scalar, visit } from "yaml";
 import { z } from "zod";
+import { workspaceDigest, type Hashed } from "./workspace.ts";
 
 export const MANIFEST_FILE = "nodrail.yaml";
 export const LOCK_FILE = "nodrail.lock.yaml";
+/** A policy-only project's lock. */
 const LOCK_SCHEMA = 1;
+/** A setup's lock: the policy, and the whole workspace the hosts get. */
+const LOCK_WORKSPACE = 2;
 
 /** Text is hashed as UTF-8; bytes as they are. */
 export const sha256 = (data: string | Uint8Array) =>
@@ -19,7 +23,7 @@ const hashed = z.object({ path: z.string(), sha256: z.string() }).strict();
 
 const lockShape = z
   .object({
-    lock: z.literal(LOCK_SCHEMA),
+    lock: z.union([z.literal(LOCK_SCHEMA), z.literal(LOCK_WORKSPACE)]),
     engine: z.number().int(),
     manifest: hashed,
     modules: z.array(
@@ -37,10 +41,21 @@ const lockShape = z
     edges: z.array(z.object({ from: z.string(), to: z.string() }).strict()),
     order: z.array(z.string()),
     effective: z.object({ sha256: z.string() }).strict().nullable(),
+    /**
+     * The reviewed workspace: one digest over every file above, the
+     * catalog's included, and the instructions and skill files listed here.
+     */
+    workspace: z
+      .object({ sha256: z.string(), files: z.array(hashed) })
+      .strict()
+      .optional(),
     /** The effective policy last reviewed, to show what the next change does. */
     baseline: z.string(),
   })
-  .strict();
+  .strict()
+  .refine(
+    (lock) => (lock.lock === LOCK_WORKSPACE) === (lock.workspace !== undefined),
+  );
 
 export type Lock = z.infer<typeof lockShape>;
 
@@ -56,10 +71,12 @@ export function lockFor(input: {
   catalog: Catalog;
   effective: string | null;
   previous: Lock | null;
+  /** A setup's instructions and skill files; null for a policy alone. */
+  content: Hashed[] | null;
 }): Lock {
-  const { resolution, manifest, catalog, effective } = input;
-  return {
-    lock: LOCK_SCHEMA,
+  const { resolution, manifest, catalog, effective, content } = input;
+  const lock: Lock = {
+    lock: content === null ? LOCK_SCHEMA : LOCK_WORKSPACE,
     engine: ENGINE_VERSION,
     manifest: { path: manifest.path, sha256: sha256(manifest.text) },
     modules: resolution.modules
@@ -88,6 +105,39 @@ export function lockFor(input: {
     effective: effective === null ? null : { sha256: sha256(effective) },
     baseline: effective ?? input.previous?.baseline ?? "",
   };
+  if (content === null) return lock;
+  // The workspace section goes before the baseline, which is long.
+  const { baseline, ...rest } = lock;
+  return {
+    ...rest,
+    workspace: {
+      sha256: workspaceDigest(sourcesOf(lock, content), sha256),
+      files: content,
+    },
+    baseline,
+  };
+}
+
+/**
+ * What the workspace digest covers: every file the lock records, each by its
+ * path, catalog files by module, and the effective policy compiled from them,
+ * so another engine's policy is another revision.
+ */
+export function sourcesOf(lock: Lock, content: Hashed[]): Hashed[] {
+  return [
+    ...(lock.effective
+      ? [{ path: "<effective policy>", sha256: lock.effective.sha256 }]
+      : []),
+    lock.manifest,
+    ...lock.files,
+    ...lock.modules.flatMap((module) =>
+      module.files.map((file) => ({
+        path: `${module.id}@${module.version}/${file.path}`,
+        sha256: file.sha256,
+      })),
+    ),
+    ...content,
+  ];
 }
 
 /**
@@ -121,9 +171,10 @@ export function readLock(text: string): Lock | string {
     value !== null &&
     typeof value === "object" &&
     "lock" in value &&
-    value.lock !== LOCK_SCHEMA
+    value.lock !== LOCK_SCHEMA &&
+    value.lock !== LOCK_WORKSPACE
   )
-    return `nodrail.lock.yaml uses lock format ${String(value.lock)}; this nodrail reads ${LOCK_SCHEMA}`;
+    return `nodrail.lock.yaml uses lock format ${String(value.lock)}; this nodrail reads ${LOCK_SCHEMA} and ${LOCK_WORKSPACE}. Update nodrail.`;
   const lock = lockShape.safeParse(value);
   return lock.success ? lock.data : "nodrail.lock.yaml is damaged";
 }

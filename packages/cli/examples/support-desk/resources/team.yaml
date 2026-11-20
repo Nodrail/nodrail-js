@@ -1,0 +1,8 @@
+apiVersion: apf.nodrail.com/v1alpha1
+kind: Team
+metadata: { name: desk }
+spec:
+  entry: marketing
+  members: [marketing, support]
+  handoffs:
+    - { from: marketing, to: support }

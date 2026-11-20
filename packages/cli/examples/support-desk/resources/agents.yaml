@@ -1,0 +1,15 @@
+apiVersion: apf.nodrail.com/v1alpha1
+kind: Agent
+metadata: { name: marketing }
+spec:
+  description: Writes campaign copy from the public handbook. Starts every session.
+  instructions: ./marketing.md
+  skills: [../skills/cite-sources]
+---
+apiVersion: apf.nodrail.com/v1alpha1
+kind: Agent
+metadata: { name: support }
+spec:
+  description: Answers questions from the public and internal handbook. Use it for anything internal.
+  instructions: ./support.md
+  skills: [../skills/cite-sources]

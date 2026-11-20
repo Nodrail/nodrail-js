@@ -1,5 +1,107 @@
 # Changelog
 
+## 0.5.0
+
+GitHub Copilot CLI as a third host, and the reporting contract v2.
+
+### Fixed
+
+- An invalid `nodrail.yaml` field is named, with why: "The manifest's
+  fields are not valid: plugins.x.from.commit: A full commit id…". Before,
+  the message didn't say which field.
+- `nodrail-policy hook --connections` reads each connection's `data` and
+  denies file tools and shell commands that reach it, whatever the rules
+  say: agents reach a connection's data only through its operations.
+- Codex couldn't load the project's own skills: it reads a skill through
+  its shell, and the setup guard refused any command naming the setup's
+  files, reads included. A read in a shape the hook knows exactly changes
+  nothing, so the file rules now decide it. `cat`, `head`, `tail`, `nl` and
+  `wc` on several files (up to 20) are judged as one read per file, so one
+  secret among them still denies the command.
+- Claude Code's `Skill` tool is described as `claude-code skill` on a
+  `skill` resource named after the skill, and a Team's rules let each member
+  load the skills its Agent lists. Before, a skill set up for an agent was
+  denied when it loaded it (`no rule covers claude-code skill on Skill`).
+  A project with a Team gets one allow per member and skill: run
+  `nodrail policy lock` to review and record them.
+- A connection with `-` in its name, such as `support-memory`, is read as
+  declared on Codex, which calls it `mcp__support_memory__…`: it was denied
+  as undeclared. Operations that differ only by `-` and `_` are refused,
+  since Codex names them alike.
+
+### Changed
+
+- A connection's locked files are every project file its command line
+  names (`connectionPaths`), the command included, with or without `./` or
+  as `--flag=value`; a `./` folder is accepted as data, unlocked. The
+  `--protect-list` docs state the shell check's limits: words as written,
+  not wildcards, variables or scripts.
+
+### Added
+
+- GitHub Copilot CLI (preview): `hook --host copilot` reads Copilot's
+  `preToolUse` calls (`bash`, `view`, `create`, `edit`, `rg`, `glob`,
+  `web_fetch`, `task`, and MCP tools as `<server>-<tool>`) as the Claude
+  Code calls they are, so the same rules and modules judge them, and
+  answers in Copilot's shape. An `apply_patch` is judged once per file it
+  names; a review is a deny. `runtimes: [copilot]` sets the team up in
+  `.github/agents`, `.github/skills`, `.github/mcp.json` and
+  `.github/hooks`, which are setup places agents can't change. A
+  Claude Code hook that Copilot runs is detected and judged correctly.
+- Reporting contract v2 (preview): every span carries `nodrail.schema=2`,
+  the project's name and, with `id:` in `nodrail.yaml`, its stable
+  `nodrail.project.id`. Decisions carry the policy's full SHA-256
+  (`policyRevision`, the lock's `effective.sha256`), the machine
+  (`machineId`) and the run; a run's steps and actions are sent as
+  `nodrail.run.event` spans (`runEventSpan`, run keys hashed with
+  `runRef`). `telemetry.traces.bearer` takes a secret by reference and
+  sends it as `Authorization: Bearer`.
+- The sender reads OTLP partial success (`deliveryOf`) and counts sent,
+  refused, unknown and dropped spans apart in its status. A 4xx is final;
+  408, 429, 5xx and network errors retry with the same span ids, which a
+  receiver dedupes on.
+- `decodeSpans` reads an OTLP/HTTP traces export, protobuf or JSON, for
+  receivers.
+- `id:` in a project manifest (a UUID), read into the setup as `id`.
+- `@nodrail/policy-engine/compile`: `compilePolicies` without Node
+  built-ins, for browsers.
+
+- `plugins` and `agentPlugins` in a project manifest: plugin folders, their
+  MCP servers' operations and who may use them. `connectionCall` reads
+  `mcp__plugin_<plugin>_<server>__<tool>` (Claude Code) and, with host
+  `codex`, `mcp__<server>__<tool>`; the hook takes `host`. Team rules let
+  members given a plugin load its skills (`skill` prefix `<plugin>:`) and
+  deny its operations to the rest. A plugin's skill keeps its `:`
+  (`vercel:deploy`). `.claude-plugin` is a setup place.
+- `tested` in a project manifest (proposed): exact versions for `nodrail`,
+  `node`, `claude-code` and `codex`, read into the setup as `tested`.
+- Telemetry (preview): `telemetry.traces` in `nodrail.yaml` (an OTLP/HTTP
+  endpoint, protobuf or JSON, headers with secrets by reference), and
+  `hook --telemetry <file>`, which sends each decision as a
+  `nodrail.decision` span: the decision the host was told, the rule match,
+  the agent, tool, operation, resource kind, host and policy revision, with
+  the host's `session.id` and `gen_ai.tool.call.id`. Never arguments,
+  resources, prompts or secrets. Spans wait in a bounded queue and a
+  separate process sends them; a receiver that is down never delays a
+  decision.
+
+- Tool connections (preview): `nodrail.yaml` may declare `connections`, MCP
+  servers by command, arguments, environment (secrets as `fromEnv` or
+  `fromKeychain` references) and operations, and `agentConnections`, who
+  may use which. A `./` file a connection runs is locked like a resource.
+  A started Team's rules deny each member the connections and operations it
+  isn't given. Names the engine uses for its own tools (`shell`, `files`…)
+  are refused.
+- `hook --connections <file>` reads a call to a declared connection as its
+  declaration says: `mcp__handbook__search` with `collection: internal` is
+  tool `handbook`, operation `search`, resource `collection` `internal`.
+  An undeclared operation, or a missing resource argument, is denied.
+
+- `nodrail.yaml` may say `runtimes: [claude-code, codex]` instead of
+  `runtime`, for one file both hosts apply. `ProjectSetup.runtimes` lists the
+  hosts; `runtime` is the host when there is only one. Both fields, or a host
+  listed twice, is a problem.
+
 ## 0.4.0
 
 ### Added
@@ -68,7 +170,7 @@ Project manifests, a permission diff, and a safer reading of file paths.
 - `resolveProject` (`@nodrail/policy-engine/yaml`) composes a project's
   `nodrail.yaml` (`kind: nodrail.project/v1`): ordered imports of local rules
   files, nested manifests and catalog modules with typed values (`with:
-  { repository: owner/name }`). A file shared by two imports is applied once.
+{ repository: owner/name }`). A file shared by two imports is applied once.
   Cycles, paths or links that leave the project folder, unknown publishers,
   versions in the manifest and conflicting values are refused, each naming the
   reference. It reads only what its host gives it, so it runs in a browser too.
@@ -80,7 +182,7 @@ Project manifests, a permission diff, and a safer reading of file paths.
   changed or needs review. A change that weakens a deny, a gate or a budget is
   marked `!`. Checked against the evaluator with generated policies.
 - `@nodrail/policy-engine/command-line` exports `runPolicyCommandLine(argv,
-  io)`: `nodrail-policy` as a function, which `nodrail policy` runs.
+io)`: `nodrail-policy` as a function, which `nodrail policy` runs.
 - File calls carry `file_name`, the file's own name, so a rule can allow files
   by name without matching folders that share it.
 

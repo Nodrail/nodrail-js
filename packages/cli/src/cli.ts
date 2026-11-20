@@ -2,14 +2,24 @@ import { parseArgs } from "node:util";
 import { decide, listApprovals } from "./commands/approvals.ts";
 import { login, logout, showWhoami } from "./commands/auth.ts";
 import { activity, insights, run, runs } from "./commands/read.ts";
+import { connection } from "./commands/connection.ts";
+import { connector } from "./commands/connector.ts";
+import { example } from "./commands/example.ts";
 import { policy } from "./commands/policy.ts";
 import { add } from "./commands/project.ts";
 import { rules } from "./commands/rules.ts";
 import { apply, plan } from "./commands/setup.ts";
+import { destroy } from "./commands/destroy.ts";
+import { status } from "./commands/status.ts";
+import { observe } from "./commands/observe.ts";
+import { plugin } from "./commands/plugin.ts";
+import { workspace } from "./commands/workspace.ts";
 import { commandFor, type Command, type Values } from "./context.ts";
 import { describeFailure, exitCodeOf, UsageError, type Io } from "./io.ts";
 
-export const VERSION = "0.2.0";
+import { VERSION } from "./version.ts";
+
+export { VERSION };
 
 const options = {
   json: { type: "boolean" },
@@ -19,6 +29,11 @@ const options = {
   version: { type: "boolean", short: "v" },
   yes: { type: "boolean", short: "y" },
   agent: { type: "string" },
+  runtime: { type: "string" },
+  "require-active": { type: "boolean" },
+  check: { type: "boolean" },
+  detach: { type: "boolean" },
+  names: { type: "boolean" },
   watch: { type: "boolean", short: "w" },
   q: { type: "string" },
   outcome: { type: "string" },
@@ -49,8 +64,14 @@ const commands: Record<string, Entry> = {
   insights: { run: insights, options: ["days"] },
   rules: { run: rules, options: ["yes"] },
   add: { run: add, options: [] },
-  plan: { run: plan, options: [] },
-  apply: { run: apply, options: ["yes"] },
+  plan: { run: plan, options: ["runtime", "require-active"] },
+  example: { run: example, options: [] },
+  apply: { run: apply, options: ["yes", "runtime"] },
+  destroy: { run: destroy, options: ["yes", "runtime"] },
+  status: { run: status, options: ["runtime"] },
+  observe: { run: observe, options: ["detach", "names"] },
+  plugin: { run: plugin, options: ["yes", "check"] },
+  workspace: { run: workspace, options: ["yes"] },
 };
 
 export const HELP = `nodrail — your Nodrail workspace from the terminal
@@ -74,8 +95,15 @@ Project policy (offline, no account; run where nodrail.yaml is)
   add <module | ./file>  Add a catalog module (@nodrail/…) or a rules file
   policy lock            Review the permission changes and record them
   policy export --frozen The locked policy as one APF file, or an error
-  plan                   What \`nodrail apply\` would set up for the team (preview)
-  apply                  Set up the team on its host, after showing the plan (preview)
+  example [name] [dir]   Copy an example project, such as support-desk (preview)
+  plan [folder]          What \`nodrail apply\` would set up for the team (preview)
+  apply [folder]         Set up the team on its host, after showing the plan (preview)
+  destroy [folder]       Take out what apply set up; keeps your files and data (preview)
+  status [folder]        Each host as apply set it up, next to what is there now (preview)
+  observe <folder>       Record status in ~/.nodrail; the session-start hook runs it (preview)
+  plugin fetch [name]    Copy a plugin from git at its pinned commit; --check compares (preview)
+  workspace publish      Make the lock here the revision your team should run (preview)
+  workspace show         The team's intended revision next to the lock and each host (preview)
 
 Policies (offline, no account), the same as nodrail-policy
   policy init <pack>     A starter rules file: read-only or repo-work
@@ -84,11 +112,14 @@ Policies (offline, no account), the same as nodrail-policy
   policy hook <dir>      Claude Code hook; reads the event from stdin
   policy runs            What the local run ledger recorded
   policy --help          Every policy command and its flags
+  connection run <file> <name>  Start a tool connection; hosts run this
+  connector <name>       Nodrail's connectors: http-search, files-search, outbox
 
 Options
   --json                 Machine-readable output on stdout
   -e, --environment      An environment's slug (default: the workspace's)
   --url                  Nodrail's address, for self-hosting (or NODRAIL_URL)
+  --runtime              plan, apply, destroy, status: claude-code or codex
   -y, --yes              Don't ask before deciding or publishing
   --limit, --cursor      Page size (1–100) and the next page's cursor
   -h, --help, -v, --version
@@ -122,6 +153,10 @@ export async function main(argv: string[], io: Io): Promise<number> {
   try {
     // Before parsing: policy takes nodrail-policy's flags, not these.
     if (argv[0] === "policy") return await policy(argv.slice(1), io);
+    // Started by a host: its stdio belongs to the connection.
+    if (argv[0] === "connection") return await connection(argv.slice(1), io);
+    if (argv[0] === "connector")
+      return await connector(argv.slice(1), io, VERSION);
     const { values, positionals } = parse(argv);
     if (values.version) {
       io.out(VERSION);

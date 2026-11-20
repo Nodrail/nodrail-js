@@ -171,7 +171,7 @@ export function searchCall(
  * Rule keys are lowercase. A name that needs changing gets a fingerprint, so
  * "GitHub" and "github", or "a.b" and "a-b", can never share a rule.
  */
-function ruleKey(value: string, max: number) {
+export function ruleKey(value: string, max: number) {
   // A name already shaped like a tagged one is tagged too, so it can't pose as it.
   const plain = /^[a-z0-9_-]+$/.test(value) && !/-[0-9a-f]{8}$/.test(value);
   if (value.length > 0 && value.length <= max && plain) return value;
@@ -184,7 +184,7 @@ function ruleKey(value: string, max: number) {
 }
 
 /** Enough for a reviewer to read, with anything that looks secret taken out. */
-function inputParams(input: ToolInput) {
+export function inputParams(input: ToolInput) {
   const size = Buffer.byteLength(JSON.stringify(input));
   return {
     ...(size <= MAX_INLINE_INPUT ? { input: redactJson(input) } : {}),
@@ -353,6 +353,23 @@ function subagentCall(input: ToolInput): ActionDescriptor {
   };
 }
 
+/**
+ * Loading a skill on Claude Code. The resource is the skill, named as runs
+ * name agents, so a rule can let an agent load the skills set up for it; a
+ * plugin's skills are `<plugin>:<skill>`.
+ */
+function skillCall(input: ToolInput): ActionDescriptor {
+  // `<plugin>:<skill>` keeps its `:`, so a prefix names a plugin's skills.
+  const parts = (nonEmptyText(input.skill) ?? "unnamed").split(":");
+  const name = parts.map(agentName).join(":");
+  return {
+    tool: "claude-code",
+    operation: "skill",
+    resource: { kind: "skill", id: name },
+    params: { skill: name, input_sha256: fingerprint(input) },
+  };
+}
+
 const whatIsWritten = (input: ToolInput) => input.content;
 export const wholeInput = (input: ToolInput) => input;
 
@@ -368,6 +385,7 @@ const describers = new Map<string, Describe>([
   ["Agent", (input) => subagentCall(input)],
   // Claude Code's earlier name for Agent, with the same subagent_type.
   ["Task", (input) => subagentCall(input)],
+  ["Skill", (input) => skillCall(input)],
   ...codexDescribers,
   ["PowerShell", (input, _cwd, name) => shellCall(name, input)],
   [

@@ -41,6 +41,7 @@ export {
   type ProjectImport,
   type ProjectManifest,
   type Runtime,
+  type Tested,
 } from "./project-manifest.ts";
 export {
   RESOURCE_API,
@@ -49,9 +50,41 @@ export {
   type ResourceKind,
   type SetupAgent,
   type SetupBinding,
+  type SetupConnection,
+  type SetupPlugin,
   type SetupPolicy,
   type SetupTeam,
 } from "./project-resources.ts";
 export { bindingsUsed, renameAgents } from "./project-bind.ts";
-export { SETUP_PLACES, teamRules } from "./project-team.ts";
+export { COPILOT_PLACES, SETUP_PLACES, teamRules } from "./project-team.ts";
+export {
+  connectionCall,
+  connectionCalls,
+  connectionCallsFile,
+  connectionsField,
+  exposureOf,
+  secretRef,
+  type AgentConnections,
+  type ConnectionCalls,
+  type Connections,
+  type ConnectionSpec,
+  type SecretRef,
+} from "./connections.ts";
+export {
+  agentPluginsField,
+  pluginCalls,
+  pluginsField,
+  pluginOrigin,
+  pluginsOf,
+  type AgentPlugins,
+  type Plugins,
+  type PluginSpec,
+  type PluginOrigin,
+} from "./plugins.ts";
+export {
+  telemetryField,
+  telemetryFile,
+  type Telemetry,
+  type TelemetryFile,
+} from "./telemetry-schema.ts";
 export { joinPath } from "./project-paths.ts";

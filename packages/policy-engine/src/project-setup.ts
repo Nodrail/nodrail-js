@@ -1,10 +1,17 @@
 import { parseAllDocuments } from "yaml";
 import { canonicalId, type Catalog } from "./catalog.ts";
+import {
+  connectionPaths,
+  exposureProblems,
+  type ConnectionSpec,
+} from "./connections.ts";
+import { agentPluginProblems, serverClashes } from "./plugins.ts";
+import { readPlugin } from "./project-plugins.ts";
 import { agentName } from "./names.ts";
-import type { ProjectHost, ProjectInput } from "./project.ts";
+import type { ProjectHost, ProjectInput, ProjectProblem } from "./project.ts";
 import type { ProjectManifest } from "./project-manifest.ts";
 import { joinPath } from "./project-paths.ts";
-import { SETUP_PLACES } from "./project-team.ts";
+import { COPILOT_PLACES, SETUP_PLACES } from "./project-team.ts";
 import {
   resource,
   rolesProblems,
@@ -33,7 +40,7 @@ const WRITTEN =
  * removed with it.
  */
 const written = (path: string) =>
-  SETUP_PLACES.some(
+  [...SETUP_PLACES, ...COPILOT_PLACES].some(
     (place) => path === place || path.startsWith(`${place}/`),
   ) && !path.startsWith("nodrail.");
 
@@ -48,7 +55,7 @@ export function readSetup(
   path: string,
 ) {
   const { setup } = context;
-  setup.runtime = manifest.runtime ?? null;
+  readRuntimes(context, manifest, path);
   setup.start = manifest.start ?? false;
   const refs = manifest.resources;
   for (const ref of typeof refs === "string" ? [refs] : (refs ?? []))
@@ -57,7 +64,158 @@ export function readSetup(
     for (const message of teamProblems(team, agentNames(setup)))
       context.problem(team.name, team.file, message);
   chooseTeam(context, manifest.team, path);
+  readConnections(context, manifest, path);
+  readPlugins(context, manifest, path);
+  setup.telemetry = manifest.telemetry ?? null;
+  setup.id = manifest.id ?? null;
+  setup.tested = manifest.tested ?? null;
+  setup.observe = {
+    names: manifest.observe?.names ?? false,
+    sessionStart: manifest.observe?.sessionStart ?? true,
+  };
   return checkBindings(context);
+}
+
+/** `runtime: x`, or `runtimes: [x, y]` for one file both hosts apply. */
+function readRuntimes(
+  context: SetupContext,
+  manifest: ProjectManifest,
+  path: string,
+) {
+  const { setup } = context;
+  const { runtime, runtimes } = manifest;
+  if (runtime !== undefined && runtimes !== undefined)
+    context.problem("runtimes", path, "Say runtime or runtimes, not both");
+  const named = runtimes ?? (runtime === undefined ? [] : [runtime]);
+  if (new Set(named).size !== named.length)
+    context.problem("runtimes", path, "Lists a host twice");
+  setup.runtimes = [...new Set(named)];
+  setup.runtime = setup.runtimes.length === 1 ? setup.runtimes[0]! : null;
+}
+
+/**
+ * The connections, each with the project files it runs, locked like the
+ * resources so the code a connection runs is the code reviewed; and who may
+ * use each.
+ */
+function readConnections(
+  context: SetupContext,
+  manifest: ProjectManifest,
+  path: string,
+) {
+  const { setup } = context;
+  for (const [name, spec] of Object.entries(manifest.connections ?? {})) {
+    const data = readData(context, spec, path);
+    const files = connectionFiles(context, spec, path, data);
+    setup.connections.push(
+      data.length > 0 ? { name, spec, files, data } : { name, spec, files },
+    );
+  }
+  const exposure = manifest.agentConnections;
+  if (exposure === undefined) return;
+  setup.agentConnections = exposure;
+  const declared = Object.fromEntries(
+    setup.connections.map((each) => [each.name, each.spec]),
+  );
+  for (const message of exposureProblems(exposure, declared, membersOf(setup)))
+    context.problem("agentConnections", path, message);
+}
+
+/**
+ * The project files a connection's command line names: locked, and kept
+ * from agents. A folder it reads, or its data, isn't.
+ */
+function connectionFiles(
+  context: SetupContext,
+  spec: ConnectionSpec,
+  path: string,
+  data: string[],
+) {
+  const files: string[] = [];
+  for (const { ref, named } of connectionPaths(spec)) {
+    const file = inProject(context, path, ref);
+    // What it keeps changes as it runs: never locked.
+    if (file !== undefined && data.some((each) => overlaps(file, each)))
+      continue;
+    const text = file === undefined ? undefined : context.host.read(file);
+    if (text !== undefined && written(file!))
+      context.problem(ref, path, WRITTEN);
+    else if (text !== undefined) {
+      files.push(file!);
+      if (!context.inputs.some((input) => input.path === file))
+        context.inputs.push({ kind: "local", path: file!, text });
+    } else if (!named) continue;
+    else if (file === undefined) context.problem(ref, path, LEAVES);
+    else if (context.host.list?.(file) === undefined)
+      context.problem(ref, path, "No such file or folder");
+  }
+  return files;
+}
+
+/**
+ * A connection's data, as project paths. It needn't be there yet: the server
+ * makes it. It can't be where nodrail writes, nor hold the program the
+ * connection runs.
+ */
+function readData(context: SetupContext, spec: ConnectionSpec, path: string) {
+  const data: string[] = [];
+  const program = inProject(context, path, spec.command);
+  for (const ref of spec.data ?? []) {
+    const file = inProject(context, path, ref);
+    if (file === undefined) context.problem(ref, path, LEAVES);
+    else if (written(file) || file.startsWith("nodrail."))
+      context.problem(
+        ref,
+        path,
+        "That's the setup's own; keep data in a folder of its own",
+      );
+    else if (
+      program !== undefined &&
+      context.host.read(program) !== undefined &&
+      overlaps(file, program)
+    )
+      context.problem(ref, path, OVERLAPS);
+    else data.push(file);
+  }
+  return data;
+}
+
+const OVERLAPS =
+  "That overlaps files the lock covers; keep data in a folder of its own";
+
+/** Whether either path is the other, or in it. */
+const overlaps = (a: string, b: string) =>
+  a === b || a.startsWith(`${b}/`) || b.startsWith(`${a}/`);
+
+/**
+ * Data that overlaps what the lock covers: the resources, the files
+ * connections run, the policies, instructions, skills and plugins. Checked
+ * once everything is read, so the policy never keeps agents from the
+ * setup's own files, nor leaves them unlocked as data.
+ */
+export function dataProblems(
+  result: Pick<SetupContext, "setup" | "inputs"> & {
+    problems: ProjectProblem[];
+  },
+  path: string,
+) {
+  const { setup } = result;
+  const covered = [
+    ...result.inputs.map((input) => input.path),
+    ...setup.agents.flatMap((agent) => [
+      agent.instructions ?? "",
+      ...agent.skills,
+    ]),
+    ...setup.plugins.map((plugin) => plugin.folder),
+  ].filter((each) => each !== "");
+  for (const connection of setup.connections)
+    for (const file of connection.data ?? [])
+      if (covered.some((each) => overlaps(file, each)))
+        result.problems.push({
+          ref: `./${file}`,
+          from: path,
+          message: OVERLAPS,
+        });
 }
 
 const agentNames = (setup: ProjectSetup) =>
@@ -203,8 +361,12 @@ function chooseTeam(
   } else if (setup.teams.length === 1) setup.team = setup.teams[0]!;
   else if (setup.teams.length > 1)
     context.problem("team", path, "Say which team to start: team: <name>");
-  if (setup.runtime !== null && setup.teams.length === 0)
-    context.problem("runtime", path, `${setup.runtime} needs a Team to start`);
+  if (setup.runtimes.length > 0 && setup.teams.length === 0)
+    context.problem(
+      "runtime",
+      path,
+      `${setup.runtimes.join(" and ")} ${setup.runtimes.length > 1 ? "need" : "needs"} a Team to start`,
+    );
 }
 
 function checkBindings(context: SetupContext) {
@@ -238,4 +400,42 @@ function checkBindings(context: SetupContext) {
         `Policy ${policy.name} isn't bound, so it does nothing; add a PolicyBinding`,
       );
   return bindings;
+}
+
+/**
+ * The plugins: each a folder in the project with a manifest for each host,
+ * its servers named uniquely among plugins and connections; and who may use
+ * each.
+ */
+function readPlugins(
+  context: SetupContext,
+  manifest: ProjectManifest,
+  path: string,
+) {
+  const { setup } = context;
+  const plugins = manifest.plugins ?? {};
+  for (const [name, spec] of Object.entries(plugins)) {
+    const { plugin, problems } = readPlugin({
+      name,
+      spec,
+      folder: inProject(context, path, spec.source),
+      host: context.host,
+      runtimes: setup.runtimes,
+      written,
+    });
+    for (const message of problems) context.problem(spec.source, path, message);
+    if (plugin) setup.plugins.push(plugin);
+  }
+  const connections = setup.connections.map((each) => each.name);
+  for (const message of serverClashes(plugins, connections))
+    context.problem("plugins", path, message);
+  const exposure = manifest.agentPlugins;
+  if (exposure === undefined) return;
+  setup.agentPlugins = exposure;
+  for (const message of agentPluginProblems(
+    exposure,
+    plugins,
+    membersOf(setup),
+  ))
+    context.problem("agentPlugins", path, message);
 }

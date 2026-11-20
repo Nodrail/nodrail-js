@@ -1,6 +1,6 @@
 {
   "name": "@nodrail/policy-engine",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Compile, test and evaluate Agent Policy Format (APF) rules locally. Includes the CLI, TypeScript evaluator and local Claude Code hook.",
   "keywords": [
     "ai",
@@ -35,6 +35,7 @@
     "./protocol": "./src/protocol.ts",
     "./simulator": "./src/simulator.ts",
     "./yaml": "./src/yaml.ts",
+    "./compile": "./src/compile.ts",
     "./actions": "./src/actions.ts",
     "./receipts": "./src/receipts.ts",
     "./hook-runs": "./src/hook-runs.ts",
@@ -95,6 +96,10 @@
       "./yaml": {
         "types": "./dist/yaml.d.ts",
         "default": "./dist/yaml.js"
+      },
+      "./compile": {
+        "types": "./dist/compile.d.ts",
+        "default": "./dist/compile.js"
       },
       "./actions": {
         "types": "./dist/actions.d.ts",

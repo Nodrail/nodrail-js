@@ -1,0 +1,40 @@
+# A support desk: marketing writes from the public handbook and hands
+# internal questions to support. The same file sets it up on Claude Code
+# or Codex: nodrail plan . --runtime claude-code (or codex).
+kind: nodrail.project/v1
+runtimes: [claude-code, codex]
+resources: ./resources
+imports:
+  - "@nodrail/read-only"
+  - ./policies/desk.yaml
+
+connections:
+  # The handbook, searched by the words passages share with the question.
+  # To search your own service instead, swap the command line (see README).
+  handbook:
+    command: nodrail
+    args: [connector, files-search, --folder, ./handbook, --receipts, ./activity]
+    operations:
+      search: { resource: { kind: collection, from: collection } }
+  # Publishing writes one file per publication to ./outbox: count them.
+  outbox:
+    command: nodrail
+    args: [connector, outbox, --folder, ./outbox]
+    operations:
+      publish: { resource: { kind: channel, from: channel } }
+
+agentConnections:
+  marketing: [handbook, outbox]
+  support: [handbook, outbox]
+
+# The versions this example was last run with on real hosts. Another
+# version works too; plan marks it "?" (unverified) rather than refusing it.
+tested:
+  node: 22.22.3
+  claude-code: 2.1.328
+  codex: 0.170.0
+
+# Send each decision to an OpenTelemetry receiver:
+# telemetry:
+#   traces:
+#     endpoint: http://127.0.0.1:4318/v1/traces

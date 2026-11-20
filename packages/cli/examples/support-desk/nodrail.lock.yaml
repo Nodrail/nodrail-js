@@ -1,0 +1,507 @@
+# Written by `nodrail add` and `nodrail policy lock`. Commit it with
+# nodrail.yaml. `nodrail policy export --frozen` checks every file below
+# against it and refuses to export anything that differs.
+lock: 2
+engine: 3
+manifest:
+  path: nodrail.yaml
+  sha256: "e72c6d558cf83d3fe37d273edd0352242181c49b97ad5c3492c096e0a366d7b9"
+modules:
+  - id: "@nodrail/read-only"
+    version: 1.0.1
+    with: {}
+    missing: []
+    files:
+      - path: module.yaml
+        sha256: "362edd8a6c7498c38ddc6f76a6ef5c7b4cca1b624c43491b57fccdb923109b4c"
+      - path: policies/read-only.yaml
+        sha256: "c40201000d47610013b69e4728dbb55233d1677906e2be1a831d821bc3b46114"
+files:
+  - path: resources/agents.yaml
+    sha256: "a32c398bb4f645b528c3c0fa994a38d731f42d5ede1ceba338961fa17e34e24d"
+  - path: resources/team.yaml
+    sha256: "d4efc790218cad986b29c90841b1da85f87b0973741aad4b18991c8f0df73cfa"
+  - path: policies/desk.yaml
+    sha256: "5398ead8460976cc8c5e34fea6c8eefc4218b269467f926fb78d05cabd334184"
+edges:
+  - from: nodrail.yaml
+    to: "@nodrail/read-only@1.0.1"
+  - from: "@nodrail/read-only@1.0.1"
+    to: "@nodrail/read-only@1.0.1/policies/read-only.yaml"
+  - from: nodrail.yaml
+    to: policies/desk.yaml
+order:
+  - "@nodrail/read-only/policies/read-only.yaml"
+  - policies/desk.yaml
+  - team/desk.apf.yaml
+effective:
+  sha256: "7937d7a2206f85461d8676a400305dc296b0f3e431a78e54fda6de8154596485"
+workspace:
+  sha256: "31f64740c52d64e248be9d951210027adef8e5f1953a7ef4a3e7012568e490ea"
+  files:
+    - path: resources/marketing.md
+      sha256: "ca70922abb537d7bd23bdd6b16d60445e510354baabdbe0fbaa267819c2addd3"
+    - path: resources/support.md
+      sha256: "e5fe14d1fe9554f77c5207965cd93bc99860b9463c8fe3d7f44ae64a9a022bfe"
+    - path: skills/cite-sources/SKILL.md
+      sha256: "655e7f53b8165477132b23ac7ed9d7efb13479e9fab2eb879f37ed785e8fa802"
+baseline: |
+  # The effective policy of this project, exported by nodrail from
+  # nodrail.yaml and nodrail.lock.yaml. Regenerate it; don't edit it.
+
+  # ── @nodrail/read-only/policies/read-only.yaml
+  - required_engine_version: 2
+
+  # Where credentials live. Reading or searching any of these is denied, and
+  # deny beats allow, so this holds whatever else is added. A dot file with a
+  # suffix counts as its base: .env.staging is .env.
+  - list: secret_places
+    items:
+      - ".env"
+      - ".envrc"
+      - ".ssh"
+      - ".aws"
+      - ".gnupg"
+      - ".kube"
+      - ".docker"
+      - "gcloud"
+      - ".netrc"
+      - ".npmrc"
+      - ".pypirc"
+      - ".git-credentials"
+      - ".pgpass"
+      - ".vault-token"
+      - "id_rsa"
+      - "id_ecdsa"
+      - "id_ed25519"
+      - ".credentials.json"
+      - ".nodrail"
+      - "environ"
+      - "*.pem"
+      - "*.key"
+      - "*.p12"
+      - "*.pfx"
+
+  - rule: Never read secrets
+    tool: files
+    operation: file.read
+    resource: {kind: file, match: any}
+    condition:
+      - {field: path_parts, op: contains, list: secret_places}
+    effect: deny
+
+  - rule: Never search secrets
+    tool: files
+    operation: file.search
+    resource: {kind: file, match: any}
+    condition:
+      - {field: path_parts, op: contains, list: secret_places}
+    effect: deny
+
+  # A file pattern such as .env* or *env picks out a secret without naming it.
+  - rule: Never search with a pattern that reaches secrets
+    tool: files
+    operation: file.search
+    resource: {kind: file, match: any}
+    condition:
+      - {field: reaches_secrets, op: eq, value: true}
+    effect: deny
+
+  - rule: Never read GitHub CLI tokens
+    tool: files
+    operation: file.read
+    resource: {kind: file, match: any}
+    condition:
+      - {field: path_parts, op: contains, value: ".config"}
+      - {field: path_parts, op: contains, value: "gh"}
+    effect: deny
+
+  - rule: Never search GitHub CLI tokens
+    tool: files
+    operation: file.search
+    resource: {kind: file, match: any}
+    condition:
+      - {field: path_parts, op: contains, value: ".config"}
+      - {field: path_parts, op: contains, value: "gh"}
+    effect: deny
+
+  - rule: Never read Codex sign-in
+    tool: files
+    operation: file.read
+    resource: {kind: file, match: any}
+    condition:
+      - {field: path_parts, op: contains, value: ".codex"}
+      - {field: path_parts, op: contains, value: "auth.json"}
+    effect: deny
+
+  - rule: Never search Codex sign-in
+    tool: files
+    operation: file.search
+    resource: {kind: file, match: any}
+    condition:
+      - {field: path_parts, op: contains, value: ".codex"}
+      - {field: path_parts, op: contains, value: "auth.json"}
+    effect: deny
+
+  - rule: Never read git config
+    tool: files
+    operation: file.read
+    resource: {kind: file, match: any}
+    condition:
+      - {field: path_parts, op: contains, value: ".git"}
+      - {field: path_parts, op: contains, value: "config"}
+    effect: deny
+
+  - rule: Never search git config
+    tool: files
+    operation: file.search
+    resource: {kind: file, match: any}
+    condition:
+      - {field: path_parts, op: contains, value: ".git"}
+      - {field: path_parts, op: contains, value: "config"}
+    effect: deny
+
+  # Reading and searching the project.
+  - rule: Read files
+    tool: files
+    operation: file.read
+    resource: {kind: file, match: any}
+    effect: allow
+
+  - rule: Search files
+    tool: files
+    operation: file.search
+    resource: {kind: file, match: any}
+    effect: allow
+
+  # Commands that only look at things. Not git diff or git show: given a path or
+  # a revision they print any file, secrets included.
+  - list: looking_commands
+    items: [cd, ls, git status, git log]
+
+  - rule: Look around
+    command: {list: looking_commands, match: prefix}
+    effect: allow
+
+  - list: exact_looking_commands
+    items: [pwd, git branch, git diff, git diff --staged]
+
+  - rule: Where am I
+    command: {list: exact_looking_commands}
+    effect: allow
+
+  # Nodrail's own commands. Run by hand, the hook could write a step or a verdict
+  # into the run ledger, and `nodrail` can approve requests, so they are for
+  # you, not the agent. Starting the plugin hook through node or npx runs another
+  # program, which no rule here allows.
+  - list: nodrail_commands
+    items: [nodrail, nodrail-policy, nodrail-claude-hook]
+
+  - rule: Never run Nodrail itself
+    command: {list: nodrail_commands, match: prefix}
+    effect: deny
+
+  # Claude Code's own tools that only plan or talk to the person.
+  - rule: Keep a task list
+    tool: claude-code
+    operation: todowrite
+    resource: {kind: tool, match: any}
+    effect: allow
+
+  # Claude Code's task tools, and the search that loads deferred tools such as
+  # these. A tool it loads is still decided call by call when it is used.
+  - rule: Load tools by search
+    tool: claude-code
+    operation: toolsearch
+    resource: {kind: tool, match: any}
+    effect: allow
+
+  - rule: Create a task
+    tool: claude-code
+    operation: taskcreate
+    resource: {kind: tool, match: any}
+    effect: allow
+
+  - rule: Update a task
+    tool: claude-code
+    operation: taskupdate
+    resource: {kind: tool, match: any}
+    effect: allow
+
+  - rule: List tasks
+    tool: claude-code
+    operation: tasklist
+    resource: {kind: tool, match: any}
+    effect: allow
+
+  - rule: Read a task
+    tool: claude-code
+    operation: taskget
+    resource: {kind: tool, match: any}
+    effect: allow
+
+  - rule: Ask the person a question
+    tool: claude-code
+    operation: askuserquestion
+    resource: {kind: tool, match: any}
+    effect: allow
+
+  - rule: Plan before acting
+    tool: claude-code
+    operation: enterplanmode
+    resource: {kind: tool, match: any}
+    effect: allow
+
+  - rule: Present a plan
+    tool: claude-code
+    operation: exitplanmode
+    resource: {kind: tool, match: any}
+    effect: allow
+
+  # Starting a subagent. What the subagent then does is decided call by call,
+  # like the main agent. Narrow this to the types you use, or gate one.
+  - rule: Start subagents
+    tool: claude-code
+    operation: agent
+    resource: {kind: agent, match: any}
+    effect: allow
+
+  # ── policies/desk.yaml
+  # Who may search which part of the handbook, and who may publish.
+  - rule: Public handbook for everyone
+    tool: handbook
+    operation: search
+    resource: { kind: collection, match: exact, value: public }
+    effect: allow
+  - rule: Internal handbook for support
+    agent: support
+    tool: handbook
+    operation: search
+    resource: { kind: collection, match: exact, value: internal }
+    effect: allow
+  - rule: Marketing never publishes
+    agent: marketing
+    tool: outbox
+    operation: publish
+    resource: { kind: channel, match: any }
+    effect: deny
+  - rule: Support publishes after a person's review
+    agent: support
+    tool: outbox
+    operation: publish
+    resource: { kind: channel, match: any }
+    effect: require_approval
+
+  # ── team/desk.apf.yaml
+  # What Team desk means: who may start whom, which connections
+  # each agent may use, and the setup kept out of every agent's reach. Written by nodrail from resources/team.yaml.
+  - required_engine_version: 1
+  - list: desk-setup-places
+    items:
+      - .claude
+      - .claude-plugin
+      - .codex
+      - .agents
+      - .nodrail
+      - nodrail.yaml
+      - nodrail.lock.yaml
+  - rule: "Team desk: never write the setup"
+    tool: files
+    operation: file.write
+    resource:
+      kind: file
+      match: any
+    condition:
+      - field: path_parts
+        op: contains
+        list: desk-setup-places
+    effect: deny
+  - rule: "Team desk: never edit the setup"
+    tool: files
+    operation: file.edit
+    resource:
+      kind: file
+      match: any
+    condition:
+      - field: path_parts
+        op: contains
+        list: desk-setup-places
+    effect: deny
+  - rule: "Team desk: never patch the setup"
+    tool: files
+    operation: file.patch
+    resource:
+      kind: file
+      match: any
+    condition:
+      - field: path_parts
+        op: contains
+        list: desk-setup-places
+    effect: deny
+  - rule: "Team desk: never delete the setup"
+    tool: files
+    operation: file.delete
+    resource:
+      kind: file
+      match: any
+    condition:
+      - field: path_parts
+        op: contains
+        list: desk-setup-places
+    effect: deny
+  - rule: "Team desk: marketing never start marketing"
+    agent: marketing
+    tool: claude-code
+    operation: agent
+    resource:
+      kind: agent
+      match: exact
+      value: marketing
+    effect: deny
+  - rule: "Team desk: marketing never start marketing on Codex"
+    agent: marketing
+    tool: codex
+    operation: agent
+    resource:
+      kind: agent
+      match: exact
+      value: marketing
+    effect: deny
+  - rule: "Team desk: marketing may start support"
+    agent: marketing
+    tool: claude-code
+    operation: agent
+    resource:
+      kind: agent
+      match: exact
+      value: support
+    effect: allow
+  - rule: "Team desk: marketing may start support on Codex"
+    agent: marketing
+    tool: codex
+    operation: agent
+    resource:
+      kind: agent
+      match: exact
+      value: support
+    effect: allow
+  - rule: "Team desk: support never start marketing"
+    agent: support
+    tool: claude-code
+    operation: agent
+    resource:
+      kind: agent
+      match: exact
+      value: marketing
+    effect: deny
+  - rule: "Team desk: support never start marketing on Codex"
+    agent: support
+    tool: codex
+    operation: agent
+    resource:
+      kind: agent
+      match: exact
+      value: marketing
+    effect: deny
+  - rule: "Team desk: support never start support"
+    agent: support
+    tool: claude-code
+    operation: agent
+    resource:
+      kind: agent
+      match: exact
+      value: support
+    effect: deny
+  - rule: "Team desk: support never start support on Codex"
+    agent: support
+    tool: codex
+    operation: agent
+    resource:
+      kind: agent
+      match: exact
+      value: support
+    effect: deny
+  - list: desk-nodrail-commands
+    items:
+      - nodrail
+      - nodrail-policy
+      - nodrail-claude-hook
+  - rule: "Team desk: agents never run Nodrail itself"
+    command:
+      list: desk-nodrail-commands
+      match: prefix
+    effect: deny
+  - rule: "Team desk: marketing may load skill cite-sources"
+    agent: marketing
+    tool: claude-code
+    operation: skill
+    resource:
+      kind: skill
+      match: exact
+      value: cite-sources
+    effect: allow
+  - rule: "Team desk: support may load skill cite-sources"
+    agent: support
+    tool: claude-code
+    operation: skill
+    resource:
+      kind: skill
+      match: exact
+      value: cite-sources
+    effect: allow
+  - rule: "Team desk: agents may wait agent on Codex"
+    tool: codex
+    operation: wait_agent
+    resource:
+      kind: tool
+      match: any
+    effect: allow
+  - rule: "Team desk: agents may send input on Codex"
+    tool: codex
+    operation: send_input
+    resource:
+      kind: tool
+      match: any
+    effect: allow
+  - rule: "Team desk: agents may send message on Codex"
+    tool: codex
+    operation: send_message
+    resource:
+      kind: tool
+      match: any
+    effect: allow
+  - rule: "Team desk: agents may followup task on Codex"
+    tool: codex
+    operation: followup_task
+    resource:
+      kind: tool
+      match: any
+    effect: allow
+  - rule: "Team desk: agents may resume agent on Codex"
+    tool: codex
+    operation: resume_agent
+    resource:
+      kind: tool
+      match: any
+    effect: allow
+  - rule: "Team desk: agents may interrupt agent on Codex"
+    tool: codex
+    operation: interrupt_agent
+    resource:
+      kind: tool
+      match: any
+    effect: allow
+  - rule: "Team desk: agents may close agent on Codex"
+    tool: codex
+    operation: close_agent
+    resource:
+      kind: tool
+      match: any
+    effect: allow
+  - rule: "Team desk: agents may list agents on Codex"
+    tool: codex
+    operation: list_agents
+    resource:
+      kind: tool
+      match: any
+    effect: allow

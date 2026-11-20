@@ -22,6 +22,8 @@ export type Io = {
   /** Waits between polls; false means stop. */
   sleep(ms: number): Promise<boolean>;
   clear(): void;
+  /** How to run this command line again, for a detached child: by default, this script. */
+  self?: string[];
 };
 
 /** Something the person asked for that can't be done, said plainly. */

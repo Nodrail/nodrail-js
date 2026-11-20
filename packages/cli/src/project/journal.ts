@@ -7,6 +7,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
+import { CliError } from "../io.ts";
 import { sha256 } from "./lockfile.ts";
 
 /**
@@ -151,4 +152,51 @@ export function replayJournal(root: string, folder: string) {
     }
   });
   return left;
+}
+
+/**
+ * A journal being written: each change records what the file holds now and
+ * the digest it will hold after, and keeps the bytes to write.
+ */
+export function journalWriter(root: string) {
+  const contents = new Map<string, Buffer>();
+  const entries: JournalEntry[] = [];
+  const change = (path: string, bytes: Buffer | null) => {
+    if (bytes) contents.set(path, bytes);
+    entries.push({
+      path,
+      before: onDisk(root, path),
+      after: bytes ? sha256(bytes) : null,
+    });
+  };
+  return { entries, contents, change };
+}
+
+/**
+ * Inside the project's hold: plans again, refuses when that differs from
+ * what the person reviewed, then writes the journal and replays it.
+ * Answers what replaying left undone.
+ */
+export function replayReviewed<Plan>(
+  folder: string,
+  root: string,
+  plans: {
+    reviewed: Plan;
+    now: Plan;
+    same: (a: Plan, b: Plan) => boolean;
+    again: string;
+  },
+  journal: (plan: Plan) => {
+    entries: JournalEntry[];
+    contents: Map<string, Buffer>;
+  },
+) {
+  if (!plans.same(plans.now, plans.reviewed))
+    throw new CliError(
+      `The project changed after the plan was shown. Nothing was changed; run ${plans.again} again to see the new plan.`,
+    );
+  const { entries, contents } = journal(plans.now);
+  if (entries.length === 0) return [];
+  stageJournal(folder, entries, contents);
+  return replayJournal(root, folder) ?? [];
 }
