@@ -45,12 +45,23 @@ function varint(body: Uint8Array, at: number): [number, number] {
   throw new Error("not a protobuf varint");
 }
 
-/** ExportTraceServiceResponse { partial_success 1 { rejected_spans 1; error_message 2 } }. */
+/** `length` bytes from `at`, or a throw when the body is shorter. */
+function field(body: Uint8Array, at: number, length: number) {
+  if (at + length > body.length) throw new Error("a field runs past the end");
+  return body.subarray(at, at + length);
+}
+
+/**
+ * ExportTraceServiceResponse { partial_success 1 { rejected_spans 1;
+ * error_message 2 } }. Every length is checked against what arrived: a cut
+ * answer proves nothing, so it throws and the spans count as unknown.
+ */
 function protobufPartial(body: Uint8Array) {
   if (body.length === 0) return { rejected: 0, message: null };
   if (body[0] !== 0x0a) throw new Error("not an export response");
   const [length, start] = varint(body, 1);
-  const inner = body.subarray(start, start + length);
+  const inner = field(body, start, length);
+  if (start + length !== body.length) throw new Error("not an export response");
   let rejected = 0;
   let message: string | null = null;
   let at = 0;
@@ -59,10 +70,12 @@ function protobufPartial(body: Uint8Array) {
     if (key === 0x08) [rejected, at] = varint(inner, at + 1);
     else if (key === 0x12) {
       const [size, from] = varint(inner, at + 1);
-      message = new TextDecoder().decode(inner.subarray(from, from + size));
+      message = new TextDecoder().decode(field(inner, from, size));
       at = from + size;
     } else throw new Error("not an export response");
   }
+  if (!Number.isSafeInteger(rejected))
+    throw new Error("not an export response");
   return { rejected, message };
 }
 

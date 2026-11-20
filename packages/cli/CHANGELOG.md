@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.1
+
+Uses `@nodrail/policy-engine` 0.5.1: a machine id that can't be kept no
+longer turns an allowed call into a block, and a cut OTLP answer is no
+longer counted as delivered.
+
 ## 0.3.0
 
 GitHub Copilot CLI as a runtime, the reporting contract v2, observation,
