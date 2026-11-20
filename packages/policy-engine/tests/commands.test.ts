@@ -882,6 +882,21 @@ describe("tool calls", () => {
     });
   });
 
+  test("loading a skill names the skill, as runs name agents", () => {
+    expect(describeToolCall("Skill", { skill: "Vercel:Deploy" })).toMatchObject(
+      {
+        tool: "claude-code",
+        operation: "skill",
+        resource: { kind: "skill", id: "vercel:deploy" },
+        params: { skill: "vercel:deploy" },
+      },
+    );
+    expect(describeToolCall("Skill", {})?.resource).toEqual({
+      kind: "skill",
+      id: "unnamed",
+    });
+  });
+
   test("Task, the earlier name of Agent, starts a subagent like Agent", () => {
     expect(describeToolCall("Task", { subagent_type: "QA" })).toMatchObject({
       tool: "claude-code",

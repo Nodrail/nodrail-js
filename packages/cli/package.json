@@ -1,6 +1,6 @@
 {
   "name": "@nodrail/cli",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Your Nodrail workspace from the terminal: approvals, Activity, runs, Insights and rules, with a personal API token.",
   "keywords": [
     "ai",
@@ -54,6 +54,7 @@
   "files": [
     "dist",
     "catalog",
+    "examples",
     "docs",
     "README.md",
     "CHANGELOG.md",

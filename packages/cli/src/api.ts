@@ -27,7 +27,7 @@ export const visible = (text: string) => escapeControls(text, new Set());
 export const visibleLines = (text: string) =>
   escapeControls(text, new Set(["\n", "\t"]));
 
-export type Scope = "read" | "decide" | "rules:write";
+export type Scope = "read" | "decide" | "rules:write" | "inventory:write";
 
 export type Me = {
   token: {
@@ -124,6 +124,17 @@ export type Published = {
 };
 
 export type Decision = "allow_once" | "deny";
+
+/** The workspace revision a team intends for a project, in an environment. */
+export type IntendedRevision = {
+  project: string;
+  project_id: string;
+  revision: string;
+  policy_revision: string | null;
+  files: { path: string; sha256: string }[];
+  published_by: string;
+  published_at: string;
+};
 
 export type Query = Record<string, string | number | undefined>;
 
@@ -266,6 +277,28 @@ export class NodrailApi {
 
   previewRules(yaml: string) {
     return this.call<Preview>("POST", "/rules/preview", { body: { yaml } });
+  }
+
+  intendedRevision(projectId: string) {
+    return this.call<{ revision: IntendedRevision | null }>(
+      "GET",
+      "/workspace-revisions",
+      { query: { project_id: projectId } },
+    );
+  }
+
+  publishRevision(body: {
+    project: string;
+    project_id: string;
+    revision: string;
+    policy_revision: string | null;
+    files: { path: string; sha256: string }[];
+  }) {
+    return this.call<{ revision: IntendedRevision; previous: string | null }>(
+      "POST",
+      "/workspace-revisions",
+      { body },
+    );
   }
 
   publishRules(

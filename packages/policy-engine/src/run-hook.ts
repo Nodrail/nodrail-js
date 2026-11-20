@@ -43,8 +43,9 @@ const stepOf = (event: Record<string, unknown>) => {
 function recordStep(
   event: Record<string, unknown>,
   { directory, run }: Where,
-  now: Date,
+  options: Pick<LocalHookOptions, "now" | "report">,
 ): HookResult {
+  const { now } = options;
   const step = stepOf(event);
   if (!run || !step) return quiet;
   const at = now.toISOString();
@@ -66,9 +67,23 @@ function recordStep(
         };
   try {
     withRunLock(directory, run, () => record(directory, run, entry));
+    reported(options, run, entry);
     return quiet;
   } catch (error) {
     return { ...quiet, stderr: `Nodrail: ${String(error)}\n` };
+  }
+}
+
+/** Reporting is told after the ledger has the event; it never blocks. */
+function reported(
+  options: Pick<LocalHookOptions, "report">,
+  run: string,
+  entry: RunEvent,
+) {
+  try {
+    options.report?.(run, entry);
+  } catch {
+    // Telemetry never changes a decision.
   }
 }
 
@@ -97,7 +112,7 @@ function decideAndRecord(
   });
   if (!action || !decision) return result;
   try {
-    record(directory, run, {
+    const entry: RunEvent = {
       type: "action",
       step: step?.id ?? null,
       agent: step?.agent ?? MAIN_AGENT,
@@ -107,7 +122,9 @@ function decideAndRecord(
       outcome: decision.outcome,
       change:
         isChange(action) && wentAhead(decision.outcome, options.unmatched),
-    });
+    };
+    record(directory, run, entry);
+    reported(options, run, entry);
   } catch (error) {
     // Unrecorded, the call would not count against a budget.
     return deny(`Nodrail: ${String(error)} So this action is blocked.`);
@@ -145,7 +162,7 @@ export function runHook(
   const event = parseEvent(stdin) as Record<string, unknown> | null;
   const name = event?.hook_event_name;
   if (event && (name === "SubagentStart" || name === "SubagentStop"))
-    return recordStep(event, where(event, env), options.now);
+    return recordStep(event, where(event, env), options);
   if (event && name === "PreToolUse")
     return decideInRun(stdin, event, options, where(event, env));
   return judgeToolCall(stdin, options).result;

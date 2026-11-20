@@ -389,10 +389,21 @@ describe("hook", () => {
       "npx @nodrail/cli apply --yes",
       "cd sub && ../nodrail-policy hook x",
       "cp evil ~/.nodrail/writes/x/setup.json",
+      "cat skills/style/SKILL.md > skills/style/x.md",
+      "cat skills/style/SKILL.md; rm -r resources",
     ])("denies %s, whatever the rules allow", async (command) => {
       const result = await shell(command);
       expect(result.stdout).toContain('"deny"');
       expect(result.stdout).toContain("part of the setup this hook enforces");
+    });
+
+    // Codex loads a skill by reading it through its shell: a read in a shape
+    // known exactly changes nothing, so the file rules decide it.
+    test.each([
+      "cat skills/style/SKILL.md",
+      "sed -n '1,20p' resources/team.yaml",
+    ])("leaves the read %s to the file rules", async (command) => {
+      expect((await shell(command)).stdout).not.toContain("part of the setup");
     });
 
     test.each(["npm test", "git add .", "git status", "cat src/app.ts"])(

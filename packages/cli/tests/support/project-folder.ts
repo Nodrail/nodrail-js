@@ -23,10 +23,12 @@ export function projectFolder(
     throw new Error("network used");
   }) as unknown as typeof globalThis.fetch;
   const read = (path: string) => readFileSync(join(cwd, path), "utf8");
-  const run = async (...argv: string[]) => {
-    const terminal = fakeIo({ cwd, home, fetch, env });
+  /** `nodrail` run in another folder, as `nodrail plan ./project` is. */
+  const runFrom = async (from: string, ...argv: string[]) => {
+    const terminal = fakeIo({ cwd: from, home, fetch, env });
     const code = await terminal.run(...argv);
     return { code, out: terminal.stdout(), err: terminal.stderr() };
   };
-  return { cwd, home, read, write, run };
+  const run = (...argv: string[]) => runFrom(cwd, ...argv);
+  return { cwd, home, read, write, run, runFrom };
 }

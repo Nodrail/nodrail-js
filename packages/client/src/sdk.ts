@@ -24,7 +24,7 @@ import {
   type ToolHooks,
 } from "./tool-shapes.ts";
 
-export const SDK_VERSION = "0.4.0";
+export const SDK_VERSION = "0.5.0";
 
 type Blocked = Extract<Decision, { allowed: false }>;
 

@@ -121,6 +121,32 @@ nodrail: policies/team.yaml changed since it was locked. Run `nodrail policy loc
 
 So an export always matches the policy someone reviewed and committed. To change the policy, edit the files, run `nodrail policy lock`, read the review and commit again.
 
+### The workspace
+
+When `nodrail.yaml` sets up hosts, with agents, a team or connections, the lock records more than the policy: it records the workspace the hosts get. It has two digests:
+
+- **The policy** (`effective`): what the hook enforces. `export --frozen` checks only this, as above.
+- **The workspace** (`workspace`): one digest over every file the setup is made from, and the effective policy compiled from them. The files are `nodrail.yaml`, every resource and policy file, each connection's code, the catalog modules' files, each agent's instructions, and every file in its skills. Because the policy is included, the same files compiled by another engine into another policy are another revision.
+
+The instructions and skill files are listed under `workspace.files`. Their paths are relative to the project and sorted the same way on every machine, so a copy of the project has the same digests anywhere. Machine paths, secrets, generated files and timestamps are left out. Data a connection reads or writes, such as a `./handbook` folder or a memory file, is not part of the workspace.
+
+`nodrail plan` checks both:
+
+```text
+  ✓ policy: matches nodrail.lock.yaml
+  ! workspace: changed since it was locked: ~ skills/cite-sources/SKILL.md, + skills/cite-sources/extra.md. Run `nodrail policy lock` to review it.
+```
+
+Then `plan` exits with 1 and `apply` refuses, until `nodrail policy lock` records the change and lists it:
+
+```text
+Instructions, skills and plugins, compared with the lock:
+  ~ skills/cite-sources/SKILL.md
+  + skills/cite-sources/extra.md
+```
+
+A lock that records the workspace has `lock: 2`. A project with a policy and no setup keeps `lock: 1`, unchanged. If a setup's lock predates workspaces, `plan` asks you to run `nodrail policy lock` once, and `export --frozen` keeps working meanwhile. A `nodrail` older than this one refuses `lock: 2` with a message, rather than misreading it.
+
 ### Versions
 
 `nodrail add @nodrail/open-reviewed-pr` takes the catalog's newest version. `nodrail add @nodrail/open-reviewed-pr@1.0.0` asks for that exact version; a version the catalog doesn't have is refused, and nothing changes. Once locked, a module stays at its version, even when a newer `nodrail` brings a newer one: to move to it, add it with its version, such as `@1.0.1`, and review the change.
@@ -295,16 +321,255 @@ A binding renames the roles everywhere the policy names an agent: a rule's `agen
 The team adds rules of its own to the effective policy, after everything else:
 
 - each member may start the members it hands off to, and no other member, itself included. The team's handoffs are the only way work moves between its agents. Agents that aren't on the team, such as a host's built-in ones, are left to the rest of the policy.
-- no agent may write, edit, patch or delete the setup: `.claude`, `.codex`, `.agents`, `.nodrail`, `nodrail.yaml` and `nodrail.lock.yaml`. An agent that could rewrite an agent definition could make itself that agent.
+- no agent may write, edit, patch or delete the setup: `.claude`, `.codex`, `.agents`, `.nodrail`, `nodrail.yaml` and `nodrail.lock.yaml`, and Copilot's places in `.github` (`agents`, `hooks`, `skills`, `mcp.json`, `copilot`). The rest of `.github`, such as workflows, isn't protected: the hook's guard covers those places by path. An agent that could rewrite an agent definition could make itself that agent.
 - no agent may run `nodrail` or `nodrail-policy`, so none can lock and apply a setup it changed.
 
 These are denies, and deny wins, so no other file can widen them. `nodrail apply` also lists every file the setup is made from (the resources, your own policy files, the agents' instructions and skills) in `.nodrail/protected.txt`, and the hook refuses any file tool that would change one, whatever the rules say.
 
-The hook also denies any shell command that names one of those files, or runs Nodrail by any path, whatever the rules allow. Whole-project commands such as `git checkout .` or `rm -r .` don't name a setup file, so a policy that allows them can still undo the setup: allow the commands your agents need, not the shell.
+The hook also denies any shell command that names one of those files, or runs Nodrail by any path, whatever the rules allow. It reads the words a command is written with, not what the shell makes of them: a wildcard (`.cl*/`), a path built from a variable (`$D/settings.json`), or a script that writes the file isn't recognised. Whole-project commands such as `git checkout .` or `rm -r .` don't name a setup file either. So the guard stops an agent from editing the setup with its file tools and from naming it in a command; it isn't a sandbox. A policy that allows the shell, or commands that run scripts, can still undo the setup: allow the commands your agents need, not the shell.
 
 An agent's instructions and skills can't live in `.claude`, `.codex`, `.agents` or `.nodrail`: nodrail writes those folders.
 
-`runtime` (`claude-code` or `codex`) and `start` are for setting up the host. [`nodrail plan`](cli.md#plan-preview) shows what would be set up, without changing anything, and [`nodrail apply`](cli.md#apply-preview) sets it up, on Claude Code or Codex. Only the root `nodrail.yaml` may declare them, and a module nobody binds compiles exactly as before.
+`runtime` (`claude-code`, `codex` or `copilot`), or `runtimes: [claude-code, codex, copilot]` for one file several hosts apply, and `start` are for setting up the host. [`nodrail plan`](cli.md#plan-preview) shows what would be set up, without changing anything, and [`nodrail apply`](cli.md#apply-preview) sets it up, on Claude Code or Codex. Only the root `nodrail.yaml` may declare them, and a module nobody binds compiles exactly as before.
+
+### Tool connections (preview)
+
+A connection is a tool server your agents call, such as a search over your own handbook: an MCP server that runs over stdio. Declare it in `nodrail.yaml`, with the operations agents may call and what each one acts on:
+
+```yaml
+connections:
+  handbook:
+    command: node
+    args: [./connectors/handbook.mjs]
+    env:
+      HANDBOOK_URL: http://127.0.0.1:8091/search
+      HANDBOOK_TOKEN: { fromEnv: HANDBOOK_TOKEN }
+    operations:
+      search: { resource: { kind: collection, from: collection } }
+agentConnections:
+  marketing: [handbook]
+  support: [{ connection: handbook, operations: [search] }]
+```
+
+Claude Code and Codex call it as `mcp__handbook__search`, and the hook judges each call before the server gets it, as the agent the host says made it: a subagent's call as that subagent. So `search` with `collection: internal` is tool `handbook`, operation `search`, resource `collection` `internal`, and a rule decides it like any other:
+
+```yaml
+- rule: Internal handbook for support
+  agent: support
+  tool: handbook
+  operation: search
+  resource: { kind: collection, match: exact, value: internal }
+  effect: allow
+```
+
+A call to an operation the connection doesn't declare, or without the argument its resource comes from, is denied. An agent named in the arguments changes nothing. With `agentConnections`, each member may use only the connections and operations listed for it; the rest of the policy still decides each call. Without it, every member may, and the policy decides.
+
+A secret is a reference, never a value: `{ fromEnv: NAME }`, or on macOS `{ fromKeychain: { service: name, account: name } }`. The host starts the connection with `nodrail connection run`, which reads the secrets then and gives the connection only those and what any program needs (`PATH`, `HOME`, the locale): not the rest of your environment. To rotate one, change the variable or the Keychain entry and start a new session. Every project file the connection's command line names, the command itself included, with or without `./`, or as `--flag=value`, is locked with the policy: the code that gets your secrets is the code you reviewed, and agents' file tools can't change it (see the guard's limits above). A folder it names, such as documents to search, is data: it is read, not locked. A program from `PATH`, such as `node`, isn't part of the project: `plan` shows it as written.
+
+`nodrail plan` starts nothing and reads no secret. It shows each connection's command line, which secret goes to which connection, and whether each is set, never its value. Only `apply`, once you accept the plan, starts each connection once to list its tools, calling none; one that doesn't offer a declared operation, or the argument its resource comes from, stops `apply` before it writes anything. Swapping a connector for another that keeps the same operations needs no change to roles or rules.
+
+### Search connectors (preview)
+
+Nodrail ships two connectors that keep one contract: a `search` tool that takes a `collection`, a `query` and an optional `limit` (1 to 20, 5 by default), and gives back `{ "matches": [{ "collection", "source", "text" }] }`. Either can stand behind a connection, and swapping one for the other is a change to its command line alone: the tool, its operation and its resource stay the same, so roles and rules don't change.
+
+A folder of documents, one subfolder per collection (`handbook/public/returns.md`, `handbook/internal/escalation.md`), searched by the words a passage shares with the query:
+
+```yaml
+connections:
+  handbook:
+    command: nodrail
+    args: [connector, files-search, --folder, ./handbook]
+    operations:
+      search: { resource: { kind: collection, from: collection } }
+```
+
+A search service of your own, over HTTP: `nodrail` posts `{ collection, query, limit }` to the endpoint, with `Authorization: Bearer` and the value of `SEARCH_TOKEN`, and reads `{ "matches": [{ "source", "text" }] }` back:
+
+```yaml
+connections:
+  handbook:
+    command: nodrail
+    args: [connector, http-search, --endpoint, https://search.example.com/v1/search]
+    env:
+      SEARCH_TOKEN: { fromEnv: HANDBOOK_TOKEN }
+    operations:
+      search: { resource: { kind: collection, from: collection } }
+```
+
+A failure reaches the agent as a tool error it can report, such as `the search service answered 401` or `there is no collection secret`, never with the token. `files-search --receipts <folder>` adds one line per search to `<folder>/reads.jsonl`, with the collection and the sources it returned and never the query: a count of reads. The connectors are part of the `nodrail` you installed, so their version is its version.
+
+### Memory (preview)
+
+Memory is a connection to a memory provider you choose. Nodrail doesn't store it; it starts the provider, decides who may call it, and keeps its data where you say. With the reference [MCP memory server](https://github.com/modelcontextprotocol/servers/tree/main/src/memory), a knowledge graph in one file, the file is the scope. Give each agent its own:
+
+```yaml
+connections:
+  support-memory:
+    command: npx
+    args: [-y, "@modelcontextprotocol/server-memory@2.2.1"]
+    env:
+      MEMORY_FILE_PATH: ./memory/support.jsonl
+    operations:
+      search_nodes: {}
+      open_nodes: {}
+      create_entities: {}
+      add_observations: {}
+    data: [./memory/support.jsonl]
+agentConnections:
+  support: [support-memory]
+```
+
+A plain `env` value that starts with `./` is a path in the project. Nodrail hands it to the provider whole, because a provider may resolve a relative path against its own install folder. Leave out the operations agents shouldn't have, such as `delete_entities`; a call to one is denied.
+
+`data` names what the provider keeps: files or folders in the project, which needn't exist yet. Nodrail treats them this way:
+
+- **Reached only through the connection.** The hook denies any agent a file tool on them (reading, writing or searching inside them) and any shell command that names them or a folder holding them, whatever the rules say. Otherwise an agent not given `support-memory` could read `memory/support.jsonl` with `Read` or `cat`.
+- **Never locked.** Data changes as agents work, so it's left out of the lock and the workspace revision, even when the command line names a file in it.
+- **Never removed.** When you take the connection out of `nodrail.yaml`, `apply` removes the connection and keeps its data; `plan` says where it stays. From then on the hook no longer keeps it from agents: move or delete it yourself if they shouldn't reach it.
+
+`data` can't be where nodrail writes (`.claude`, `.codex`, `.agents`, `.nodrail`), and can't overlap what the lock covers: resources, policies, instructions, skills, plugins, or the program the connection runs. `plan` shows it: `keeps ./memory/support.jsonl, which agents reach only through it`. Create the folder before the first session: the reference memory server 2.2.1 fails to write into a folder that isn't there.
+
+These operations name no resource, so a call is `tool: support-memory`, the operation, and resource kind `mcp_tool`. Allow each operation for its agent:
+
+```yaml
+- rule: Support remembers (search_nodes)
+  agent: support
+  tool: support-memory
+  operation: search_nodes
+  resource: { kind: mcp_tool, match: any }
+  effect: allow
+```
+
+A new session gets what an earlier one wrote. An agent that isn't exposed to a memory can't call it. `plan` shows the command, and `npx` downloads the version you pinned when `apply` first starts it. When the command is `npx`, `bunx` or `uvx` and the package has no exact version (`@modelcontextprotocol/server-memory`, `@latest`, `^2.0.0`), `plan` marks the connection `?`: each start may fetch another release than the one you reviewed. It doesn't stop `apply`. To use a hosted provider, give its MCP server's command line and its key as `{ fromEnv: … }`.
+
+### Plugins (preview)
+
+A plugin is a folder in your project that each host loads: skills, and MCP servers with their tools. Declare it with the operations its servers offer, as for a connection, and who may use it:
+
+```yaml
+plugins:
+  desk-kit:
+    source: ./vendor/desk-kit
+    servers:
+      ledger:
+        operations:
+          record: { resource: { kind: ledger_line, from: line } }
+agentPlugins:
+  support: [desk-kit]
+```
+
+The folder holds a manifest for each host you set up: `.claude-plugin/plugin.json` and `.codex-plugin/plugin.json`, each naming the plugin as declared and bringing each declared server. Claude Code reads a plugin's servers from `.mcp.json` and expands `${CLAUDE_PLUGIN_ROOT}` in them. Codex doesn't: give its manifest its own file, with `"cwd": "."` and paths relative to the plugin. `plan` refuses a plugin whose manifests don't match the declaration.
+
+`apply` makes the project a marketplace named `nodrail-<team>` that lists the plugin from its folder: `.claude-plugin/marketplace.json`, and `.agents/plugins/marketplace.json` for Codex. It then switches the plugin on in the host's settings: `extraKnownMarketplaces` and `enabledPlugins` in `.claude/settings.json`, next to your own entries; `[marketplaces]` and `[plugins]` in `.codex/config.toml`. Nothing is installed.
+
+- **Claude Code** loads the plugin once you trust the folder.
+- **Codex** lists it then, but loads it only once you install it with `codex plugin add desk-kit@nodrail-<team>` in the folder. That installs it for your user and enables it in every folder, so nodrail never runs it for you. `plan` shows the command as `? plugin desk-kit`, and `✓` once Codex has that version.
+
+The hook reads a plugin's tool calls by the server's name, however the host names them: `mcp__plugin_desk-kit_ledger__record` on Claude Code, `mcp__ledger__record` on Codex. So a rule says `tool: ledger, operation: record`, and a call with no `line` is refused. A server's name must differ from every connection's and every other plugin's, because Codex names them alike. Each member given the plugin may load its skills (`desk-kit:<skill>`). With `agentPlugins`, any other member is denied the plugin's operations; without it, every member may use it.
+
+The plugin's files are part of the [workspace](#the-workspace): changing one stops `apply` until `nodrail policy lock`. They are kept from agents, like the rest of the setup.
+
+#### A plugin from git
+
+For a plugin someone else publishes, say where it comes from, at one commit:
+
+```yaml
+plugins:
+  commit-commands:
+    source: ./vendor/commit-commands
+    from:
+      git: https://github.com/anthropics/claude-plugins-official
+      commit: "df9699a55c56707e9948a32951ea356638ea8519"
+      path: plugins/commit-commands
+```
+
+`commit` is a full commit id, in quotes so YAML reads it as text. A branch or tag is refused: it can move to code nobody reviewed. `path` is the plugin's folder in the repository; leave it out when the plugin is the whole repository.
+
+`nodrail plugin fetch` copies the plugin's files at that commit into `source`. It shows what it adds, changes and removes there, and asks first. It reads the files from git's objects without checking anything out, so nothing in the repository runs, and it refuses links and submodules. Then:
+
+1. `nodrail policy lock` shows each of the plugin's files for you to review, and records them.
+2. `nodrail apply` sets it up like a plugin of your own.
+
+Commit the folder: a teammate then gets the reviewed files with the project, with no network and no fetch.
+
+To update, change `commit` and run `nodrail plugin fetch` again; the lock shows what changed. `nodrail plugin fetch --check` compares the folder with its commit and changes nothing: it exits 1 when they differ, for CI. `plan` doesn't go to the network, so it marks such a plugin `?` and names that command. A file changed in the folder since the lock still stops `apply`, as for any plugin.
+
+### Observation (preview)
+
+`nodrail status` shows each host as `apply` set it up, next to what is there now (see the [CLI reference](cli.md#status-preview)). `apply` also adds a session-start hook on each host that runs `nodrail observe`. That records the project's latest status in `~/.nodrail/observations/`, so the last reading is never older than the last session:
+
+```yaml
+observe:
+  names: true          # also record names of what nodrail doesn't manage
+  sessionStart: false  # no session-start hook
+```
+
+- **Counts by default.** A record holds, per host: the revision, whether the hook runs, how many files changed since apply, and how many agents, skills, MCP servers, plugins and hooks the host loads that nodrail doesn't manage. Names only with `names: true`: they say which tools a person uses, so it's the project's choice. Never contents, environments or secrets.
+- **Never in the way.** The hook starts `nodrail observe` apart and returns at once. Observing never fails, and never changes the project. `nodrail status` shows when it last recorded, and calls a record older than 24 hours stale.
+- **Codex** asks you to trust the new hook once: open `codex` in the folder and run `/hooks`. Until then it doesn't run, and the policy hook is unaffected. `nodrail status` says which.
+- **Sent only with telemetry.** Without `telemetry:` a record stays on the machine. With it, each record also goes to the same receiver as the decisions: one `nodrail.observation` span per host, one trace per record, with `nodrail.machine` (a random id kept in `~/.nodrail/machine-id`, never the hostname), `nodrail.host`, `nodrail.agent`, `nodrail.activation`, `nodrail.in_step`, `nodrail.drift`, `nodrail.workspace.revision`, `nodrail.workspace.locked` and `nodrail.unmanaged.<kind>` counts. With `names: true`, also `nodrail.drift.names` and `nodrail.unmanaged.names` (JSON lists, at most 4,000 characters). Never the project's path or anything under home. Offline, records wait in the same bounded queue as decisions.
+- **Your team's inventory.** Nodrail Cloud is one such receiver.
+  1. Create a reporting token: API tokens → `inventory:write`, chosen alone. It reads nothing.
+  2. Give the project an `id:` in nodrail.yaml.
+  3. Point `telemetry:` at `https://app.nodrail.com/api/v1/otlp/v1/traces?environment=<slug>`, with `bearer: { fromEnv: NODRAIL_TOKEN }` and the raw token in that variable.
+
+  The **Inventory** page then shows each person's machines, project by project, and Activity → **Reported locally** shows each decision and local run. All of it is evidence of local enforcement, never a Cloud approval. Admins and policy managers see everyone; others see their own. `nodrail workspace publish` marks which locked revision the team should run.
+
+### Telemetry (preview)
+
+Nodrail can send each decision its hook makes to any OpenTelemetry receiver: a backend that takes OTLP, or a Collector you run, which routes it on.
+
+```yaml
+id: 3f1c2a8e-5b7d-4e0f-9a6c-1d2e3f405162   # the project's stable id: make one once and commit it
+telemetry:
+  traces:
+    endpoint: http://127.0.0.1:4318/v1/traces
+    protocol: otlp-http/protobuf   # or otlp-http/json
+    bearer: { fromEnv: NODRAIL_TOKEN }       # sent as "Authorization: Bearer <raw token>"
+    headers:                                 # or any header, sent as written
+      x-collector-key: { fromEnv: OTLP_KEY }
+```
+
+`bearer` takes a raw token and adds `Bearer `, so `NODRAIL_TOKEN` can hold the same `ndp_` token the CLI reads. `headers` are sent as written, for collectors that want something else. Without an `id`, reports name the project by its folder only: a clone, a rename or another project of the same name can't be told apart. `plan` suggests an id to add.
+
+Each export carries `service.name` `nodrail`, `nodrail.schema` `2`, the project's folder name and its `id`. Each decision is one span, `nodrail.decision`. It carries what the host can't know: the decision the host was told (`nodrail.decision`: allow, deny or require_approval), what the rules said (`nodrail.match`, `none` when no rule did), the rule, the agent it was judged as, the tool, operation and kind of resource, the host, and the policy's revision. It carries the policy's revision two ways. `nodrail.policy.revision` is the effective policy file's full SHA-256, the same digest the lock records. `nodrail.revision` is the older short hash, kept for old receivers and never compared. Each decision also carries the machine's random id, and the run and step when the rules keep a run ledger.
+
+It also carries the ids the host's own telemetry uses, `session.id`, `gen_ai.conversation.id` and `gen_ai.tool.call.id`. A backend that also receives Claude Code's or Codex's own telemetry can then join each decision to the call it was about. A call's arguments, the resource it names, prompts and secrets are never sent.
+
+With gates or budgets, each step and action the run ledger records is a `nodrail.run.event` span. It carries the event, the agent, the step, the verdict and the number of findings (never their text), usage, and the action's tool, operation and outcome. The run is named by a hash of its key, never by the repository or branch in it.
+
+The hook doesn't wait on the network. It adds the span to a queue in `~/.nodrail/telemetry/`, and a separate process sends it. When the receiver is down, decisions go on exactly as before.
+
+`nodrail plan` says how sending went:
+- **kept:** spans the receiver accepted.
+- **refused:** spans the receiver rejected, either as an OTLP partial success or with a 4xx. They are never sent again, and the receiver's reason is shown.
+- **no readable answer:** the receiver answered, but whether it kept the spans is unknown.
+- **dropped:** spans never sent, because the queue passed 512 KiB.
+
+A receiver that is down or busy (408, 429, 5xx, no connection) gets the same spans again, with the same ids, after 30 seconds. A receiver that deduplicates, like Nodrail's, keeps each once. A batch the receiver partly accepted is never resent.
+
+Claude Code and Codex can export their own telemetry too, which this doesn't switch on. Both send the person's email and account ids with every record, and Codex sends each tool call's arguments and output: route theirs through a Collector that drops what you don't want sent.
+
+### Tested versions (proposed)
+
+A workspace can say which exact versions it was tested with, so whoever sets it up knows whether their machine matches:
+
+```yaml
+tested:
+  nodrail: 0.5.0
+  node: 22.22.3
+  claude-code: 2.1.328
+  codex: 0.170.0
+```
+
+`nodrail plan` compares this `nodrail`, the Node running it, and the host it sets up:
+
+```text
+  ✓ tested: runs as tested: nodrail 0.5.0, node 22.22.3, claude-code 2.1.328
+  ? tested: unverified here: claude-code 2.1.330 (tested 2.1.328)
+```
+
+Any other version is unverified, not refused: `?` doesn't block `apply`, and it shows as `"unverified": true` in `plan --json`. Using a newer host is your choice; the minimum versions above still apply. A host the profile doesn't name is also unverified. Each version is exact, such as `2.1.328`. The field is a proposal until the workspace milestone ships; its name and shape may change.
 
 ## Activate an export
 

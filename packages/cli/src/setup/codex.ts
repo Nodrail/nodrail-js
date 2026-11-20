@@ -1,8 +1,17 @@
-import { spawn } from "node:child_process";
+import { observeCommand } from "./claude-code.ts";
 import { realpathSync } from "node:fs";
+import { codexMarketplace, codexPluginLines } from "./plugins.ts";
 import { join } from "node:path";
 import type { ProjectSetup, SetupAgent } from "@nodrail/policy-engine/yaml";
 import type { Env } from "../config.ts";
+import {
+  CONNECTIONS_FILE,
+  envNames,
+  hookReads,
+  runnerArgs,
+} from "./connections.ts";
+import type { Activation } from "./status.ts";
+import { askServer } from "./json-lines.ts";
 import {
   byPath,
   EFFECTIVE_FILE,
@@ -39,11 +48,22 @@ const tomlString = (text: string) => JSON.stringify(text);
  * answer blocks. So the policy is named by its full path, and when nodrail
  * can't run at all, the shell answers deny in its place.
  */
-export function codexHookCommand(root: string, entry: string) {
+export function codexHookCommand(
+  root: string,
+  entry: string,
+  setup: Pick<ProjectSetup, "connections" | "telemetry"> &
+    Partial<Pick<ProjectSetup, "plugins">> = {
+    connections: [],
+    telemetry: null,
+  },
+) {
   const real = realpathSync(root);
   const policy = join(real, EFFECTIVE_FILE);
   const list = join(real, PROTECT_LIST);
-  return `nodrail policy hook ${quoted(policy)} --protect-list ${quoted(list)} --host codex --agent ${entry} || printf '%s' ${quoted(DENY)}`;
+  const reads = hookReads(setup as ProjectSetup, (file) =>
+    quoted(join(real, file)),
+  );
+  return `nodrail policy hook ${quoted(policy)} --protect-list ${quoted(list)}${reads} --host codex --agent ${entry} || printf '%s' ${quoted(DENY)}`;
 }
 
 /**
@@ -63,17 +83,19 @@ export function codexSetup(input: {
   const parts = teamFiles({
     ...input,
     skillsFolder: ".agents/skills",
-    hostPlaces: [".codex", ".agents"],
   });
   const { team } = parts;
-  const files: DesiredFile[] = [...parts.files];
+  const files: DesiredFile[] = [
+    ...parts.files,
+    ...codexMarketplace(input.setup),
+  ];
   const problems = [...parts.problems];
   if (process.platform === "win32")
     problems.push("Setting up Codex on Windows isn't supported yet.");
   const entry = parts.members.find((agent) => agent.name === team.entry)!;
   files.push({
     path: CODEX_CONFIG,
-    content: Buffer.from(configFile(root, entry, team.name)),
+    content: Buffer.from(configFile(root, entry, team.name, input.setup)),
     why: `start as ${entry.name}; agents on`,
   });
   for (const agent of parts.members)
@@ -85,27 +107,7 @@ export function codexSetup(input: {
       });
   files.push({
     path: CODEX_HOOKS,
-    content: Buffer.from(
-      `${JSON.stringify(
-        {
-          hooks: {
-            PreToolUse: [
-              {
-                matcher: ".*",
-                hooks: [
-                  {
-                    type: "command",
-                    command: codexHookCommand(root, team.entry),
-                  },
-                ],
-              },
-            ],
-          },
-        },
-        null,
-        2,
-      )}\n`,
-    ),
+    content: Buffer.from(hooksFile(root, team.entry, input.setup)),
     why: "the policy hook",
   });
   return {
@@ -116,17 +118,59 @@ export function codexSetup(input: {
   };
 }
 
+/** `.codex/hooks.json`: the policy hook, and the observation at session start. */
+function hooksFile(root: string, entry: string, setup: ProjectSetup) {
+  const command = (line: string) => [{ type: "command", command: line }];
+  const hooks = {
+    PreToolUse: [
+      { matcher: ".*", hooks: command(codexHookCommand(root, entry, setup)) },
+    ],
+    // Codex asks the person to trust it once, in /hooks.
+    ...(setup.observe.sessionStart
+      ? {
+          SessionStart: [
+            {
+              hooks: command(observeCommand(quoted(realpathSync(root)), setup)),
+            },
+          ],
+        }
+      : {}),
+  };
+  return `${JSON.stringify({ hooks }, null, 2)}\n`;
+}
+
 const header = (from: string) =>
   `# Written by nodrail apply from ${from}. Change that file, not this one.\n`;
 
-/** The project's Codex config: the session is the entry agent. */
-function configFile(root: string, entry: SetupAgent, team: string) {
+/**
+ * The project's Codex config: the session is the entry agent, and each
+ * connection is an MCP server nodrail starts, with the names of its fromEnv
+ * secrets passed through, never their values.
+ */
+function configFile(
+  root: string,
+  entry: SetupAgent,
+  team: string,
+  setup: ProjectSetup,
+) {
   const lines = [
     header(entry.file).trimEnd(),
     `developer_instructions = ${tomlString(instructionsOf(root, entry, team))}`,
   ];
   if (entry.model) lines.push(`model = ${tomlString(entry.model)}`);
   lines.push("", "[agents]", "enabled = true");
+  const file = join(realpathSync(root), CONNECTIONS_FILE);
+  for (const { name, spec } of setup.connections) {
+    lines.push(
+      "",
+      `[mcp_servers.${tomlString(name)}]`,
+      `command = "nodrail"`,
+      `args = ${JSON.stringify(runnerArgs(file, name))}`,
+    );
+    if (envNames(spec).length > 0)
+      lines.push(`env_vars = ${JSON.stringify(envNames(spec))}`);
+  }
+  lines.push(...codexPluginLines(root, setup));
   return `${lines.join("\n")}\n`;
 }
 
@@ -142,9 +186,8 @@ function agentFile(root: string, agent: SetupAgent, team: string) {
 }
 
 /** Whether Codex runs nodrail's hook here, and if not, what to do. */
-export type Activation = { active: boolean; detail: string };
 
-type HookInfo = {
+export type HookInfo = {
   source?: string;
   eventName?: string;
   command?: string;
@@ -161,36 +204,50 @@ export async function codexActivation(input: {
   codex: string;
   env: Env;
   entry: string;
+  setup: Pick<ProjectSetup, "connections" | "telemetry"> &
+    Partial<Pick<ProjectSetup, "plugins">>;
 }): Promise<Activation> {
-  const command = codexHookCommand(input.root, input.entry);
-  let hooks: HookInfo[];
+  const command = codexHookCommand(input.root, input.entry, input.setup);
+  const hooks = await codexHooks(input.codex, input.root, input.env);
+  return typeof hooks === "string"
+    ? { state: "unknown", detail: hooks }
+    : hookActivation(hooks, command);
+}
+
+/** The hooks Codex would run here, from every source, or why it couldn't say. */
+export async function codexHooks(
+  codex: string,
+  root: string,
+  env: Env,
+): Promise<HookInfo[] | string> {
   try {
-    hooks = await listHooks(input.codex, input.root, input.env);
+    return await listHooks(codex, root, env);
   } catch (error) {
-    return {
-      active: false,
-      detail: `couldn't ask Codex which hooks it runs: ${(error as Error).message}`,
-    };
+    return `couldn't ask Codex which hooks it runs: ${(error as Error).message}`;
   }
+}
+
+/** Whether Codex runs this hook command here, from what it listed. */
+export function hookActivation(hooks: HookInfo[], command: string): Activation {
   const project = hooks.filter((hook) => hook.source === "project");
   const ours = project.find(
     (hook) => hook.eventName === "preToolUse" && hook.command === command,
   );
   if (ours?.trustStatus === "trusted")
-    return { active: true, detail: "Codex runs nodrail's hook here" };
+    return { state: "verified", detail: "Codex runs nodrail's hook here" };
   if (ours)
     return {
-      active: false,
+      state: "inactive",
       detail: `nodrail's hook is ${ours.trustStatus ?? "not trusted"}. Open codex here, run /hooks and trust it`,
     };
   if (project.length === 0)
     return {
-      active: false,
+      state: "inactive",
       detail:
         "Codex doesn't load this folder's hooks until you trust the folder: open codex here and trust it, then run /hooks and trust nodrail's hook",
     };
   return {
-    active: false,
+    state: "inactive",
     detail: "Codex doesn't list nodrail's hook here yet; run nodrail apply",
   };
 }
@@ -199,68 +256,28 @@ const TIMEOUT = 30_000;
 
 /** `hooks/list` over the app server's JSON lines, then the server is stopped. */
 function listHooks(codex: string, cwd: string, env: Env) {
-  return new Promise<HookInfo[]>((resolve, reject) => {
-    const server = spawn(codex, ["app-server"], {
-      cwd,
-      env: env as NodeJS.ProcessEnv,
-      stdio: ["pipe", "pipe", "ignore"],
-    });
-    let settled = false;
-    const done = (error: Error | null, hooks: HookInfo[] = []) => {
-      // Stopping the server below ends it too: answer once.
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      server.kill();
-      if (error) reject(error);
-      else resolve(hooks);
-    };
-    const timer = setTimeout(
-      () => done(new Error("no answer in 30 seconds")),
-      TIMEOUT,
-    );
-    const send = (message: object) =>
-      server.stdin.write(`${JSON.stringify(message)}\n`);
-    let buffer = "";
-    server.on("error", (error) => done(error));
-    server.on("exit", () => done(new Error("the app server stopped")));
-    server.stdout.on("data", (data: Buffer) => {
-      buffer += data.toString("utf8");
-      let at: number;
-      while ((at = buffer.indexOf("\n")) >= 0) {
-        const line = buffer.slice(0, at);
-        buffer = buffer.slice(at + 1);
-        let message: {
-          id?: number;
-          result?: unknown;
-          error?: { message?: string };
-        };
-        try {
-          message = JSON.parse(line) as typeof message;
-        } catch {
-          continue;
-        }
-        if (message.id === 1) {
-          send({ method: "initialized" });
-          send({ id: 2, method: "hooks/list", params: { cwds: [cwd] } });
-        } else if (message.id === 2) {
-          if (message.error)
-            return done(
-              new Error(message.error.message ?? "hooks/list failed"),
-            );
-          const data = (message.result as { data?: { hooks?: HookInfo[] }[] })
-            ?.data;
-          return done(
-            null,
-            (data ?? []).flatMap((entry) => entry.hooks ?? []),
-          );
-        }
-      }
-    });
-    send({
+  return askServer<HookInfo[]>({
+    command: codex,
+    args: ["app-server"],
+    cwd,
+    env,
+    timeout: TIMEOUT,
+    first: {
       id: 1,
       method: "initialize",
       params: { clientInfo: { name: "nodrail", version: "0" } },
-    });
+    },
+    answer: (message, send, finish) => {
+      if (message.id === 1) {
+        send({ method: "initialized" });
+        send({ id: 2, method: "hooks/list", params: { cwds: [cwd] } });
+      } else if (message.id === 2) {
+        if (message.error)
+          throw new Error(message.error.message ?? "hooks/list failed");
+        const data = (message.result as { data?: { hooks?: HookInfo[] }[] })
+          ?.data;
+        finish((data ?? []).flatMap((entry) => entry.hooks ?? []));
+      }
+    },
   });
 }

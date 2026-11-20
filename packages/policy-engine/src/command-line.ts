@@ -6,9 +6,16 @@ import { parse } from "yaml";
 import { version } from "../package.json";
 import { z } from "zod";
 import { describeArguments, describeToolCall } from "./actions.ts";
-import { decideToolCall, toDescriptor, type Identity } from "./local-hook.ts";
-import { runHook } from "./run-hook.ts";
-import { protectedPaths, setupGuard } from "./rules-guard.ts";
+import { toDescriptor, type Identity } from "./local-hook.ts";
+import { hookCommand } from "./hook-command.ts";
+import { sendSpool } from "./telemetry.ts";
+
+// Node-only helpers the nodrail command uses for a setup.
+export { hasSecret, secretName, secretValue } from "./secret-refs.ts";
+// The spool and its sender, for `nodrail observe` too.
+export * from "./telemetry.ts";
+export type { SpanRecord } from "./otlp.ts";
+export { machineId } from "./reporting-spans.ts";
 import { caseRun, toRunContext } from "./case-runs.ts";
 import { runsCommand } from "./runs-cli.ts";
 import type { ActionDescriptor } from "./protocol.ts";
@@ -38,7 +45,10 @@ Commands:
   hook                 Claude Code hook; reads the event from stdin
     --unmatched deny|ask   When no rule covers a call (default deny)
     --protect-list <file>  Also keep the files it lists from being changed
-    --host codex           Codex can't ask a person: reviews become denies
+    --connections <file>   Read calls to the setup's tool connections as declared
+    --telemetry <file>     Send each decision as an OpenTelemetry span
+    --host codex|copilot   Codex and Copilot can't ask a person: reviews become denies;
+                           Copilot's calls are read as the Claude Code calls they are
     With gates or budgets, also SubagentStart and SubagentStop, and the run
     is recorded in the repository's git folder.
   runs [list | show <run> | report]   What the run ledger recorded
@@ -142,6 +152,8 @@ export type Io = {
   write: (text: string) => void;
   writeError: (text: string) => void;
   readStdin: () => Promise<string>;
+  /** How to run this command line again, as `nodrail policy` or alone. */
+  self?: readonly string[];
 };
 
 export const processIo: Io = {
@@ -154,6 +166,7 @@ export const processIo: Io = {
     for await (const chunk of process.stdin) stdin += String(chunk);
     return stdin;
   },
+  self: [process.argv[1] ?? ""],
 };
 
 let io: Io = processIo;
@@ -171,6 +184,8 @@ const options = {
   command: { type: "string" },
   unmatched: { type: "string" },
   "protect-list": { type: "string" },
+  connections: { type: "string" },
+  telemetry: { type: "string" },
   host: { type: "string" },
   help: { type: "boolean", short: "h" },
   version: { type: "boolean", short: "v" },
@@ -278,38 +293,6 @@ function gateCommand({ command, values, program, document, now }: Run) {
   return run.status ?? 1;
 }
 
-async function hookCommand({ values, document, now, paths }: Run) {
-  let setup: ReturnType<typeof setupGuard> | null = null;
-  try {
-    if (values["protect-list"]) setup = setupGuard(values["protect-list"]);
-  } catch (error) {
-    // Unprotected would be worse than stopped: 2 is what blocks.
-    io.writeError(
-      `Nodrail: can't read the protect list: ${(error as Error).message}\n`,
-    );
-    return 2;
-  }
-  const options = {
-    document,
-    now,
-    protect: [...protectedPaths(paths), ...(setup?.paths ?? [])],
-    setup,
-    canAsk: values.host !== "codex",
-    unmatched:
-      values.unmatched === "ask" ? ("ask" as const) : ("deny" as const),
-    ...identityOf(values),
-  };
-  const stdin = await io.readStdin();
-  // Rules without gates or budgets never read or write the ledger.
-  const result =
-    document.version === 2
-      ? runHook(stdin, options)
-      : decideToolCall(stdin, options);
-  if (result.stdout) io.write(result.stdout);
-  if (result.stderr) io.writeError(result.stderr);
-  return result.exitCode;
-}
-
 const counted = (count: number, word: string) =>
   `${count} ${word}${count === 1 ? "" : "s"}`;
 
@@ -342,7 +325,7 @@ const commands = new Map<string, (run: Run) => number | Promise<number>>([
   ["test", testCommand],
   ["check", gateCommand],
   ["exec", gateCommand],
-  ["hook", hookCommand],
+  ["hook", (run: Run) => hookCommand(run, io)],
 ]);
 
 function printPack(name: string | undefined) {
@@ -401,6 +384,9 @@ export async function runPolicyCommandLine(
   output: Io = processIo,
 ): Promise<number> {
   try {
+    // The hook's sender, run detached: not a command for people.
+    if (argv[0] === "telemetry-send" && argv[1] && argv[2])
+      return (await sendSpool(argv[1], argv[2], process.env), 0);
     return await runCli(argv, output);
   } catch (error) {
     output.error(error instanceof Error ? error.message : String(error));

@@ -1,4 +1,8 @@
 import { z } from "zod";
+import type { AgentConnections, ConnectionSpec } from "./connections.ts";
+import type { AgentPlugins, PluginSpec } from "./plugins.ts";
+import type { Runtime, Tested } from "./project-manifest.ts";
+import type { Telemetry } from "./telemetry-schema.ts";
 import { localRef, resourceName } from "./project-manifest.ts";
 
 /**
@@ -101,9 +105,35 @@ export type SetupBinding = Declared & {
   roles: Record<string, string>;
 };
 
+/** A tool connection, with the project files it runs. */
+export type SetupConnection = {
+  name: string;
+  spec: ConnectionSpec;
+  /** Project paths its arguments name, locked and kept from agents. */
+  files: string[];
+  /** Project paths of what it keeps, reached only through it; not locked. */
+  data?: string[];
+};
+
+export type SetupPlugin = {
+  name: string;
+  spec: PluginSpec;
+  /** Its folder, as a project path: locked and kept from agents. */
+  folder: string;
+  /** The hosts it has a manifest for. */
+  hosts: Runtime[];
+  /** The version each host's manifest gives, where it gives one. */
+  versions: Partial<Record<Runtime, string>>;
+};
+
 /** What nodrail.yaml and its resources ask a host to be. */
 export type ProjectSetup = {
-  runtime: "claude-code" | "codex" | null;
+  /** The project's stable id for reports, when nodrail.yaml gives one. */
+  id: string | null;
+  /** The host to set up, when only one is named. */
+  runtime: Runtime | null;
+  /** Every host the setup is for: `runtime`, or each one `runtimes` lists. */
+  runtimes: Runtime[];
   start: boolean;
   /** The team a session starts with, or null when there is none. */
   team: SetupTeam | null;
@@ -111,18 +141,40 @@ export type ProjectSetup = {
   teams: SetupTeam[];
   policies: SetupPolicy[];
   bindings: SetupBinding[];
+  connections: SetupConnection[];
+  /** Who may use which connection; null when every member may. */
+  agentConnections: AgentConnections | null;
+  /** Plugins in the project each host loads. */
+  plugins: SetupPlugin[];
+  /** Who may use which plugin; null when every member may. */
+  agentPlugins: AgentPlugins | null;
+  /** Where decisions are sent, or null when nowhere. */
+  telemetry: Telemetry | null;
+  /** The exact versions the workspace was tested with, or null. */
+  tested: Tested | null;
+  /** What observation records, and whether it runs at session start. */
+  observe: { names: boolean; sessionStart: boolean };
   /** The resource files, in the order they were read. */
   files: string[];
 };
 
 export const emptySetup = (): ProjectSetup => ({
+  id: null,
   runtime: null,
+  runtimes: [],
   start: false,
   team: null,
   agents: [],
   teams: [],
   policies: [],
   bindings: [],
+  connections: [],
+  agentConnections: null,
+  plugins: [],
+  agentPlugins: null,
+  telemetry: null,
+  tested: null,
+  observe: { names: false, sessionStart: true },
   files: [],
 });
 

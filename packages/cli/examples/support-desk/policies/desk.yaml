@@ -1,0 +1,24 @@
+# Who may search which part of the handbook, and who may publish.
+- rule: Public handbook for everyone
+  tool: handbook
+  operation: search
+  resource: { kind: collection, match: exact, value: public }
+  effect: allow
+- rule: Internal handbook for support
+  agent: support
+  tool: handbook
+  operation: search
+  resource: { kind: collection, match: exact, value: internal }
+  effect: allow
+- rule: Marketing never publishes
+  agent: marketing
+  tool: outbox
+  operation: publish
+  resource: { kind: channel, match: any }
+  effect: deny
+- rule: Support publishes after a person's review
+  agent: support
+  tool: outbox
+  operation: publish
+  resource: { kind: channel, match: any }
+  effect: require_approval

@@ -8,6 +8,11 @@ export type Values = {
   url?: string;
   yes?: boolean;
   agent?: string;
+  runtime?: string;
+  "require-active"?: boolean;
+  check?: boolean;
+  detach?: boolean;
+  names?: boolean;
   watch?: boolean;
   q?: string;
   outcome?: string;

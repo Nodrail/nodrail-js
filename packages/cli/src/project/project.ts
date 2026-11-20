@@ -10,12 +10,14 @@ import { CliError } from "../io.ts";
 import { bundledCatalog } from "./catalog.ts";
 import { effectivePolicy } from "./effective.ts";
 import { folderHost } from "./host.ts";
+import { contentFiles, declaresSetup } from "./workspace.ts";
 import {
   LOCK_FILE,
   lockFor,
   MANIFEST_FILE,
   pinsOf,
   readLock,
+  sha256,
   type Lock,
 } from "./lockfile.ts";
 
@@ -94,6 +96,9 @@ export function planProject(input: {
     catalog,
     effective: effective?.text ?? null,
     previous: input.previous,
+    content: declaresSetup(resolution.setup)
+      ? contentFiles(input.root, resolution.setup, sha256)
+      : null,
   });
   return { resolution, catalog, effective, pending, lock };
 }

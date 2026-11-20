@@ -18,6 +18,7 @@ await build({
     "src/protocol.ts",
     "src/simulator.ts",
     "src/yaml.ts",
+    "src/compile.ts",
     "src/actions.ts",
     "src/receipts.ts",
     "src/hook-runs.ts",

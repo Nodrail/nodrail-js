@@ -43,6 +43,9 @@ describe("reads Codex makes through its shell", () => {
     "rg -n 'su.*m' src",
     "rg -g '*.js' sum",
     "ls -la src",
+    // Several files named one by one: each is a read, as Codex batches them.
+    "cat src/sum.js src/other.js",
+    "head -n 5 src/sum.js src/other.js",
   ])("%s is judged as a read, and the read-only pack allows it", (command) => {
     expect(hook(command)).toBe("allow");
   });
@@ -54,6 +57,8 @@ describe("reads Codex makes through its shell", () => {
     "rg token .env",
     "rg -g '.env*' token",
     "ls .ssh",
+    // One secret among several files denies them all.
+    "cat src/sum.js .env",
   ])("%s reaches a secret and is denied", (command) => {
     expect(hook(command)).toContain('"deny"');
   });
@@ -70,8 +75,8 @@ describe("reads Codex makes through its shell", () => {
     "grep -rn token .",
     "tail -f src/sum.js",
     "sed -n '1p;w out' src/sum.js",
-    "cat src/sum.js src/other.js",
     "cat src/sum.js | head",
+    `cat ${Array.from({ length: 21 }, () => "src/sum.js").join(" ")}`,
   ])("%s is left a shell command, which the pack doesn't allow", (command) => {
     expect(hook(command)).toContain('"deny"');
   });

@@ -55,3 +55,5 @@ export {
 export { renderPermissionChanges } from "./permission-render.ts";
 export { legacySubagentRuleProblem, type RuleTarget } from "./upgrades.ts";
 export * from "./commands.ts";
+export { decodeSpans, type ReceivedSpans } from "./otlp-decode.ts";
+export type { SpanRecord } from "./otlp.ts";

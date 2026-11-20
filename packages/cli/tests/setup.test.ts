@@ -5,122 +5,43 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
-  statSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
-import { delimiter, join } from "node:path";
+import { basename, delimiter, dirname, join } from "node:path";
 import { describe, expect, test } from "vitest";
 import { stageJournal, replayJournal } from "../src/project/journal.ts";
 import { applySetup } from "../src/setup/apply.ts";
 import { codexHookCommand } from "../src/setup/codex.ts";
 import { planSetup } from "../src/setup/plan.ts";
 import { heldByAnother, killed } from "./support/writers.ts";
-import { projectFolder } from "./support/project-folder.ts";
-
-const api = "apiVersion: apf.nodrail.com/v1alpha1";
-const windows = process.platform === "win32";
-
-const RESOURCES = {
-  "resources/agents.yaml": [
-    `${api}
-kind: Agent
-metadata: { name: lead }
-spec:
-  description: Plans the release and hands work on.
-  instructions: ./lead.md
-  skills: [../skills/release-notes]`,
-    `${api}\nkind: Agent\nmetadata: { name: publisher }`,
-    `${api}\nkind: Agent\nmetadata: { name: loner }`,
-  ].join("\n---\n"),
-  "resources/lead.md": "You lead the release.\n",
-  "skills/release-notes/SKILL.md":
-    "---\nname: release-notes\ndescription: Write release notes.\n---\nSteps.\n",
-  "skills/release-notes/template.md": "## Changes\n",
-  "resources/team.yaml": `${api}
-kind: Team
-metadata: { name: release }
-spec:
-  entry: lead
-  members: [lead, publisher]
-  handoffs: [{ from: lead, to: publisher }]
-`,
-  "policies/base.yaml": `- rule: Read anything
-  tool: files
-  operation: file.read
-  resource: { kind: file, match: any }
-  effect: allow
-`,
-  "nodrail.yaml": `kind: nodrail.project/v1
-runtime: claude-code
-resources: ./resources
-imports:
-  - ./policies/base.yaml
-`,
-};
-
-/** A folder with a fake `claude` and `nodrail`, as PATH would find them. */
-function tools(version = "2.1.327") {
-  const bin = mkdtempSync(join(tmpdir(), "nodrail-bin-"));
-  for (const [name, text] of [
-    ["claude", `${version} (Claude Code)`],
-    ["nodrail", "0.1.0"],
-  ] as const) {
-    const file = join(bin, windows ? `${name}.cmd` : name);
-    writeFileSync(
-      file,
-      windows ? `@echo ${text}\r\n` : `#!/bin/sh\necho "${text}"\n`,
-    );
-    chmodSync(file, 0o755);
-  }
-  return bin;
-}
-
-function project(
-  files: Record<string, string> = RESOURCES,
-  bin: string | null = tools(),
-) {
-  const env = {
-    PATH: bin ?? "",
-    ...(windows
-      ? { PATHEXT: ".CMD", SystemRoot: process.env.SystemRoot! }
-      : {}),
-  };
-  const folder = projectFolder(files, env);
-  const plan = () => planSetup({ root: folder.cwd, home: folder.home, env });
-  return { ...folder, env, plan };
-}
-
-async function locked(files?: Record<string, string>, bin?: string | null) {
-  const p = project(files, bin);
-  const lock = await p.run("policy", "lock");
-  expect(lock.err).toBe("");
-  return p;
-}
+import {
+  codexTools,
+  filesUnder,
+  locked,
+  project,
+  RESOURCES,
+  tools,
+  windows,
+} from "./support/setup-project.ts";
 
 /** Every file under the folder with its hash: what "changed nothing" means. */
 function snapshot(root: string) {
-  const files: Record<string, string> = {};
-  const walk = (folder: string) => {
-    for (const entry of readdirSync(join(root, folder))) {
-      const path = folder ? `${folder}/${entry}` : entry;
-      if (statSync(join(root, path)).isDirectory()) walk(path);
-      else
-        files[path] = createHash("sha256")
-          .update(readFileSync(join(root, path)))
-          .digest("hex");
-    }
-  };
-  walk("");
-  return files;
+  return Object.fromEntries(
+    Object.entries(filesUnder(root)).map(([path, bytes]) => [
+      path,
+      createHash("sha256").update(bytes).digest("hex"),
+    ]),
+  );
 }
 
 const action = (p: ReturnType<typeof project>, path: string) =>
   p.plan().steps.find((step) => step.path === path)?.action;
 
+/** A state as nodrail 0.2.0's first apply wrote it: one host. */
 const owned = (
   p: ReturnType<typeof project>,
   files: Record<string, string>,
@@ -192,7 +113,15 @@ You lead the release.
     expect(file(".nodrail/protected.txt"))
       .toBe(`# Written by nodrail apply. The setup's files, from the project folder:
 # the policy hook keeps agents from changing them.
+.agents
 .claude
+.claude-plugin
+.codex
+.github/agents
+.github/copilot
+.github/hooks
+.github/mcp.json
+.github/skills
 .nodrail
 nodrail.lock.yaml
 nodrail.yaml
@@ -208,7 +137,7 @@ skills/release-notes
     expect((await p.run("policy", "export", "--frozen")).out).toBe(
       effective.replace(/\n$/, ""),
     );
-    expect(plan.settings).toEqual({
+    expect(plan.merged[".claude/settings.json"]).toEqual({
       agent: "lead",
       hooks: {
         PreToolUse: [
@@ -220,6 +149,17 @@ skills/release-notes
                 command:
                   'nodrail policy hook "$CLAUDE_PROJECT_DIR/.nodrail/effective.apf.yaml" --protect-list "$CLAUDE_PROJECT_DIR/.nodrail/protected.txt" --agent lead',
                 onFailure: "block",
+              },
+            ],
+          },
+        ],
+        // Records what is set up at each session start (W3); never blocks.
+        SessionStart: [
+          {
+            hooks: [
+              {
+                type: "command",
+                command: 'nodrail observe "$CLAUDE_PROJECT_DIR" --detach',
               },
             ],
           },
@@ -258,7 +198,7 @@ skills/release-notes
     );
     const plan = p.plan();
     expect(action(p, ".claude/settings.json")).toBe("update");
-    expect(plan.settings).toMatchObject({
+    expect(plan.merged[".claude/settings.json"]).toMatchObject({
       model: "opus",
       agent: "lead",
       hooks: {
@@ -308,7 +248,10 @@ skills/release-notes
     const first = p.plan();
     for (const file of first.files)
       p.write(file.path, file.content.toString("utf8"));
-    p.write(".claude/settings.json", JSON.stringify(first.settings));
+    p.write(
+      ".claude/settings.json",
+      JSON.stringify(first.merged[".claude/settings.json"]),
+    );
     const { code, out } = await p.run("plan");
     expect(code).toBe(0);
     expect(out).toContain("Nothing to change. Nothing was changed.");
@@ -437,9 +380,11 @@ describe("nodrail apply", () => {
     expect(action(p, ".claude/agents/publisher.md")).toBe("keep");
     expect((await p.run("apply", "--yes")).code).toBe(0);
     const state = JSON.parse(p.read(".nodrail/setup-state.json")) as {
-      files: Record<string, string>;
+      hosts: { "claude-code": { files: Record<string, string> } };
     };
-    expect(state.files[".claude/agents/publisher.md"]).toBeUndefined();
+    expect(
+      state.hosts["claude-code"].files[".claude/agents/publisher.md"],
+    ).toBeUndefined();
     // The publisher leaves the team: nodrail removes nothing of the person's.
     p.write(
       "resources/team.yaml",
@@ -502,11 +447,12 @@ describe("nodrail apply", () => {
     );
     for (const file of plan.files)
       expect(readFileSync(join(p.cwd, file.path))).toEqual(file.content);
-    expect(JSON.parse(p.read(".claude/settings.json"))).toEqual(plan.settings);
+    expect(JSON.parse(p.read(".claude/settings.json"))).toEqual(
+      plan.merged[".claude/settings.json"],
+    );
     expect(JSON.parse(p.read(".nodrail/setup-state.json"))).toMatchObject({
-      state: 1,
-      runtime: "claude-code",
-      settings: { agent: "lead" },
+      state: 2,
+      hosts: { "claude-code": { settings: { agent: "lead" } } },
     });
     expect(applied(p)).toEqual([]);
     const before = snapshot(p.cwd);
@@ -673,37 +619,6 @@ describe("nodrail apply", () => {
   });
 });
 
-// A `codex` on PATH that answers --version and, as its app server, lists the
-// hooks in `hooks.json` next to it, the way Codex 0.169 does.
-function codexTools(version = "0.169.0") {
-  const bin = tools();
-  writeFileSync(
-    join(bin, "codex"),
-    `#!${process.execPath}
-const { readFileSync } = require("node:fs");
-const { join } = require("node:path");
-if (process.argv[2] === "--version") { console.log("codex-cli ${version}"); process.exit(0); }
-let buffer = "";
-process.stdin.on("data", (data) => {
-  buffer += data;
-  let at;
-  while ((at = buffer.indexOf("\\n")) >= 0) {
-    const message = JSON.parse(buffer.slice(0, at));
-    buffer = buffer.slice(at + 1);
-    if (message.id === 1) console.log(JSON.stringify({ id: 1, result: {} }));
-    if (message.id === 2) {
-      let hooks = [];
-      try { hooks = JSON.parse(readFileSync(join(__dirname, "hooks.json"), "utf8")); } catch {}
-      console.log(JSON.stringify({ id: 2, result: { data: [{ cwd: message.params.cwds[0], hooks }] } }));
-    }
-  }
-});
-`,
-  );
-  chmodSync(join(bin, "codex"), 0o755);
-  return bin;
-}
-
 const CODEX = {
   ...RESOURCES,
   "nodrail.yaml": RESOURCES["nodrail.yaml"].replace("claude-code", "codex"),
@@ -828,8 +743,8 @@ enabled = true
     );
     expect((await p.run("plan")).out).not.toContain("won't run the policy");
     expect(JSON.parse(p.read(".nodrail/setup-state.json"))).toMatchObject({
-      runtime: "codex",
-      settings: {},
+      state: 2,
+      hosts: { codex: { settings: {} } },
     });
   });
 
@@ -838,5 +753,148 @@ enabled = true
     const { code, out } = await p.run("plan");
     expect(code).toBe(1);
     expect(out).toContain("! codex: 0.150.0; needs 0.169.0 or later");
+  });
+});
+
+describe.skipIf(windows)("one nodrail.yaml for both hosts", () => {
+  const BOTH = {
+    ...RESOURCES,
+    "nodrail.yaml": RESOURCES["nodrail.yaml"].replace(
+      "runtime: claude-code",
+      "runtimes: [claude-code, codex]",
+    ),
+  };
+
+  async function both() {
+    const bin = codexTools();
+    const p = await locked(BOTH, bin);
+    writeFileSync(
+      join(bin, "hooks.json"),
+      JSON.stringify([
+        {
+          source: "project",
+          eventName: "preToolUse",
+          command: codexHookCommand(p.cwd, "lead"),
+          trustStatus: "trusted",
+        },
+      ]),
+    );
+    const parent = dirname(p.cwd);
+    const folder = `./${basename(p.cwd)}`;
+    /** `nodrail <verb> ./project --runtime <host>`, from the folder above. */
+    const as = (host: string, verb: string, ...rest: string[]) =>
+      p.runFrom(parent, verb, folder, "--runtime", host, ...rest);
+    const state = () =>
+      JSON.parse(p.read(".nodrail/setup-state.json")) as {
+        hosts: Record<string, { files: Record<string, string> }>;
+      };
+    return { ...p, folder, as, state };
+  }
+
+  test("plan and apply say which host, and refuse one not listed", async () => {
+    const p = await both();
+    const unsaid = await p.run("plan");
+    expect(unsaid.code).toBe(1);
+    expect(unsaid.err).toContain(
+      "nodrail.yaml sets up Claude Code and Codex: say which with --runtime claude-code or --runtime codex.",
+    );
+    const other = await p.as("langgraph", "apply", "--yes");
+    expect(other.code).toBe(1);
+    expect(other.err).toContain(
+      "nodrail.yaml doesn't set up langgraph; it lists claude-code, codex.",
+    );
+    const plan = await p.as("codex", "plan");
+    expect(plan.out).toContain(
+      "Plan for Codex: team release, starting as lead",
+    );
+    expect(plan.out).toContain(
+      `\`nodrail apply ${p.folder} --runtime codex\` makes them.`,
+    );
+    expect(existsSync(join(p.cwd, ".nodrail/setup-state.json"))).toBe(false);
+  });
+
+  test("each host is set up beside the other, and keeps its own state", async () => {
+    const p = await both();
+    const claude = await p.as("claude-code", "apply", "--yes");
+    expect(claude.code).toBe(0);
+    expect(claude.out).toContain(
+      `Run \`claude\` in ${p.cwd}: it starts as lead`,
+    );
+    const codex = await p.as("codex", "apply", "--yes");
+    expect(codex.err).toBe("");
+    expect(codex.code).toBe(0);
+    for (const path of [
+      ".claude/agents/publisher.md",
+      ".claude/settings.json",
+      ".codex/agents/publisher.toml",
+      ".codex/hooks.json",
+    ])
+      expect(existsSync(join(p.cwd, path))).toBe(true);
+    const { hosts } = p.state();
+    expect(Object.keys(hosts).sort()).toEqual(["claude-code", "codex"]);
+    // The effective policy is the same for both, and both own it.
+    expect(hosts.codex!.files[".nodrail/effective.apf.yaml"]).toBe(
+      hosts["claude-code"]!.files[".nodrail/effective.apf.yaml"],
+    );
+    for (const host of ["claude-code", "codex"]) {
+      const again = await p.as(host, "apply", "--yes");
+      expect(again.code).toBe(0);
+      expect(again.out).toContain("Nothing to change.");
+    }
+  });
+
+  test("a change applied for one host leaves the other's files, and its state right", async () => {
+    const p = await both();
+    await p.as("claude-code", "apply", "--yes");
+    await p.as("codex", "apply", "--yes");
+    p.write(
+      "resources/team.yaml",
+      RESOURCES["resources/team.yaml"]
+        .replace("[lead, publisher]", "[lead]")
+        .replace("[{ from: lead, to: publisher }]", "[]"),
+    );
+    expect((await p.run("policy", "lock")).code).toBe(0);
+    expect((await p.as("codex", "apply", "--yes")).code).toBe(0);
+    expect(existsSync(join(p.cwd, ".codex/agents/publisher.toml"))).toBe(false);
+    expect(existsSync(join(p.cwd, ".claude/agents/publisher.md"))).toBe(true);
+    // Claude Code's setup takes the new policy, written for Codex, as its own.
+    const plan = planSetup({
+      root: p.cwd,
+      home: p.home,
+      env: p.env,
+      runtime: "claude-code",
+    });
+    const actions = Object.fromEntries(
+      plan.steps.map((step) => [step.path, step.action]),
+    );
+    expect(actions[".nodrail/effective.apf.yaml"]).toBe("keep");
+    expect(actions[".claude/agents/publisher.md"]).toBe("remove");
+    expect((await p.as("claude-code", "apply", "--yes")).code).toBe(0);
+    expect(existsSync(join(p.cwd, ".claude/agents/publisher.md"))).toBe(false);
+  });
+
+  test("a file only one host still needs stays for it", async () => {
+    const p = await both();
+    await p.as("claude-code", "apply", "--yes");
+    await p.as("codex", "apply", "--yes");
+    // Codex drops out: what Claude Code still uses stays.
+    p.write(
+      "nodrail.yaml",
+      BOTH["nodrail.yaml"].replace(
+        "runtimes: [claude-code, codex]",
+        "runtimes: [claude-code]",
+      ),
+    );
+    expect((await p.run("policy", "lock")).code).toBe(0);
+    const plan = planSetup({
+      root: p.cwd,
+      home: p.home,
+      env: p.env,
+    });
+    expect(plan.runtime).toBe("claude-code");
+    expect(
+      plan.steps.find((step) => step.path === ".nodrail/effective.apf.yaml")
+        ?.action,
+    ).toBe("keep");
   });
 });

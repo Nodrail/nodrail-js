@@ -24,6 +24,7 @@ import {
 } from "../project/project.ts";
 import { reviewBaseline, reviewText } from "../project/review.ts";
 import { writeInProgress, writeProject } from "../project/store.ts";
+import { fileChanges } from "../project/workspace.ts";
 
 type Wanted = {
   entry: { ref: string; with?: Record<string, string> };
@@ -162,6 +163,7 @@ export async function lock(args: string[], io: Io) {
     report = [
       `Updated ${LOCK_FILE}`,
       ...waiting(plan),
+      ...contentReview(project.lock, plan.lock),
       reviewText(baseline, plan),
       NOT_ACTIVE,
       nextStep(plan),
@@ -170,6 +172,25 @@ export async function lock(args: string[], io: Io) {
   });
   io.out(report.join("\n"));
   return 0;
+}
+
+/** What changed in the agents' instructions and skills, for the reviewer. */
+function contentReview(
+  locked: ProjectPlan["lock"] | null,
+  now: ProjectPlan["lock"],
+) {
+  if (now.workspace === undefined) return [];
+  if (locked?.workspace === undefined)
+    return [
+      `Workspace: now records ${now.workspace.files.length} instruction, skill and plugin files, with one digest for the whole setup.`,
+    ];
+  const changed = fileChanges(locked.workspace.files, now.workspace.files);
+  return changed.length > 0
+    ? [
+        "Instructions, skills and plugins, compared with the lock:",
+        ...changed.map((line) => `  ${line}`),
+      ]
+    : [];
 }
 
 /** Why the files on disk are not the ones the lock recorded, or null. */
@@ -267,5 +288,37 @@ export function frozenPolicy({
   const problem = drift(project.lock, plan.lock);
   if (problem)
     throw new CliError(`${problem}. Run \`nodrail policy lock\` to review it.`);
-  return { text: plan.effective!.text, ...setupOf(plan) };
+  return {
+    text: plan.effective!.text,
+    ...setupOf(plan),
+    workspace: workspaceCheck(project.lock, plan.lock),
+  };
+}
+
+/**
+ * Whether the workspace is the one reviewed: its instructions and skills as
+ * well as its policy. A policy alone has none to check (null). A lock from
+ * before workspaces were recorded is upgraded by locking again, never
+ * silently.
+ */
+export function workspaceCheck(
+  locked: ProjectPlan["lock"],
+  now: ProjectPlan["lock"],
+): { ok: boolean; detail: string } | null {
+  if (now.workspace === undefined) return null;
+  if (locked.workspace === undefined)
+    return {
+      ok: false,
+      detail: `${LOCK_FILE} records the policy only. Run \`nodrail policy lock\` to record the agents' instructions and skills too, and commit it.`,
+    };
+  if (locked.workspace.sha256 === now.workspace.sha256)
+    return {
+      ok: true,
+      detail: `matches ${LOCK_FILE} (${now.workspace.sha256.slice(0, 12)})`,
+    };
+  const changed = fileChanges(locked.workspace.files, now.workspace.files);
+  return {
+    ok: false,
+    detail: `changed since it was locked${changed.length > 0 ? `: ${changed.join(", ")}` : ""}. Run \`nodrail policy lock\` to review it.`,
+  };
 }

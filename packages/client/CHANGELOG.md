@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.0
+
+Released with `@nodrail/policy-engine` 0.5.0, which it uses. The hook it
+bundles judges GitHub Copilot CLI's calls (`--host copilot`) and sends
+decisions in the reporting contract v2; see the engine's changelog.
+Otherwise the client behaves as in 0.4.0.
+
 ## 0.4.0
 
 Released with `@nodrail/policy-engine` 0.4.0, which it uses. The hook

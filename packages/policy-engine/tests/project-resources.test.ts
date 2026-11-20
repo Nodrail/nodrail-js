@@ -87,6 +87,16 @@ const project = (
     catalog,
   });
 
+/** The project's policy after a careless file that allows too much. */
+function openedBy(open: string, result: ReturnType<typeof resolveProject>) {
+  const compiled = compilePolicies([
+    { name: "open.yaml", text: open },
+    ...result.sources,
+  ]);
+  if (!compiled.ok) throw new Error(JSON.stringify(compiled.issues));
+  return compiled.document;
+}
+
 const messages = (result: ReturnType<typeof resolveProject>) =>
   result.problems.map((problem) => problem.message);
 
@@ -333,6 +343,44 @@ describe("the setup nodrail.yaml declares", () => {
     ]);
   });
 
+  test("one file can name both hosts, and each run picks one", () => {
+    const solo = {
+      "r.yaml": docs(agent("a"), team("t", "{ entry: a, members: [a] }")),
+    };
+    const both = project(
+      `runtimes: [claude-code, codex]\nresources: ./r.yaml\n`,
+      solo,
+    );
+    expect(messages(both)).toEqual([]);
+    expect(both.setup).toMatchObject({
+      runtime: null,
+      runtimes: ["claude-code", "codex"],
+    });
+    expect(
+      project(`runtimes: [codex]\nresources: ./r.yaml\n`, solo).setup,
+    ).toMatchObject({ runtime: "codex", runtimes: ["codex"] });
+    expect(
+      project(`runtime: codex\nresources: ./r.yaml\n`, solo).setup.runtimes,
+    ).toEqual(["codex"]);
+    expect(
+      messages(
+        project(
+          `runtime: codex\nruntimes: [codex]\nresources: ./r.yaml\n`,
+          solo,
+        ),
+      ),
+    ).toEqual(["Say runtime or runtimes, not both"]);
+    expect(
+      messages(
+        project(`runtimes: [codex, codex]\nresources: ./r.yaml\n`, solo),
+      ),
+    ).toEqual(["Lists a host twice"]);
+    expect(messages(project(`runtimes: [codex, claude-code]\n`))).toEqual([
+      "codex and claude-code need a Team to start",
+    ]);
+    expect(messages(project(`runtimes: [langgraph]\n`))).toHaveLength(1);
+  });
+
   test("resources are checked field by field, and named once per kind", () => {
     const result = project(`resources: ./r.yaml\n`, {
       "r.yaml": docs(
@@ -494,6 +542,33 @@ describe("renaming a policy's agents", () => {
   });
 });
 
+describe("a team's skills", () => {
+  test("each member may load the skills set up for it, and no other", () => {
+    const result = project(`resources: ./team/r.yaml\n`, {
+      "team/skills/style/SKILL.md": "---\nname: style\n---\n",
+      "team/r.yaml": docs(
+        agent("editor", "{ skills: [./skills/style/] }"),
+        agent("publisher"),
+        team("release", "{ entry: editor, members: [editor, publisher] }"),
+      ),
+    });
+    expect(messages(result)).toEqual([]);
+    const compiled = compilePolicies(result.sources);
+    if (!compiled.ok) throw new Error("doesn't compile");
+    const load = (agent: string, skill: string) =>
+      simulate({
+        document: compiled.document,
+        descriptor: toDescriptor(describeToolCall("Skill", { skill })!, {
+          agent,
+        }),
+        now: new Date("2026-11-19T00:00:00Z"),
+      }).outcome;
+    expect(load("editor", "style")).toBe("allow");
+    expect(load("publisher", "style")).toBe("none");
+    expect(load("editor", "other")).toBe("none");
+  });
+});
+
 describe("what a team means", () => {
   const result = project(`resources: ./r.yaml\n`, {
     "r.yaml": docs(
@@ -512,11 +587,7 @@ describe("what a team means", () => {
   resource: { kind: agent, match: any }
   effect: allow
 `;
-  const compiled = compilePolicies([
-    { name: "open.yaml", text: open },
-    ...result.sources,
-  ]);
-  if (!compiled.ok) throw new Error(JSON.stringify(compiled.issues));
+  const compiled = { document: openedBy(open, result) };
   const decide = (
     agent: string,
     tool: string,
@@ -596,5 +667,215 @@ describe("what a team means", () => {
     ["Write", { file_path: "/repo/nodrail.yaml", content: "x" }],
   ])("no agent may %s %o", (tool, input) => {
     expect(decide("editor", tool, input)).toBe("deny");
+  });
+});
+
+describe("tool connections in nodrail.yaml", () => {
+  const files = {
+    "r.yaml": docs(
+      agent("marketing"),
+      agent("support"),
+      team(
+        "desk",
+        "{ entry: marketing, members: [marketing, support], handoffs: [{ from: marketing, to: support }] }",
+      ),
+    ),
+    "connectors/handbook.mjs": "// the connector\n",
+  };
+  const connection = `connections:
+  handbook:
+    command: node
+    args: [./connectors/handbook.mjs, --verbose]
+    env: { HANDBOOK_TOKEN: { fromEnv: HANDBOOK_TOKEN } }
+    operations:
+      search: { resource: { kind: collection, from: collection } }
+      sources: {}
+`;
+  const desk = (extra = "", more: Record<string, string> = {}) =>
+    project(`resources: ./r.yaml\n${connection}${extra}`, {
+      ...files,
+      ...more,
+    });
+
+  test("are read with the files they run, which are locked", () => {
+    const result = desk();
+    expect(messages(result)).toEqual([]);
+    expect(result.setup.connections).toMatchObject([
+      { name: "handbook", files: ["connectors/handbook.mjs"] },
+    ]);
+    expect(result.setup.agentConnections).toBeNull();
+    expect(result.inputs.map((input) => input.path)).toContain(
+      "connectors/handbook.mjs",
+    );
+  });
+
+  test("name what's wrong with them and with who may use them", () => {
+    expect(
+      messages(
+        project(`resources: ./r.yaml\n${connection}`, {
+          "r.yaml": files["r.yaml"],
+        }),
+      ),
+    ).toEqual(["No such file or folder"]);
+    expect(
+      messages(
+        desk(`agentConnections:
+  marketing: [ledger]
+  support: [{ connection: handbook, operations: [delete] }]
+  intern: [handbook]
+`),
+      ),
+    ).toEqual([
+      "marketing uses ledger, which isn't a connection",
+      "handbook has no operation delete",
+      "intern isn't on the team",
+    ]);
+  });
+
+  test("lock whatever project file the command line names, however it's written", () => {
+    const result = project(
+      `resources: ./r.yaml
+connections:
+  docs:
+    command: ./bin/docs
+    args: [connectors/helper.mjs, --config=./docs.json, --folder, ./handbook, http://127.0.0.1:1/x, -v]
+    operations: { search: {} }
+  tools:
+    command: node
+    args: [--script=lib/tool.cjs]
+    operations: { run: {} }
+`,
+      {
+        "r.yaml": files["r.yaml"],
+        "bin/docs": "#!/bin/sh\n",
+        "connectors/helper.mjs": "//\n",
+        "docs.json": "{}",
+        "handbook/public/a.md": "text",
+        "lib/tool.cjs": "//\n",
+      },
+    );
+    expect(messages(result)).toEqual([]);
+    expect(result.setup.connections.map((each) => each.files)).toEqual([
+      ["bin/docs", "connectors/helper.mjs", "docs.json"],
+      ["lib/tool.cjs"],
+    ]);
+    // The documents folder is data: read, not locked.
+    expect(result.inputs.map((input) => input.path)).not.toContain(
+      "handbook/public/a.md",
+    );
+    expect(
+      messages(
+        project(
+          `resources: ./r.yaml
+connections:
+  docs:
+    command: ./.claude/run
+    args: [./missing]
+    operations: { search: {} }
+`,
+          { "r.yaml": files["r.yaml"], ".claude/run": "x" },
+        ),
+      ),
+    ).toEqual([
+      "nodrail apply writes there, so it can't be a source; keep it in a folder of your own",
+      "No such file or folder",
+    ]);
+  });
+
+  test("keep their data, which isn't locked, where nothing of the setup is", () => {
+    const memory = (data: string, extra = "") =>
+      project(
+        `resources: ./r.yaml
+connections:
+  memory:
+    command: node
+    args: [./connectors/handbook.mjs, --file, ./memory/desk.jsonl]
+    operations: { search_nodes: {} }
+    data: [${data}]
+${extra}`,
+        { ...files, "memory/desk.jsonl": '{"type":"entity"}\n' },
+      );
+    const kept = memory("./memory");
+    expect(messages(kept)).toEqual([]);
+    // The file it writes is named on its command line, yet not locked.
+    expect(kept.setup.connections[0]!.files).toEqual([
+      "connectors/handbook.mjs",
+    ]);
+    expect(kept.inputs.map((input) => input.path)).not.toContain(
+      "memory/desk.jsonl",
+    );
+    expect(messages(memory("./.claude/memory"))).toEqual([
+      "That's the setup's own; keep data in a folder of its own",
+    ]);
+    // A skill folder is in the workspace, which the lock covers.
+    expect(
+      messages(
+        project(
+          `resources: ./r.yaml
+connections:
+  memory:
+    command: node
+    operations: { search_nodes: {} }
+    data: [./skills/s/notes]
+`,
+          {
+            "r.yaml": docs(agent("support", "{ skills: [./skills/s] }")),
+            "skills/s/SKILL.md": "---\nname: s\n---\n",
+          },
+        ),
+      ),
+    ).toEqual([
+      "That overlaps files the lock covers; keep data in a folder of its own",
+    ]);
+    expect(messages(memory("./r.yaml"))).toEqual([
+      "That overlaps files the lock covers; keep data in a folder of its own",
+    ]);
+  });
+
+  test("only nodrail.yaml declares them", () => {
+    const result = project(`imports: [./more.yaml]\n`, {
+      "more.yaml": `kind: nodrail.project/v1\n${connection}`,
+    });
+    expect(messages(result)).toEqual(["Only nodrail.yaml says connections"]);
+  });
+
+  describe("who may use which, as team rules", () => {
+    const result = desk(`agentConnections:
+  marketing: [{ connection: handbook, operations: [search] }]
+  support: [handbook]
+`);
+    const open = `- rule: Anything on the handbook
+  tool: handbook
+  operation: search
+  resource: { kind: collection, match: any }
+  effect: allow
+- rule: Its sources
+  tool: handbook
+  operation: sources
+  resource: { kind: mcp_tool, match: any }
+  effect: allow
+`;
+    const compiled = { document: openedBy(open, result) };
+    const decide = (agent: string, operation: string, kind: string) =>
+      simulate({
+        document: compiled.document,
+        descriptor: {
+          agentId: agent,
+          installationId: "local",
+          toolKey: "handbook",
+          operationKey: operation,
+          resourceKind: kind,
+          resourceId: kind === "collection" ? "internal" : "handbook.sources",
+          params: {},
+        },
+        now: new Date("2026-11-18T00:00:00Z"),
+      }).outcome;
+
+    test("an operation an agent isn't given is denied, whatever else allows it", () => {
+      expect(messages(result)).toEqual([]);
+      expect(decide("marketing", "search", "collection")).toBe("allow");
+      expect(decide("marketing", "sources", "mcp_tool")).toBe("deny");
+      expect(decide("support", "sources", "mcp_tool")).toBe("allow");
+    });
   });
 });

@@ -199,6 +199,108 @@ function checkProject(folder) {
     );
 }
 
+/**
+ * The examples ship in the package: one is copied out, and its own lock
+ * exports the policy, from the installed command alone.
+ */
+function checkExample(folder) {
+  const bin = join(folder, "node_modules", ".bin", "nodrail");
+  const copied = spawnSync(bin, ["example", "support-desk", "desk"], {
+    cwd: folder,
+    encoding: "utf8",
+    shell,
+  });
+  if (copied.status !== 0)
+    fail(`nodrail example: ${copied.stdout}${copied.stderr}`);
+  const exported = spawnSync(bin, ["policy", "export", "--frozen"], {
+    cwd: join(folder, "desk"),
+    encoding: "utf8",
+    shell,
+  });
+  if (
+    exported.status !== 0 ||
+    !exported.stdout.includes("Marketing never publishes")
+  )
+    fail(`the example's policy: ${exported.stdout}${exported.stderr}`);
+  checkExampleSetup(folder, bin);
+}
+
+/**
+ * A host program that only says its version, where a test can't start the
+ * real one. Codex's app server is asked which hooks it runs: this one runs
+ * none, so the setup is applied and reported inactive, never enforced.
+ */
+function fakeHosts(folder) {
+  const hosts = join(folder, "hosts");
+  mkdirSync(hosts);
+  const fake = (name, version) =>
+    shell
+      ? writeFileSync(join(hosts, `${name}.cmd`), `@echo ${version}\r\n`)
+      : writeFileSync(join(hosts, name), `#!/bin/sh\necho "${version}"\n`, {
+          mode: 0o755,
+        });
+  fake("claude", "2.1.328 (Claude Code)");
+  if (!shell) fake("codex", "codex-cli 0.170.0");
+  return hosts;
+}
+
+/**
+ * The example set up from the installed package, as its README says: plan
+ * on each host starts nothing; apply starts the packaged connectors once
+ * and writes the setup; a second apply has nothing to change.
+ */
+function checkExampleSetup(folder, bin) {
+  const desk = join(folder, "desk");
+  const path = [fakeHosts(folder), dirname(bin), process.env.PATH].join(
+    process.platform === "win32" ? ";" : ":",
+  );
+  const nodrail = (...args) =>
+    spawnSync(bin, args, {
+      cwd: folder,
+      encoding: "utf8",
+      shell,
+      env: { ...process.env, PATH: path },
+    });
+  const runtimes = shell ? ["claude-code"] : ["claude-code", "codex"];
+  for (const runtime of runtimes) {
+    const plan = nodrail("plan", "./desk", "--runtime", runtime);
+    if (
+      plan.status !== 0 ||
+      !plan.stdout.includes("✓ workspace: matches nodrail.lock.yaml")
+    )
+      fail(`nodrail plan --runtime ${runtime}: ${plan.stdout}${plan.stderr}`);
+  }
+  if (
+    readdirSync(join(desk, "activity")).some((name) => name.endsWith(".jsonl"))
+  )
+    fail("plan started a connection");
+  const applied = nodrail(
+    "apply",
+    "./desk",
+    "--runtime",
+    "claude-code",
+    "--yes",
+  );
+  if (
+    applied.status !== 0 ||
+    !applied.stdout.includes("✓ connection handbook: offers search") ||
+    !applied.stdout.includes("✓ connection outbox: offers publish")
+  )
+    fail(`nodrail apply: ${applied.stdout}${applied.stderr}`);
+  const again = nodrail("apply", "./desk", "--runtime", "claude-code", "--yes");
+  if (again.status !== 0 || !again.stdout.includes("Nothing to change."))
+    fail(`nodrail apply, again: ${again.stdout}${again.stderr}`);
+  const active = nodrail(
+    "plan",
+    "./desk",
+    "--runtime",
+    "claude-code",
+    "--require-active",
+  );
+  if (active.status !== 0 || !active.stdout.includes("Policy hook: configured"))
+    fail(`nodrail plan --require-active: ${active.stdout}${active.stderr}`);
+}
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const folder = mkdtempSync(join(tmpdir(), "nodrail-cli-pack-"));
   try {
@@ -206,6 +308,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     checkCli(folder);
     checkPolicy(folder);
     checkProject(folder);
+    checkExample(folder);
     console.log(
       "Package check passed: installed and used outside the monorepo.",
     );

@@ -72,6 +72,73 @@ export function setupGuard(list: string): SetupGuard {
   };
 }
 
+/** A connection's data: where it is, and the connection that keeps it. */
+export type DataPlace = { path: string; connection: string };
+
+/** The project folder and the data its connections keep in it. */
+export type DataGuard = { root: string; places: DataPlace[] };
+
+/**
+ * The data each connection keeps, from the connections file: its paths are
+ * from the project folder, the one that holds the file's own folder.
+ */
+export function dataGuard(
+  file: string,
+  calls: Record<string, { data?: string[] }>,
+): DataGuard {
+  const root = canonicalPath(dirname(dirname(resolve(file))));
+  return {
+    root,
+    places: Object.entries(calls).flatMap(([connection, { data }]) =>
+      (data ?? []).map((path) => ({
+        path: canonicalPath(resolve(root, path)),
+        connection,
+      })),
+    ),
+  };
+}
+
+/**
+ * The data a call reaches outside its connection, or null: a file tool on
+ * a path in it, reading or changing; a search from inside it; a shell
+ * command naming it, or a folder in the project holding it. A wildcard word
+ * counts by the folder before it: `cat memory/*` names `memory`.
+ */
+export function touchedData(
+  action: ActionDescriptor,
+  command: string | null,
+  cwd: string,
+  guard: DataGuard,
+): DataPlace | null {
+  const { root, places } = guard;
+  if (places.length === 0) return null;
+  const within = (path: string) =>
+    places.find(
+      (place) =>
+        isWithin(path, place.path) ||
+        (path !== root && isWithin(path, root) && isWithin(place.path, path)),
+    ) ?? null;
+  const paths =
+    action.tool === "files"
+      ? [...targets(action), action.resource.id]
+      : action.tool === "shell" && command
+        ? words(command).map((word) =>
+            wordPath(word.replace(/[*?[{].*$/, ""), cwd),
+          )
+        : [];
+  for (const path of paths) {
+    const place = within(path);
+    if (place) return place;
+  }
+  return null;
+}
+
+const words = (command: string) =>
+  command.split(/[\s;|&<>()`'"=:$]+/).filter(Boolean);
+
+const wordPath = (word: string, cwd: string) =>
+  canonicalPath(resolve(cwd, word.replace(/^~(?=$|\/)/, homedir())));
+
 const NODRAIL_PROGRAMS = new Set([
   "nodrail",
   "nodrail-policy",
@@ -92,16 +159,13 @@ export function touchedSetup(
   cwd: string,
   guard: SetupGuard,
 ): string | null {
-  const words = command.split(/[\s;|&<>()`'"=:$]+/).filter(Boolean);
-  for (const word of words) {
+  for (const word of words(command)) {
     if (
       NODRAIL_PROGRAMS.has(basename(word)) ||
       /@nodrail\/(?:cli|policy-engine)/.test(word)
     )
       return word;
-    const path = canonicalPath(
-      resolve(cwd, word.replace(/^~(?=$|\/)/, homedir())),
-    );
+    const path = wordPath(word, cwd);
     for (const protectedPath of guard.paths) {
       if (isWithin(path, protectedPath)) return word;
       // A folder holding a setup path, inside the project: rm -r resources.

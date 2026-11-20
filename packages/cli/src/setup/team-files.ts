@@ -1,6 +1,12 @@
 import { lstatSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import type { ProjectSetup, SetupAgent } from "@nodrail/policy-engine/yaml";
+import { connectionsFile, telemetrySettings } from "./connections.ts";
+import {
+  COPILOT_PLACES,
+  SETUP_PLACES,
+  type ProjectSetup,
+  type SetupAgent,
+} from "@nodrail/policy-engine/yaml";
 
 /** Where the effective policy goes, for the hook to read. */
 export const EFFECTIVE_FILE = ".nodrail/effective.apf.yaml";
@@ -27,7 +33,6 @@ export function teamFiles(input: {
   inputs: string[];
   skillsFolder: string;
   /** The host's own folders, where its agent files and hooks live. */
-  hostPlaces: string[];
 }) {
   const { root, setup, effective, skillsFolder } = input;
   const team = setup.team!;
@@ -65,10 +70,25 @@ export function teamFiles(input: {
     },
     {
       path: PROTECT_LIST,
-      content: Buffer.from(protectList(input, members)),
+      content: Buffer.from(
+        protectList(
+          {
+            inputs: input.inputs,
+            connectionFiles: input.setup.connections.flatMap(
+              (each) => each.files,
+            ),
+            pluginFolders: input.setup.plugins.map((each) => each.folder),
+          },
+          members,
+        ),
+      ),
       why: "the setup's files, which the hook keeps from agents",
     },
   );
+  const connections = connectionsFile(input.setup);
+  if (connections) files.push(connections);
+  const telemetry = telemetrySettings(root, input.setup);
+  if (telemetry) files.push(telemetry);
   return {
     team,
     members,
@@ -82,20 +102,26 @@ export function teamFiles(input: {
 }
 
 /**
- * Every file the setup is made from, and the host's own folders: an agent
+ * Every file the setup is made from, and every host.s folders: an agent
  * that could change one could give itself another agent's powers at the next
  * apply. The hook refuses any file tool that would change them.
  */
 function protectList(
-  input: { inputs: string[]; hostPlaces: string[] },
+  input: {
+    inputs: string[];
+    connectionFiles: string[];
+    pluginFolders: string[];
+  },
   members: SetupAgent[],
 ) {
-  const paths = new Set([
-    "nodrail.yaml",
-    "nodrail.lock.yaml",
-    ".nodrail",
-    ...input.hostPlaces,
+  // Every host's places, whichever this is: the same list for both hosts,
+  // and an agent on one can't plant the other's config.
+  const paths = new Set<string>([
+    ...SETUP_PLACES,
+    ...COPILOT_PLACES,
     ...input.inputs,
+    ...input.connectionFiles,
+    ...input.pluginFolders,
     ...members.flatMap((agent) => [
       ...(agent.instructions ? [agent.instructions] : []),
       ...agent.skills,
