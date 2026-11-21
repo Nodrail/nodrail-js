@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.5.2
+
+### Fixed
+
+- A git that didn't answer within 2 s was read as "not a repository", so
+  the run moved to `~/.nodrail` and lost its history: a gate could deny for
+  no reason, and runs from different projects could share a ledger. git now
+  has 5 s, and a timeout blocks the call with the reason ("git didn't answer
+  within 5 s") and leaves a step unrecorded; the ledger never moves.
+
 ## 0.5.1
 
 ### Fixed

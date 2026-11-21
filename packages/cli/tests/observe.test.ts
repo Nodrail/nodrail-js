@@ -30,6 +30,43 @@ function addUnmanaged(p: { write: (path: string, text: string) => void }) {
 
 const json = (text: string) => JSON.parse(text) as Record<string, any>;
 
+describe.skipIf(windows)("the run hooks", () => {
+  const gated = {
+    ...RESOURCES,
+    "policies/base.yaml": `${RESOURCES["policies/base.yaml"]}- gate: Publish after the lead passes it
+  id: led
+  agent: publisher
+  tool: files
+  operation: file.write
+  resource: { kind: file, match: any }
+  requires:
+    - { agent: lead, verdict: pass }
+  otherwise: deny
+`,
+  };
+
+  test("Claude Code: with gates, SubagentStart and SubagentStop run the policy hook; destroy takes them out", async () => {
+    const p = await locked(gated);
+    await p.run("apply", "--yes");
+    const hooks = json(p.read(".claude/settings.json")).hooks;
+    const policy = hooks.PreToolUse[0].hooks[0].command;
+    for (const event of ["SubagentStart", "SubagentStop"])
+      expect(hooks[event]).toEqual([
+        { hooks: [{ type: "command", command: policy }] },
+      ]);
+    expect((await p.run("destroy", "--yes")).code).toBe(0);
+    expect(existsSync(join(p.cwd, ".claude/settings.json"))).toBe(false);
+  });
+
+  test("Claude Code: without gates or budgets, no step hooks", async () => {
+    const p = await locked();
+    await p.run("apply", "--yes");
+    const hooks = json(p.read(".claude/settings.json")).hooks;
+    expect(hooks.SubagentStart).toBeUndefined();
+    expect(hooks.SubagentStop).toBeUndefined();
+  });
+});
+
 describe.skipIf(windows)("the session-start hook", () => {
   test("Claude Code: in settings by default; out with sessionStart: false, and on destroy", async () => {
     const p = await locked();

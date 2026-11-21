@@ -161,9 +161,21 @@ export function runHook(
 ): HookResult {
   const event = parseEvent(stdin) as Record<string, unknown> | null;
   const name = event?.hook_event_name;
-  if (event && (name === "SubagentStart" || name === "SubagentStop"))
-    return recordStep(event, where(event, env), options);
-  if (event && name === "PreToolUse")
-    return decideInRun(stdin, event, options, where(event, env));
-  return judgeToolCall(stdin, options).result;
+  const step = name === "SubagentStart" || name === "SubagentStop";
+  if (!event || (!step && name !== "PreToolUse"))
+    return judgeToolCall(stdin, options).result;
+  let place: Where;
+  try {
+    place = where(event, env);
+  } catch (error) {
+    // Where the run is kept is unknown: a call is blocked, and a step goes
+    // unrecorded, so a gate that needs it stays closed.
+    const reason = `Nodrail: ${(error as Error).message}`;
+    return step
+      ? { ...quiet, stderr: `${reason} The step isn't recorded.\n` }
+      : deny(`${reason} So this action is blocked.`);
+  }
+  return step
+    ? recordStep(event, place, options)
+    : decideInRun(stdin, event, options, place);
 }

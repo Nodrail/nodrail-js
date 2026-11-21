@@ -11,13 +11,24 @@ export type Environment = Record<string, string | undefined>;
 /** Run keys are at most this long, as runs take them. */
 const MAX_KEY = 200;
 
-/** Whatever git prints, or "" when it fails or isn't there. */
+/** How long one git command may take before the hook stops waiting. */
+const GIT_TIMEOUT_MS = 5000;
+
+/**
+ * Whatever git prints, or "" when it fails or isn't there. A git that
+ * doesn't answer in time throws: guessing "not a repository" then would
+ * keep the run somewhere else (~/.nodrail) and lose its history.
+ */
 export function git(cwd: string, args: string[]) {
   const result = spawnSync("git", args, {
     cwd,
     encoding: "utf8",
-    timeout: 2000,
+    timeout: GIT_TIMEOUT_MS,
   });
+  if ((result.error as NodeJS.ErrnoException | undefined)?.code === "ETIMEDOUT")
+    throw new Error(
+      `git didn't answer within ${GIT_TIMEOUT_MS / 1000} s, so the run's history can't be found.`,
+    );
   return result.status === 0 ? result.stdout.trim() : "";
 }
 

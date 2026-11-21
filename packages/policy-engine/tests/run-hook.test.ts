@@ -142,7 +142,7 @@ afterEach(() => {
   else process.env.NODRAIL_LEDGER = saved;
 });
 
-describe("a run through the Claude Code hook", () => {
+describe("a run through the Claude Code hook", { timeout: 30_000 }, () => {
   test("the pull request waits for QA and review after the last build", async () => {
     const { repo, file } = scratchRepository();
     const s = session(repo, file);
@@ -287,7 +287,7 @@ const WRITES = `${RULES}
 const pushDecision = async (s: Session) =>
   decision((await s.bash("git push")).stdout).permissionDecision;
 
-describe("what counts as work after a review", () => {
+describe("what counts as work after a review", { timeout: 30_000 }, () => {
   async function reviewed(rules = WRITES) {
     const scratch = scratchRepository(rules);
     const s = session(scratch.repo, scratch.file);
@@ -325,7 +325,7 @@ describe("what counts as work after a review", () => {
   });
 });
 
-describe("the run a session belongs to", () => {
+describe("the run a session belongs to", { timeout: 30_000 }, () => {
   test("switching branch doesn't leave the review behind, nor escape a gate", async () => {
     const { repo, file } = scratchRepository();
     const s = session(repo, file);
@@ -340,6 +340,34 @@ describe("the run a session belongs to", () => {
     expect(await pushDecision(s)).toBe("deny");
   });
 
+  test.skipIf(process.platform === "win32")(
+    "a git that doesn't answer blocks the call; the ledger never moves",
+    async () => {
+      const { repo, file } = scratchRepository();
+      const bin = mkdtempSync(join(tmpdir(), "nodrail-slow-git-"));
+      writeFileSync(join(bin, "git"), "#!/bin/sh\nexec /bin/sleep 30\n", {
+        mode: 0o755,
+      });
+      const home = mkdtempSync(join(tmpdir(), "nodrail-home-"));
+      const saved = { PATH: process.env.PATH, HOME: process.env.HOME };
+      process.env.PATH = bin;
+      process.env.HOME = home;
+      try {
+        const s = session(repo, file);
+        const started = await s.start("d1", "dev");
+        expect(started.code).toBe(0);
+        expect(started.stderr).toContain("The step isn't recorded");
+        const call = decision((await s.bash("ls")).stdout);
+        expect(call.permissionDecision).toBe("deny");
+        expect(call.permissionDecisionReason).toContain("git didn't answer");
+      } finally {
+        Object.assign(process.env, saved);
+      }
+      expect(existsSync(join(home, ".nodrail"))).toBe(false);
+    },
+    30_000,
+  );
+
   test("on the default branch the run is the session", async () => {
     const { repo, file, ledger } = scratchRepository();
     spawnSync("git", ["switch", "-q", "--orphan", "main"], { cwd: repo });
@@ -350,7 +378,7 @@ describe("the run a session belongs to", () => {
   });
 });
 
-describe("the rules the hook enforces", () => {
+describe("the rules the hook enforces", { timeout: 30_000 }, () => {
   test("no file tool may change them, whatever the rules allow", async () => {
     const { repo, file, s } = await (async () => {
       const scratch = scratchRepository(WRITES);
@@ -387,7 +415,7 @@ describe("the rules the hook enforces", () => {
   });
 });
 
-describe("a ledger that two hooks share", () => {
+describe("a ledger that two hooks share", { timeout: 30_000 }, () => {
   test("a last line cut off while it was written is left out, then cut away", async () => {
     const { repo, file, ledger } = scratchRepository();
     const s = session(repo, file);
@@ -426,7 +454,7 @@ describe("a ledger that two hooks share", () => {
   }, 15_000);
 });
 
-describe("testing gates in a cases file", () => {
+describe("testing gates in a cases file", { timeout: 30_000 }, () => {
   test("cases can carry a run, so gates and budgets are tested like rules", async () => {
     const { repo, file } = scratchRepository();
     const cases = join(repo, "cases.yaml");

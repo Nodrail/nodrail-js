@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.2
+
+### Fixed
+
+- With the engine's change, a git that doesn't answer in time blocks the
+  call ("git didn't answer within 5 s"), since a budget couldn't count it
+  without its run; a step event is left unrecorded.
+
 ## 0.5.1
 
 Released with `@nodrail/policy-engine` 0.5.1, which it uses: the hook it
