@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.3.2
+
+Uses `@nodrail/policy-engine` 0.5.2: a git that doesn't answer in time
+blocks the call instead of moving the run ledger.
+
+### Fixed
+
+- Run gates never opened on Claude Code: `apply` didn't register the policy
+  hook on `SubagentStart` and `SubagentStop`, so no step was recorded and
+  every gate with `requires:` stayed unmet (it failed closed). With gates or
+  budgets in the policy, `apply` now adds both; `destroy` takes them out.
+  Codex has no such events, so a gate still denies there: see
+  `docs/compatibility.md`.
+
 ## 0.3.1
 
 Uses `@nodrail/policy-engine` 0.5.1: a machine id that can't be kept no

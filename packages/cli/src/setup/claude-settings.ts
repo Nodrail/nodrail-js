@@ -5,6 +5,7 @@ import {
   isNodrailHook,
   MCP_FILE,
   SETTINGS_FILE,
+  STEP_EVENTS,
   type DesiredSettings,
 } from "./claude-code.ts";
 import type { HostState } from "./state.ts";
@@ -55,10 +56,7 @@ function settingsStep(
   const value: Record<string, unknown> = {
     ...current,
     agent: want.agent,
-    hooks: withSessionStart(
-      { ...hooks, PreToolUse: [...withoutOurs(groups), want.hook] },
-      want,
-    ),
+    hooks: ourHooks(hooks, groups, want),
   };
   const enabled = mergedNames(
     current.enabledMcpjsonServers,
@@ -82,17 +80,31 @@ function settingsStep(
   return step(path, why, read, value);
 }
 
-/** SessionStart with nodrail's observation set, or taken out; dropped once empty. */
-function withSessionStart(
+/** Settings' hooks with nodrail's set: the policy hook, observation, steps. */
+function ourHooks(
   hooks: Record<string, unknown>,
+  preToolUse: unknown[],
   want: DesiredSettings,
 ) {
-  const had = Array.isArray(hooks.SessionStart)
-    ? (hooks.SessionStart as unknown[])
-    : [];
-  const groups = [...withoutOurs(had), ...(want.observe ? [want.observe] : [])];
-  const { SessionStart: _, ...rest } = hooks;
-  return groups.length > 0 ? { ...rest, SessionStart: groups } : rest;
+  let all: Record<string, unknown> = {
+    ...hooks,
+    PreToolUse: [...withoutOurs(preToolUse), want.hook],
+  };
+  all = withOurs(all, "SessionStart", want.observe);
+  for (const event of STEP_EVENTS) all = withOurs(all, event, want.steps);
+  return all;
+}
+
+/** An event's hooks with nodrail's group set, or taken out; dropped once empty. */
+function withOurs(
+  hooks: Record<string, unknown>,
+  event: string,
+  group: unknown,
+): Record<string, unknown> {
+  const had = Array.isArray(hooks[event]) ? (hooks[event] as unknown[]) : [];
+  const groups = [...withoutOurs(had), ...(group ? [group] : [])];
+  const { [event]: _, ...rest } = hooks;
+  return groups.length > 0 ? { ...rest, [event]: groups } : rest;
 }
 
 /**
@@ -301,7 +313,7 @@ function undoHooks(value: Record<string, unknown>) {
   if (hooks === null || typeof hooks !== "object" || Array.isArray(hooks))
     return;
   const rest = { ...(hooks as Record<string, unknown>) };
-  for (const event of ["PreToolUse", "SessionStart"]) {
+  for (const event of ["PreToolUse", "SessionStart", ...STEP_EVENTS]) {
     const groups = Array.isArray(rest[event])
       ? withoutOurs(rest[event] as unknown[])
       : null;

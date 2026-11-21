@@ -1,6 +1,10 @@
 import { claudeMarketplace, claudePluginSettings } from "./plugins.ts";
 import { stringify } from "yaml";
-import type { ProjectSetup, SetupAgent } from "@nodrail/policy-engine/yaml";
+import {
+  compilePolicies,
+  type ProjectSetup,
+  type SetupAgent,
+} from "@nodrail/policy-engine/yaml";
 import { hookReads, mcpServerEntries } from "./connections.ts";
 import {
   byPath,
@@ -30,10 +34,26 @@ export type DesiredSettings = {
   };
   /** The session-start hook that records an observation, unless turned off. */
   observe: HookGroup | null;
+  /**
+   * The same policy hook on SubagentStart and SubagentStop, which record a
+   * run's steps: only when the policy has gates or budgets, which need them.
+   */
+  steps: HookGroup | null;
 };
 type HookGroup = {
   matcher?: string;
   hooks: { type: "command"; command: string; onFailure?: "block" }[];
+};
+
+/** Hook events nodrail sets in Claude Code's settings, besides PreToolUse. */
+export const STEP_EVENTS = ["SubagentStart", "SubagentStop"] as const;
+
+/** Whether the effective policy has gates or budgets: a version 2 document. */
+const usesRuns = (effective: string) => {
+  const compiled = compilePolicies([
+    { name: "effective.apf.yaml", text: effective },
+  ]);
+  return compiled.ok && compiled.document.version === 2;
 };
 
 /** How nodrail's own hook command starts, to find it among others. */
@@ -109,6 +129,9 @@ export function claudeCodeSetup(input: {
         matcher: "*",
         hooks: [{ type: "command", command, onFailure: "block" }],
       },
+      steps: usesRuns(input.effective)
+        ? { hooks: [{ type: "command", command }] }
+        : null,
       // Records what is set up at each session start; never blocks one.
       observe: input.setup.observe.sessionStart
         ? {

@@ -34,7 +34,7 @@ export {
   type HookResult,
 } from "@nodrail/policy-engine/actions";
 
-export const HOOK_VERSION = "0.5.1";
+export const HOOK_VERSION = "0.5.2";
 
 /**
  * Longer than the wait for a person, and short enough that withdrawing the
@@ -195,13 +195,22 @@ async function beforeTool(
     return deny(
       "Nodrail: this call could not be described for review, so it is blocked.",
     );
+  let run: RunRef | undefined;
+  try {
+    run = runOf(event, env);
+  } catch (error) {
+    // Without its run, a budget couldn't count this call: blocked instead.
+    return deny(
+      `Nodrail: ${(error as Error).message} So this action is blocked.`,
+    );
+  }
 
   const decision = await decideInTime(
     (signal) =>
       authorize(client, descriptor, key, {
         waitMs: waitMsFrom(env),
         sleep: deps.sleep,
-        run: runOf(event, env),
+        run,
         signal,
       }),
     deps.deadlineMs ?? HOOK_DEADLINE_MS,
@@ -262,7 +271,13 @@ async function onStep(
   deps: HookDeps,
 ): Promise<HookResult> {
   const client = clientFrom(env, deps);
-  const run = runOf(event, env);
+  let run: RunRef | undefined;
+  try {
+    run = runOf(event, env);
+  } catch {
+    // Unrecorded, the step has no verdict, and a gate that needs it stays closed.
+    return allowQuietly;
+  }
   const step = run?.step;
   if (!client || !run || !step) return allowQuietly;
   const body: StepEvent = { run: { key: run.key }, step, event: "started" };
