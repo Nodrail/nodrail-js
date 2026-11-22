@@ -18,7 +18,7 @@ import {
   windows,
 } from "./support/setup-project.ts";
 
-const api = "apiVersion: apf.nodrail.com/v1alpha1";
+const api = "apiVersion: nodrail.com/v1alpha1";
 
 const SHAPES = `shapes:
   result-base:
@@ -97,10 +97,7 @@ const COPILOT_ONLY = {
 describe("receipts in the effective policy", () => {
   test("the contracts entry carries each agent's receipt and brief, and only the shapes they need", async () => {
     const p = await locked(FILES);
-    const text = fileOf(
-      planFor(p, "claude-code"),
-      ".nodrail/effective.apf.yaml",
-    );
+    const text = fileOf(planFor(p, "claude-code"), ".nodrail/effective.yaml");
     expect(text).toContain("# ── nodrail.yaml (contracts)\n");
     const items = parse(text) as Record<string, unknown>[];
     expect(items[0]).toEqual({ required_engine_version: 4 });
@@ -225,7 +222,7 @@ describe("receipts in the effective policy", () => {
     const p = await locked({ ...RESOURCES, "nodrail.yaml": shapesOnly });
     const plain = await locked();
     const effective = (q: typeof p) =>
-      fileOf(planFor(q, "claude-code"), ".nodrail/effective.apf.yaml");
+      fileOf(planFor(q, "claude-code"), ".nodrail/effective.yaml");
     expect(effective(p)).toBe(effective(plain));
     // The object form of spec.brief travels as written: the hook reads a
     // header brief with its aliases.
@@ -273,7 +270,7 @@ describe.skipIf(windows)("the hook enforces the receipt", () => {
     expect(
       (await p.run("apply", "--yes", "--runtime", "claude-code")).code,
     ).toBe(0);
-    const policy = join(p.cwd, ".nodrail/effective.apf.yaml");
+    const policy = join(p.cwd, ".nodrail/effective.yaml");
     const event = async (body: object) => {
       const { out } = await p.runWith(
         { stdin: JSON.stringify({ session_id: session, cwd: p.cwd, ...body }) },

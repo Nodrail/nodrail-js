@@ -15,6 +15,8 @@ import { fileURLToPath } from "node:url";
 const here = dirname(fileURLToPath(import.meta.url));
 const cli = resolve(here, "..");
 const engine = resolve(cli, "../policy-engine");
+// The connected hook (`nodrail connect hook`) runs the client's hook in-process.
+const client = resolve(cli, "../client");
 const { version: expected } = JSON.parse(
   readFileSync(join(cli, "package.json"), "utf8"),
 );
@@ -92,7 +94,7 @@ function checkCli(folder) {
     env,
     shell,
   });
-  if (help.status !== 0 || !help.stdout.includes("nodrail approvals"))
+  if (help.status !== 0 || !help.stdout.includes("plan [folder]"))
     fail(`nodrail --help: ${help.stdout}${help.stderr}`);
   const unauthenticated = spawnSync(bin, ["whoami"], {
     cwd: folder,
@@ -168,7 +170,7 @@ function checkPolicy(folder) {
 
 /**
  * The catalog ships in the package: a clean project adds the official module
- * offline, gives its repository, locks and exports one APF file.
+ * offline, gives its repository, locks and exports one rules file.
  */
 function checkProject(folder) {
   const project = join(folder, "project");
@@ -301,10 +303,33 @@ function checkExampleSetup(folder, bin) {
     fail(`nodrail plan --require-active: ${active.stdout}${active.stderr}`);
 }
 
+/**
+ * The connected hook loads from the installed packages, and without its
+ * files blocks a tool call (2) but never a step (0).
+ */
+function checkConnectHook(folder) {
+  const bin = join("node_modules", ".bin", "nodrail");
+  const env = { PATH: process.env.PATH, HOME: folder };
+  const hook = (event) =>
+    spawnSync(bin, ["connect", "hook"], {
+      cwd: folder,
+      env,
+      input: JSON.stringify({ hook_event_name: event }),
+      encoding: "utf8",
+    });
+  const call = hook("PreToolUse");
+  if (call.status !== 2 || !call.stderr.includes("isn't set up whole"))
+    fail(`nodrail connect hook (call): ${call.status} ${call.stderr}`);
+  const step = hook("SubagentStart");
+  if (step.status !== 0)
+    fail(`nodrail connect hook (step): ${step.status} ${step.stderr}`);
+}
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const folder = mkdtempSync(join(tmpdir(), "nodrail-cli-pack-"));
   try {
-    packAndInstall(folder, [engine, cli]);
+    packAndInstall(folder, [engine, client, cli]);
+    checkConnectHook(folder);
     checkCli(folder);
     checkPolicy(folder);
     checkProject(folder);

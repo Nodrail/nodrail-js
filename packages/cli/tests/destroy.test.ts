@@ -97,12 +97,10 @@ describe.skipIf(windows)("nodrail destroy", () => {
 
     const claude = await p.run("destroy", "--runtime", "claude-code", "--yes");
     expect(claude.code).toBe(0);
-    expect(claude.out).toMatch(
-      /= \.nodrail\/effective\.apf\.yaml\s+kept for Codex/,
-    );
+    expect(claude.out).toMatch(/= \.nodrail\/effective\.yaml\s+kept for Codex/);
     expect(claude.out).toContain("Codex stays set up.");
     expect(existsSync(join(p.cwd, ".claude"))).toBe(false);
-    expect(existsSync(join(p.cwd, ".nodrail/effective.apf.yaml"))).toBe(true);
+    expect(existsSync(join(p.cwd, ".nodrail/effective.yaml"))).toBe(true);
     expect(
       Object.keys(JSON.parse(p.read(".nodrail/setup-state.json")).hosts),
     ).toEqual(["codex"]);

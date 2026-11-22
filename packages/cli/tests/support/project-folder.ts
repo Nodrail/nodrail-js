@@ -10,6 +10,8 @@ import { fakeIo } from "./fake-io.ts";
 export function projectFolder(
   files: Record<string, string> = {},
   env?: Record<string, string>,
+  /** A stand-in Nodrail, for a test that means to reach one. */
+  network?: typeof globalThis.fetch,
 ) {
   const cwd = mkdtempSync(join(tmpdir(), "nodrail-project-"));
   // The person's home, where nodrail stages writes, the same for every run.
@@ -19,9 +21,11 @@ export function projectFolder(
     writeFileSync(join(cwd, path), text);
   };
   for (const [path, text] of Object.entries(files)) write(path, text);
-  const fetch = (() => {
-    throw new Error("network used");
-  }) as unknown as typeof globalThis.fetch;
+  const fetch =
+    network ??
+    ((() => {
+      throw new Error("network used");
+    }) as unknown as typeof globalThis.fetch);
   const read = (path: string) => readFileSync(join(cwd, path), "utf8");
   /** `nodrail` run in another folder, as `nodrail plan ./project` is. */
   const runFrom = async (from: string, ...argv: string[]) => {

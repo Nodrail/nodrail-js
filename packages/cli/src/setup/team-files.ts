@@ -15,7 +15,7 @@ import {
 } from "@nodrail/policy-engine/yaml";
 
 /** Where the effective policy goes, for the hook to read. */
-export const EFFECTIVE_FILE = ".nodrail/effective.apf.yaml";
+export const EFFECTIVE_FILE = ".nodrail/effective.yaml";
 
 /** The files the hook keeps from being changed, from the project folder. */
 export const PROTECT_LIST = ".nodrail/protected.txt";

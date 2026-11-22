@@ -33,35 +33,26 @@ type Entry = PolicyRule | PolicyGate;
 
 /**
  * An entry now covers actions it did not. Deny always wins, so more deny is
- * tighter; a review can turn an allow into a question or a block into one.
+ * tighter, and more allow is looser.
  */
 export function gained(effect: Effect, text: string, details?: string[]) {
   const impact = { allow: "loosened", deny: "tightened" } as const;
-  return { impact: impact[effect as "allow"] ?? "changed", text, details };
+  return { impact: impact[effect], text, details };
 }
 
 /** An entry stops covering actions. Losing a deny is the dangerous one. */
 export function lost(effect: Effect, text: string, details?: string[]): Aspect {
   if (effect === "deny")
     return { impact: "loosened", warning: true, text, details };
-  return {
-    impact: effect === "allow" ? "tightened" : "changed",
-    text,
-    details,
-  };
+  return { impact: "tightened", text, details };
 }
 
-const strength = { deny: 0, require_approval: 1, allow: 2 } as const;
-const effectName = (effect: Effect) => effect.replace("_", " ");
-
-/** The same actions decided more or less strictly than before. */
-function effectAspect(before: Effect, after: Effect, gate: boolean): Aspect[] {
+/** The same actions, now allowed where they were denied or the other way. */
+function effectAspect(before: Effect, after: Effect): Aspect[] {
   if (before === after) return [];
-  const text = `${gate ? "otherwise " : "effect "}${effectName(before)} → ${effectName(after)}`;
-  if (strength[after] < strength[before])
-    return [{ impact: "tightened", text }];
-  // A deny or a gate that now only asks lets through what a person allows.
-  return [{ impact: "loosened", warning: before === "deny", text }];
+  const text = `effect ${before} → ${after}`;
+  if (after === "deny") return [{ impact: "tightened", text }];
+  return [{ impact: "loosened", warning: true, text }];
 }
 
 const who = (name: string | null, everyone: string) => name ?? everyone;
@@ -156,7 +147,7 @@ function nameAspect(before: Entry, after: Entry): Aspect[] {
 /** Every aspect of a rule or gate kept under the same id that changed. */
 export function entryAspects(before: Entry, after: Entry, gate: boolean) {
   return [
-    ...effectAspect(before.effect, after.effect, gate),
+    ...effectAspect(before.effect, after.effect),
     ...matchAspect(before, after, gate),
     ...expiryAspect(before, after, gate),
     ...nameAspect(before, after),

@@ -3,9 +3,10 @@ name: "@nodrail/dependency-updates"
 version: 1.0.0
 description: >-
   A deps agent may change JavaScript lockfiles inside the project and refresh
-  them without running scripts. Changes to package.json, commits and pushes
-  wait for a person. It may open a draft pull request in your repository once
-  the checks pass on its latest change, and never merges or force-pushes.
+  them without running scripts, commit, and push its own branch. It may never
+  change package.json, push to main or master, merge or force-push. It may
+  open a draft pull request in your repository once the checks pass on its
+  latest change.
 parameters:
   repository:
     type: repository

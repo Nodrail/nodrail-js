@@ -43,8 +43,6 @@ export const LIMITS = {
   forText: 500,
   /** Conditions in one `where`. */
   conditions: 20,
-  /** Routes of one approval form. */
-  routes: 20,
   /** Columns, filters or groups of one view. */
   columns: 20,
   /** Named sections a file contract requires. */
@@ -65,7 +63,6 @@ export const PAYLOAD_BYTES = {
   /** A file contract's default; `max_bytes` may lower it or raise it to fileMax. */
   file: 64 * 1024,
   fileMax: 256 * 1024,
-  approval: 16 * 1024,
   inventory: 4 * 1024,
 } as const;
 

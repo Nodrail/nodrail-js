@@ -42,4 +42,4 @@ policy:
     unit: usd_cents
     limit: 50000
     per: run
-    otherwise: require_approval
+    otherwise: deny

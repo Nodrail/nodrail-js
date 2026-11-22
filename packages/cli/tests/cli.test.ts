@@ -8,13 +8,7 @@ import {
 import { describe, expect, test } from "vitest";
 import { configPath } from "../src/config.ts";
 import { VERSION } from "../src/cli.ts";
-import {
-  APPROVAL_ID,
-  EVENT_ID,
-  RUN_ID,
-  TOKEN,
-  fakeApi,
-} from "./support/fake-api.ts";
+import { EVENT_ID, RUN_ID, TOKEN, fakeApi } from "./support/fake-api.ts";
 import { fakeIo } from "./support/fake-io.ts";
 
 const withToken = (api = fakeApi(), extra: Parameters<typeof fakeIo>[0] = {}) =>
@@ -34,15 +28,21 @@ describe("basics", () => {
   test("help, and usage errors exit 2", async () => {
     const t = fakeIo();
     expect(await t.run("--help")).toBe(0);
-    expect(t.stdout()).toContain("nodrail approvals");
-    expect(t.stdout()).toContain("not the APR- reference");
+    expect(t.stdout()).toContain("nodrail <command>");
+    // Nothing waits for a person, so there is nothing to approve.
+    expect(t.stdout()).not.toMatch(/approv|reject/i);
+    for (const removed of ["approvals", "approve", "reject"]) {
+      const gone = fakeIo();
+      expect(await gone.run(removed)).toBe(2);
+      expect(gone.stderr()).toContain(`Unknown command "${removed}"`);
+    }
     expect(await fakeIo().run()).toBe(2);
     const unknown = fakeIo();
     expect(await unknown.run("frobnicate")).toBe(2);
     expect(unknown.stderr()).toContain('Unknown command "frobnicate"');
     const wrongFlag = fakeIo();
-    expect(await wrongFlag.run("whoami", "--watch")).toBe(2);
-    expect(wrongFlag.stderr()).toContain("doesn't take --watch");
+    expect(await wrongFlag.run("whoami", "--days", "7")).toBe(2);
+    expect(wrongFlag.stderr()).toContain("doesn't take --days");
     expect(await fakeIo().run("whoami", "--nope")).toBe(2);
     expect(await fakeIo().run("whoami", "extra")).toBe(2);
   });
@@ -164,116 +164,13 @@ describe("login", () => {
 
 describe("whoami", () => {
   test("text and json", async () => {
-    const t = withToken(fakeApi({ scopes: ["read", "decide"] }));
+    const t = withToken(fakeApi({ scopes: ["read", "rules:write"] }));
     expect(await t.run("whoami")).toBe(0);
-    expect(t.stdout()).toContain("Can now      read, decide");
+    expect(t.stdout()).toContain("Can now      read, rules:write");
     expect(t.stdout()).toContain("development (default)");
     const json = withToken();
     await json.run("whoami", "--json");
     expect(JSON.parse(json.stdout()).workspace.slug).toBe("acme");
-  });
-});
-
-describe("approvals", () => {
-  test("lists, filters and prints json", async () => {
-    const api = fakeApi();
-    const t = withToken(api);
-    expect(await t.run("approvals", "--agent", "support-bot")).toBe(0);
-    expect(t.stdout()).toContain(APPROVAL_ID);
-    expect(t.stdout()).toContain("github.issues.delete");
-    expect(api.seen.at(-1)?.query).toEqual({ agent: "support-bot" });
-    const json = withToken();
-    await json.run("approvals", "--json");
-    expect(JSON.parse(json.stdout()).items[0].id).toBe(APPROVAL_ID);
-  });
-
-  test("--environment is sent on environment calls", async () => {
-    const api = fakeApi();
-    await withToken(api).run("approvals", "-e", "production");
-    expect(api.seen.at(-1)?.query).toEqual({ environment: "production" });
-  });
-
-  test("--watch polls until stopped", async () => {
-    const api = fakeApi();
-    const t = withToken(api, { polls: 3 });
-    expect(await t.run("approvals", "--watch")).toBe(0);
-    expect(api.seen.filter((call) => call.path === "/approvals")).toHaveLength(
-      3,
-    );
-    expect(t.clears()).toBe(3);
-    expect(t.stdout()).toContain("Ctrl-C to stop");
-  });
-});
-
-describe("deciding", () => {
-  const decider = () =>
-    fakeApi({ scopes: ["read", "decide"], role: "approver" });
-
-  test("shows the request, asks, and sends the digest it showed", async () => {
-    const api = decider();
-    const t = withToken(api, { interactive: true, answers: ["y"] });
-    expect(await t.run("approve", APPROVAL_ID)).toBe(0);
-    expect(t.stdout()).toContain(
-      "Agent        support-bot on support-bot-prod",
-    );
-    expect(t.stdout()).toContain("Action       github.issues.delete");
-    expect(t.stdout()).toContain('"issue": 482');
-    expect(t.asked[0]?.question).toContain("Approve this request once?");
-    expect(api.seen.at(-1)).toMatchObject({
-      method: "POST",
-      path: `/approvals/${APPROVAL_ID}/decision`,
-      body: { decision: "allow_once", expected_action_digest: "sha256:abc" },
-    });
-    expect(t.stdout()).toContain("Approved once: APR-6D1C2F0A.");
-  });
-
-  test("anything but yes decides nothing", async () => {
-    const api = decider();
-    const t = withToken(api, { interactive: true, answers: ["n"] });
-    expect(await t.run("reject", APPROVAL_ID)).toBe(1);
-    expect(t.stderr()).toContain("Nothing was decided");
-    expect(api.seen.some((call) => call.method === "POST")).toBe(false);
-  });
-
-  test("refuses without a terminal unless --yes", async () => {
-    const api = decider();
-    expect(await withToken(api).run("approve", APPROVAL_ID)).toBe(2);
-    expect(api.seen).toHaveLength(0);
-    const t = withToken(api);
-    expect(await t.run("reject", APPROVAL_ID, "--yes", "--json")).toBe(0);
-    expect(JSON.parse(t.stdout()).state).toBe("denied");
-    // With --json the request shown goes to stderr, so stdout parses.
-    expect(t.stderr()).toContain("Request      APR-6D1C2F0A");
-  });
-
-  test("takes a UUID, not a reference", async () => {
-    const t = withToken(decider(), { interactive: true });
-    expect(await t.run("approve", "APR-6D1C2F0A")).toBe(2);
-    expect(t.stderr()).toContain("UUID");
-    expect(await withToken().run("approve")).toBe(2);
-  });
-
-  test("a token without the scope is told so, plainly", async () => {
-    const t = withToken(fakeApi({ scopes: ["read"] }));
-    expect(await t.run("approve", APPROVAL_ID, "--yes")).toBe(1);
-    expect(t.stderr()).toContain("doesn't have the scope");
-    expect(t.stderr()).toContain("INSUFFICIENT_SCOPE");
-  });
-
-  test("a role that can't decide is FORBIDDEN", async () => {
-    const t = withToken(
-      fakeApi({ scopes: ["read", "decide"], role: "viewer" }),
-    );
-    expect(await t.run("approve", APPROVAL_ID, "--yes")).toBe(1);
-    expect(t.stderr()).toContain("Your role");
-  });
-
-  test("a request already decided is not decided again", async () => {
-    const api = decider();
-    api.approval.state = "denied";
-    const t = withToken(api);
-    expect(await t.run("approve", APPROVAL_ID, "--yes")).toBe(1);
-    expect(t.stderr()).toContain("This request is denied");
   });
 });
 
@@ -320,9 +217,10 @@ describe("reading", () => {
     expect(t.stdout()).toContain("github.pulls.create acme/app · ready");
     expect(await t.run("insights", "--days", "7")).toBe(0);
     expect(api.seen.at(-1)?.query).toEqual({ days: "7" });
-    expect(t.stdout()).toContain("Median time to decide 42s");
-    expect(t.stdout()).toContain("approved 4×");
-    expect(await t.run("activity", "--kind", "x", "--watch")).toBe(2);
+    expect(t.stdout()).toContain(
+      "Actions 40: 28 allowed, 12 denied (5 because no rule covered them).",
+    );
+    expect(await t.run("activity", "--kind", "x", "--days", "7")).toBe(2);
   });
 
   test("an unknown run is NOT_FOUND", async () => {

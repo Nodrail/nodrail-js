@@ -2,7 +2,7 @@ import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { describe, expect, test } from "vitest";
-import { resolveConnection, waitMsFrom } from "../src/connection";
+import { resolveConnection } from "../src/connection";
 import { isSafeUrl } from "../src/index";
 import { describeToolCall, HOOK_VERSION, runHook } from "../src/hooks";
 import { SDK_VERSION } from "../src/sdk";
@@ -127,7 +127,6 @@ describe("the hook as Codex runs it", () => {
     ).toEqual({ key: "ENG-9", subject: null });
   });
 
-  // Cloud never answering leaves the moment for withdrawing to run out too.
   test(
     "answers before Codex's own time limit would let the tool run",
     {
@@ -145,23 +144,22 @@ describe("the hook as Codex runs it", () => {
   );
 
   test.each(["codex", "claude-code"] as const)(
-    "%s: at its own deadline, the request nobody decided is withdrawn",
+    "%s: a hold from an older server is denied at once, never waited for",
     async (agent) => {
       const server = fakeNodrail(() => "APPROVAL_PENDING");
       const result = await runHook(
         event("Bash", { command: "rm -rf build" }),
-        { ...env, NODRAIL_WAIT_SECONDS: "3600" },
+        env,
         {
           agent,
-          deadlineMs: 20,
           fetch: server.fetch,
-          sleep: () => new Promise((done) => setTimeout(done, 1)),
         },
       );
-      expect(reasonOf(result.stdout)).toContain("TIMED_OUT");
+      expect(reasonOf(result.stdout)).toContain("APPROVAL_PENDING");
+      expect(reasonOf(result.stdout)).toContain("denied");
       expect(
         server.requests.filter((request) => request.path.endsWith("/withdraw")),
-      ).toHaveLength(1);
+      ).toHaveLength(0);
     },
   );
 
@@ -267,15 +265,6 @@ describe("finding the connection", () => {
       null,
     );
   });
-
-  test.each([
-    [{}, 300_000],
-    [{ NODRAIL_WAIT_SECONDS: "0" }, 0],
-    [{ NODRAIL_WAIT_SECONDS: "junk" }, 0],
-    [{ NODRAIL_WAIT_SECONDS: "-5" }, 0],
-  ])("waiting with %j", (values, expected) => {
-    expect(waitMsFrom(values)).toBe(expected);
-  });
 });
 
 describe("the hook declarations", () => {
@@ -294,9 +283,11 @@ describe("the hook declarations", () => {
     expect(codexGovernedTools).not.toMatch(/\(\?[!=<]/);
   });
 
-  test("each outlasts the wait for a person", () => {
-    for (const hooks of [claudeCodeHooks({ command: "x" }), codexHooks("x")])
-      expect(hooks.PreToolUse[0]?.hooks[0]?.timeout).toBeGreaterThan(345);
+  test("each outlasts the hook's own deadline, and nothing waits longer", () => {
+    for (const hooks of [claudeCodeHooks({ command: "x" }), codexHooks("x")]) {
+      expect(hooks.PreToolUse[0]?.hooks[0]?.timeout).toBeGreaterThan(25);
+      expect(hooks.PreToolUse[0]?.hooks[0]?.timeout).toBeLessThanOrEqual(30);
+    }
   });
 
   test("Claude Code governs starting a subagent, and records its steps", () => {

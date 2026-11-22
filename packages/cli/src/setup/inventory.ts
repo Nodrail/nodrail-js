@@ -3,7 +3,7 @@ import { join } from "node:path";
 import type { Env } from "../config.ts";
 import { sha256 } from "../project/lockfile.ts";
 import {
-  HOOK_PREFIX,
+  isPolicyHook,
   isNodrailHook,
   MCP_FILE,
   OBSERVE_PREFIX,
@@ -11,7 +11,7 @@ import {
 } from "./claude-code.ts";
 import { missingHooks } from "./hook-drift.ts";
 import type { HookInfo } from "./codex.ts";
-import { readBytes } from "./plan.ts";
+import { readBytes } from "./steps.ts";
 import type { HostState, Runtime } from "./state.ts";
 
 /**
@@ -109,7 +109,7 @@ export function claudeSettingsDrift(root: string, entry: HostState): Drift[] {
   });
   const drift: Drift[] = [];
   const policyHooks = claudeHooks(settings).filter((hook) =>
-    hook.command.startsWith(HOOK_PREFIX),
+    isPolicyHook(hook.command),
   );
   if (policyHooks.length === 0)
     drift.push(changed(SETTINGS_FILE, "nodrail's policy hook is gone"));

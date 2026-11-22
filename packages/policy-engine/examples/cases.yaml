@@ -9,7 +9,7 @@
     }
   expect: allow
 
-- name: the team's added repository is reviewed
+- name: the team's added repository is never written
   call:
     {
       tool: github,
@@ -17,7 +17,7 @@
       kind: repository,
       resource: acme/billing,
     }
-  expect: require_approval
+  expect: deny
 
 - name: a repository outside the list has no rule
   call:
@@ -39,7 +39,7 @@
     }
   expect: deny
 
-- name: a large refund is reviewed
+- name: a large refund is denied
   call:
     {
       tool: stripe,
@@ -48,7 +48,7 @@
       resource: INV-1,
       params: { amount: 5000, currency: USD },
     }
-  expect: require_approval
+  expect: deny
 
 - name: this team turned off small refunds
   call:
@@ -81,7 +81,7 @@
   call: { command: git push --force origin main }
   expect: deny
 
-- name: writing to the repository's config needs a person
+- name: writing to the repository's CI config is denied
   call:
     {
       tool: files,
@@ -89,4 +89,4 @@
       kind: file,
       resource: /repo/.github/workflows/ci.yml,
     }
-  expect: require_approval
+  expect: deny

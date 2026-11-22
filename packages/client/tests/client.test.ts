@@ -37,10 +37,8 @@ type Reply = { status?: number; body: unknown } | (() => never);
 /** Answers each path in order, echoing the nonce the client generated. */
 function fakeFetch(replies: {
   submit?: Reply;
-  polls?: Reply[];
   permit?: Reply | ((nonce: string) => Reply);
 }) {
-  const polls = [...(replies.polls ?? [])];
   const send = vi.fn(async (url: string, init: RequestInit) => {
     let reply: Reply | undefined;
     if (url.endsWith("/permit")) {
@@ -51,7 +49,6 @@ function fakeFetch(replies: {
           ? (replies.permit as (nonce: string) => Reply)(nonce)
           : replies.permit;
     } else if (init.method === "POST") reply = replies.submit;
-    else reply = polls.shift();
     if (!reply) throw new Error("unexpected call");
     if (typeof reply === "function") return reply();
     return new Response(
@@ -78,12 +75,11 @@ const allow = (nonce: string, overrides: object = {}) => ({
   },
 });
 
-const run = (send: typeof fetch, waitMs = 0) =>
+const run = (send: typeof fetch) =>
   authorize(
     new NodrailClient({ url: "https://x", credential: "c", fetch: send }),
     descriptor,
     "key",
-    { waitMs, pollMs: 1, sleep: () => Promise.resolve() },
   );
 
 const blockedWith = (code: string) => ({ allowed: false, code });
@@ -93,22 +89,6 @@ describe("the one way through", () => {
     await expect(
       run(fakeFetch({ submit: { body: status() }, permit: allow })),
     ).resolves.toEqual({ allowed: true, actionId: ACTION, permitId: "p1" });
-  });
-
-  test("a person's approval arriving while waiting is honoured", async () => {
-    await expect(
-      run(
-        fakeFetch({
-          submit: { body: status({ code: "APPROVAL_PENDING" }) },
-          polls: [
-            { body: status({ code: "APPROVAL_PENDING" }) },
-            { body: status() },
-          ],
-          permit: allow,
-        }),
-        1000,
-      ),
-    ).resolves.toMatchObject({ allowed: true });
   });
 });
 
@@ -126,15 +106,18 @@ describe("everything else blocks", () => {
     },
   );
 
-  test("waiting runs out", async () => {
-    await expect(
-      run(
-        fakeFetch({ submit: { body: status({ code: "APPROVAL_PENDING" }) } }),
-      ),
-    ).resolves.toMatchObject({
+  test("a hold from an older server is a deny at once, never waited for", async () => {
+    const send = fakeFetch({
+      submit: {
+        body: status({ code: "APPROVAL_PENDING" as ActionStatus["code"] }),
+      },
+    });
+    await expect(run(send)).resolves.toMatchObject({
       ...blockedWith("APPROVAL_PENDING"),
       reference: "APR-AAAAAAAA",
     });
+    // Submitted once; nothing polled, nothing withdrawn.
+    expect(vi.mocked(send).mock.calls).toHaveLength(1);
   });
 
   test.each([
@@ -254,108 +237,6 @@ describe("everything else blocks", () => {
   });
 });
 
-/** A request nobody decides: every check finds it still waiting. */
-function undecided(withdraw: () => Promise<Response>) {
-  const withdrawn: unknown[] = [];
-  const send = vi.fn(async (url: string, init: RequestInit) => {
-    if (url.endsWith(`/actions/${ACTION}/withdraw`)) {
-      withdrawn.push(JSON.parse(init.body as string));
-      return withdraw();
-    }
-    return new Response(JSON.stringify(status({ code: "APPROVAL_PENDING" })));
-  });
-  return { send: send as unknown as typeof fetch, withdrawn };
-}
-
-const closed = () =>
-  Promise.resolve(
-    new Response(
-      JSON.stringify(status({ code: "INVALIDATED", reason: "withdrawn" })),
-    ),
-  );
-
-const waitFor = (
-  send: typeof fetch,
-  options: { waitMs: number; signal?: AbortSignal },
-) =>
-  authorize(
-    new NodrailClient({ url: "https://x", credential: "c", fetch: send }),
-    descriptor,
-    "key",
-    {
-      ...options,
-      pollMs: 1,
-      sleep: () => new Promise((done) => setTimeout(done, 1)),
-    },
-  );
-
-const stillWaiting = {
-  ...blockedWith("APPROVAL_PENDING"),
-  reference: "APR-AAAAAAAA",
-};
-
-describe("giving up on a person", () => {
-  test("after waiting, takes the request back once", async () => {
-    const server = undecided(closed);
-    await expect(waitFor(server.send, { waitMs: 20 })).resolves.toEqual({
-      ...stillWaiting,
-      reason: null,
-    });
-    expect(server.withdrawn).toEqual([{}]);
-  });
-
-  test("when the caller stops waiting early, takes it back too", async () => {
-    const server = undecided(closed);
-    const stop = new AbortController();
-    setTimeout(() => stop.abort(), 10);
-    await expect(
-      waitFor(server.send, { waitMs: 60_000, signal: stop.signal }),
-    ).resolves.toMatchObject(stillWaiting);
-    expect(server.withdrawn).toHaveLength(1);
-  });
-
-  test("with waitMs 0 leaves it open for a person to decide later", async () => {
-    const server = undecided(closed);
-    await expect(waitFor(server.send, { waitMs: 0 })).resolves.toMatchObject(
-      stillWaiting,
-    );
-    expect(server.withdrawn).toEqual([]);
-  });
-
-  test.each([
-    ["is refused", () => Promise.resolve(new Response("{}", { status: 503 }))],
-    ["fails", () => Promise.reject(new TypeError("network"))],
-    [
-      "answers nonsense",
-      () => Promise.resolve(new Response(JSON.stringify({ code: "ALLOW" }))),
-    ],
-  ])("the same block when taking it back %s", async (_label, withdraw) => {
-    const server = undecided(withdraw);
-    await expect(waitFor(server.send, { waitMs: 20 })).resolves.toEqual({
-      ...stillWaiting,
-      reason: null,
-    });
-    expect(server.withdrawn).toHaveLength(1);
-  });
-
-  test("never waits long on taking it back", async () => {
-    const send = vi.fn(
-      (_url: string, init: RequestInit) =>
-        new Promise<Response>((_done, fail) =>
-          init.signal?.addEventListener("abort", () => fail(new Error("late"))),
-        ),
-    ) as unknown as typeof fetch;
-    const client = new NodrailClient({
-      url: "https://x",
-      credential: "c",
-      fetch: send,
-    });
-    const startedAt = Date.now();
-    await expect(client.withdraw(ACTION, { timeoutMs: 20 })).rejects.toThrow();
-    expect(Date.now() - startedAt).toBeLessThan(1000);
-  });
-});
-
 describe("digests", () => {
   test("ignore key order", () => {
     const one = { ...descriptor, params: { a: 1, b: [1, 2] } };
@@ -388,5 +269,92 @@ describe("digests", () => {
     ).toBe(
       "sha256:5c50c5a2706607519f1ca455cb5f178f6da6ecf8b5581df76ffbf18ebdb31480",
     );
+  });
+});
+
+describe("the live policy (R388)", () => {
+  test("is read with the credential, as the host's data plane does", async () => {
+    const live = {
+      policy_revision: 7,
+      published_at: "2026-11-22T10:00:00.000Z",
+      managed: null,
+      source: { digest: "a".repeat(64), text: "- rule: x\n" },
+    };
+    const send = vi.fn(
+      async () => new Response(JSON.stringify(live), { status: 200 }),
+    );
+    const client = new NodrailClient({
+      url: "https://nodrail.test",
+      credential: "ndr_c",
+      fetch: send as unknown as typeof fetch,
+    });
+    expect(await client.policy()).toEqual(live);
+    const [url, init] = send.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe("https://nodrail.test/api/v1/runtime/policy");
+    expect(init.method).toBe("GET");
+    expect(new Headers(init.headers).get("authorization")).toBe("Bearer ndr_c");
+  });
+
+  test("a refusal surfaces as the server's code", async () => {
+    const client = new NodrailClient({
+      url: "https://nodrail.test",
+      credential: "ndr_c",
+      fetch: (async () =>
+        new Response(JSON.stringify({ error: { code: "FORBIDDEN" } }), {
+          status: 403,
+        })) as unknown as typeof fetch,
+    });
+    await expect(client.policy()).rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
+});
+
+describe("host decisions (R388)", () => {
+  const decision = {
+    idempotency_key: "claude-code:abc",
+    tool: "files",
+    operation: "file.write",
+    resource: { kind: "file", id: "src/a.ts" },
+    params: {},
+    verdict: "allow" as const,
+    rule: { id: "edit-sources", name: "Edit sources" },
+    decided_at: "2026-11-22T10:00:00.000Z",
+    policy_digest: "a".repeat(64),
+    run: { key: "feat/a" },
+  };
+
+  test("are posted as one batch with the credential; each item answers", async () => {
+    const results = [
+      { key: "claude-code:abc", action_id: "row-1" },
+      { key: null, error: { code: "INVALID_INPUT" } },
+    ];
+    const send = vi.fn(async () => Response.json({ results }));
+    const client = new NodrailClient({
+      url: "https://nodrail.test",
+      credential: "ndr_c",
+      fetch: send as unknown as typeof fetch,
+    });
+    expect(await client.decisions([decision])).toEqual(results);
+    const [url, init] = send.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe("https://nodrail.test/api/v1/runtime/decisions");
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(init.body as string)).toEqual({ decisions: [decision] });
+    expect(new Headers(init.headers).get("authorization")).toBe("Bearer ndr_c");
+  });
+
+  test("an answer without results, or a refusal, blocks with its code", async () => {
+    const answering = (response: () => Response) =>
+      new NodrailClient({
+        url: "https://nodrail.test",
+        credential: "ndr_c",
+        fetch: (async () => response()) as unknown as typeof fetch,
+      });
+    await expect(
+      answering(() => Response.json({})).decisions([decision]),
+    ).rejects.toMatchObject({ code: "INVALID_RESPONSE" });
+    await expect(
+      answering(() =>
+        Response.json({ error: { code: "FORBIDDEN" } }, { status: 403 }),
+      ).decisions([decision]),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
   });
 });

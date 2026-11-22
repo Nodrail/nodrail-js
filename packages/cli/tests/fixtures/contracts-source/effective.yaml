@@ -49,7 +49,7 @@
     - { agent: publisher, verdict: ship }
   otherwise: deny
 
-# ── team/release.apf.yaml
+# ── team/release.yaml
 # What Team release means: who may start whom, which connections
 # each agent may use, and the setup kept out of every agent's reach. Written by nodrail from resources/team.yaml.
 - required_engine_version: 1

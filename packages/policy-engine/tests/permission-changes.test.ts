@@ -56,11 +56,6 @@ describe("permissionChanges", () => {
   operation: file.read
   resource: { kind: path, match: any }
   effect: allow
-- rule: Ask for refunds
-  tool: stripe
-  operation: refunds.create
-  resource: { kind: invoice, match: any }
-  effect: require_approval
 - rule: Never drop tables
   command: dropdb
   effect: deny
@@ -82,12 +77,6 @@ describe("permissionChanges", () => {
         warning: false,
         id: "never-drop-tables",
         summary: "added (deny)",
-      },
-      {
-        impact: "granted",
-        warning: false,
-        id: "ask-for-refunds",
-        summary: "added (require approval)",
       },
       {
         impact: "tightened",
@@ -199,17 +188,16 @@ describe("permissionChanges", () => {
     ]);
   });
 
-  test("an allow turned into a deny or a review is tightened", () => {
+  test("an allow turned into a deny is tightened", () => {
     const allow = refunds(
       "  resource: { kind: invoice, match: any }\n  effect: allow",
     );
-    for (const effect of ["deny", "require_approval"])
-      expect(
-        diff(allow, allow.replace("effect: allow", `effect: ${effect}`))[0],
-      ).toMatchObject({
-        impact: "tightened",
-        warning: false,
-      });
+    expect(
+      diff(allow, allow.replace("effect: allow", "effect: deny"))[0],
+    ).toMatchObject({
+      impact: "tightened",
+      warning: false,
+    });
   });
 
   test.each([
@@ -309,29 +297,6 @@ describe("permissionChanges", () => {
     ).toMatchObject({ impact: "needs_review", warning: true });
   });
 
-  test("a removed review is looser only where an allow covers all of it", () => {
-    const review = `- rule: Ask
-  id: ask
-  tool: stripe
-  operation: refunds.create
-  resource: { kind: invoice, match: any }
-  effect: require_approval
-`;
-    const allow = (condition: string) => `- rule: Small
-  id: small
-  tool: stripe
-  operation: refunds.create
-  resource: { kind: invoice, match: any }
-${condition}  effect: allow
-`;
-    expect(diff(review + allow(""), allow(""))[0]?.impact).toBe("loosened");
-    // Refunds of 100 or more were asked about and are now blocked.
-    const some = allow(
-      "  condition: [{ field: amount, op: lt, value: 100 }]\n",
-    );
-    expect(diff(review + some, some)[0]?.impact).toBe("changed");
-  });
-
   test("a wider scope with narrower conditions needs review, never tightened", () => {
     const before =
       refunds(`  resource: { kind: invoice, match: exact, value: INV-1 }
@@ -387,33 +352,6 @@ ${condition}  effect: allow
     expect(diff(kept("Status"), kept("Show status"))[0]?.summary).toBe(
       'renamed "Status" → "Show status"',
     );
-  });
-
-  test("a new review where an allow may apply is only changed; elsewhere it grants", () => {
-    const allow = `- rule: Refund small
-  id: small
-  tool: stripe
-  operation: refunds.create
-  resource: { kind: invoice, match: any }
-  effect: allow
-`;
-    const ask = `- rule: Ask
-  id: ask
-  tool: stripe
-  operation: refunds.create
-  resource: { kind: invoice, match: prefix, value: EU- }
-  effect: require_approval
-`;
-    expect(diff(allow, allow + ask).map(brief)).toEqual([
-      {
-        impact: "changed",
-        warning: false,
-        id: "ask",
-        summary: "added (require approval)",
-      },
-    ]);
-    expect(diff(allow + ask, allow)[0]?.impact).toBe("loosened");
-    expect(diff(ask, "[]")[0]?.impact).toBe("revoked");
   });
 
   test("an agent's rule widened to every agent loosens; expiry moves with the effect", () => {
@@ -593,17 +531,6 @@ describe("edited gates", () => {
       { version: 2, rules: [], gates: [{ ...base, ...fields }], budgets: [] },
     )[0];
 
-  test("a gate that asks instead of denying loosens, and is flagged", () => {
-    expect(change({ effect: "require_approval" })).toMatchObject({
-      impact: "loosened",
-      warning: true,
-      summary: "otherwise deny → require approval",
-    });
-    expect(change({}, { effect: "require_approval" })?.impact).toBe(
-      "tightened",
-    );
-  });
-
   test("a gate that covers less is flagged; one that ends sooner too", () => {
     expect(change({ agentKey: "dev" })).toMatchObject({
       impact: "loosened",
@@ -644,58 +571,5 @@ describe("edited gates", () => {
       ["rule", "granted", false],
       ["gate", "loosened", true],
     ]);
-  });
-});
-
-describe("whether a new review can meet an allow", () => {
-  const rule = (fields: Partial<PolicyRule>): PolicyRule => ({
-    id: "r",
-    name: "R",
-    effect: "allow",
-    agentKey: null,
-    installationName: null,
-    toolKey: "shell",
-    operationKey: "command.run",
-    resource: { kind: "command", match: "prefix", value: "git " },
-    conditions: [],
-    expiresAt: null,
-    ...fields,
-  });
-  const withReview = (
-    allow: Partial<PolicyRule>,
-    review: Partial<PolicyRule>,
-  ) =>
-    permissionChanges(
-      { version: 1, rules: [rule(allow)] },
-      {
-        version: 1,
-        rules: [
-          rule(allow),
-          rule({ id: "ask", effect: "require_approval", ...review }),
-        ],
-      },
-    )[0]?.impact;
-
-  test.each([
-    [
-      { resource: { kind: "command", match: "exact", value: "git log" } },
-      "changed",
-    ],
-    [{ resource: { kind: "command", match: "exact", value: "ls" } }, "granted"],
-    [{ toolKey: "files", operationKey: "file.read" }, "granted"],
-  ] as const)("%j is %s", (review, expected) => {
-    expect(withReview({}, review as Partial<PolicyRule>)).toBe(expected);
-  });
-
-  test("an exact allow and a prefix review", () => {
-    const exact = {
-      resource: { kind: "command", match: "exact", value: "git log" },
-    } as const;
-    expect(withReview(exact, {})).toBe("changed");
-    expect(
-      withReview(exact, {
-        resource: { kind: "command", match: "exact", value: "ls" },
-      }),
-    ).toBe("granted");
   });
 });

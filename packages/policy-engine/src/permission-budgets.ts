@@ -114,18 +114,6 @@ function agentAspect(before: AnyBudget, after: AnyBudget): Aspect[] {
   return [{ impact: "changed", text }];
 }
 
-function effectAspect(before: AnyBudget, after: AnyBudget): Aspect[] {
-  if (before.effect === after.effect) return [];
-  const text = `otherwise ${before.effect.replace("_", " ")} → ${after.effect.replace("_", " ")}`;
-  return [
-    {
-      impact: after.effect === "deny" ? "tightened" : "loosened",
-      warning: after.effect !== "deny",
-      text,
-    },
-  ];
-}
-
 /** A warning and a name decide nothing, so they never set the impact. */
 function noticeAspects(before: AnyBudget, after: AnyBudget): Aspect[] {
   const aspects: Aspect[] = [];
@@ -151,7 +139,6 @@ export function budgetAspects(before: AnyBudget, after: AnyBudget) {
     ...reachAspects(before, after),
     ...sourceAspect(before, after),
     ...agentAspect(before, after),
-    ...effectAspect(before, after),
     ...noticeAspects(before, after),
   ];
 }

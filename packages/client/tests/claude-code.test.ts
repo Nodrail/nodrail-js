@@ -194,7 +194,7 @@ describe("describing a call", () => {
     expect(describeToolCall("WebFetch", { url })?.resource.id).toBe(expected);
   });
 
-  test("an approval still binds the exact original", () => {
+  test("a decision still binds the exact original", () => {
     const one = describeToolCall("Bash", { command: "deploy --token aaa" });
     const two = describeToolCall("Bash", { command: "deploy --token bbb" });
     expect(one?.resource).not.toEqual(two?.resource);

@@ -13,8 +13,6 @@ import { compilePolicies } from "../src/yaml";
 import {
   CONSUMERS,
   SURFACES,
-  approvalBinding,
-  approvalStillBinds,
   compileContracts,
   contractDigest,
   findingsCount,
@@ -155,7 +153,7 @@ describe("older engines refuse contracts instead of ignoring them", () => {
     for (const spec of [{ receipt: "qa" }, { brief: "b" }])
       expect(
         resource.safeParse({
-          apiVersion: "apf.nodrail.com/v1alpha1",
+          apiVersion: "nodrail.com/v1alpha1",
           kind: "Agent",
           metadata: { name: "qa" },
           spec,
@@ -581,25 +579,6 @@ describe("authority", () => {
     ).toBe(true);
   });
 
-  test("an approval binds the exact action, form values, schemas and policy", () => {
-    const subject = {
-      action: "sha256:a",
-      request: { contract: "sha256:r", value: { amount: 4200 } },
-      decision: null,
-      policy: "sha256:p",
-    };
-    const recorded = approvalBinding(subject);
-    expect(approvalStillBinds(recorded, subject)).toBe(true);
-    for (const changed of [
-      { ...subject, action: "sha256:b" },
-      { ...subject, request: { ...subject.request, value: { amount: 4300 } } },
-      { ...subject, request: { ...subject.request, contract: "sha256:r2" } },
-      { ...subject, decision: "sha256:d" },
-      { ...subject, policy: "sha256:q" },
-    ])
-      expect(approvalStillBinds(recorded, changed)).toBe(false);
-  });
-
   const envelope = {
     surface: "S01",
     producer: { class: "agent-reported", id: "reviewer" },
@@ -672,7 +651,7 @@ const asReceipt = (properties: unknown) => ({
   receipts: { qa: { shape: "s" } },
 });
 const agent = (name: string, spec: object = {}) => ({
-  apiVersion: "apf.nodrail.com/v1alpha1",
+  apiVersion: "nodrail.com/v1alpha1",
   kind: "Agent",
   metadata: { name },
   spec,
@@ -986,15 +965,27 @@ const refusals: [string, ContractSources, string, string][] = [
     "policy.1.requires.0.where.status",
   ],
   [
-    "an unknown approval form",
+    "a removed approval link",
     {
       policy: [
         { required_engine_version: 4 },
-        { rule: "R", effect: "require_approval", approval: "nope" },
+        { rule: "R", effect: "deny", approval: "nope" },
       ],
     },
-    "unknown-reference",
+    "grammar",
     "policy.1.approval",
+  ],
+  [
+    "removed approval forms",
+    {
+      manifest: {
+        approvals: {
+          refund: { request: "r", routes: [{ approvers: { role: "admin" } }] },
+        },
+      },
+    },
+    "grammar",
+    "nodrail.yaml",
   ],
   [
     "a rule-file item that isn't an entry",
@@ -1064,7 +1055,7 @@ const refusals: [string, ContractSources, string, string][] = [
     {
       manifest: {
         notifications: {
-          n: { source: { approval: "x" }, to: { role: "admin" } },
+          n: { source: { receipt: "x" }, to: { role: "admin" } },
         },
       },
     },
@@ -1359,14 +1350,23 @@ test("dates are real Gregorian days, written as text", () => {
 
 test("a value that isn't JSON has no digest", () => {
   expect(() => contractDigest("value", undefined)).toThrow();
-  expect(
-    approvalBinding({
-      action: "a",
-      request: { contract: "c", value: undefined },
-      decision: null,
-      policy: "p",
-    }),
-  ).toMatch(/^sha256:/);
+});
+
+test("removed approval syntax says what to use instead", () => {
+  const messages = [
+    compileContracts({ manifest: { approvals: {} } } as never),
+    compileContracts({
+      policy: [{ rule: "R", effect: "deny", approval: "refund" }],
+    } as never),
+  ].flatMap((result) => result.issues.map(({ message }) => message));
+  expect(messages).toEqual([
+    expect.stringContaining("approvals (approval forms) was removed"),
+    expect.stringContaining(
+      "approval (a link to an approval form) was removed",
+    ),
+  ]);
+  for (const message of messages)
+    expect(message).toContain("A rule allows or denies");
 });
 
 test("validation reports at most 20 issues, and checks each scalar type", () => {

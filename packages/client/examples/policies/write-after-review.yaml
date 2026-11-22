@@ -1,0 +1,17 @@
+# Issue writes are allowed once a reviewer agent has passed the run's work.
+# Until then a write is denied with what is missing, so the agent runs the
+# review and tries again. Nothing waits for a person.
+- required_engine_version: 3
+
+- rule: Agents update issues
+  tool: github
+  operation: issues.update
+  resource: { kind: repository, match: any }
+  effect: allow
+
+- gate: Review before an issue write
+  tool: github
+  operation: issues.update
+  resource: { kind: repository, match: any }
+  requires:
+    - { agent: reviewer, verdict: pass }

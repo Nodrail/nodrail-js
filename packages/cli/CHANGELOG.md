@@ -1,5 +1,59 @@
 # Changelog
 
+## 0.5.0
+
+Uses `@nodrail/policy-engine` 0.7.0, published with it. `connect:` and
+`plan`/`apply` connect a project to a control plane; the effective policy
+is `.nodrail/effective.yaml`; the approval commands are gone.
+
+### Removed
+
+- `nodrail approvals`, `nodrail approve` and `nodrail reject`, with
+  `NodrailApi.approvals()`, `approval()` and `decide()`: nothing waits for a
+  person, so there is nothing to approve. A rule allows or denies; gates,
+  budgets and evidence say when a call is allowed.
+
+### Changed
+
+- The connected hook's timeout in `.claude/settings.json` is 30 seconds (it
+  was 360, to wait for a person); a call Nodrail hasn't answered in 25 is
+  denied.
+- `@nodrail/dependency-updates`: the deps agent commits and pushes its own
+  branch, and is denied changing package.json, pushes that name no branch or
+  name main or master, and force pushes; nothing waits for a person.
+  `@nodrail/merge-reviewed-pr` says to override its merge rule with `deny`
+  to keep merging for people only. The support-desk example lets support
+  publish to `help-center` only.
+- The README leads with `nodrail.yaml`, `plan` and `apply`.
+
+### Added
+
+- `nodrail policy hook --report <file>` (from `@nodrail/policy-engine`):
+  the engine's hook records each decision and outcome in Nodrail through
+  `POST /api/v1/runtime/decisions`, queued on disk and sent by a detached
+  process, never delaying a decision. `apply` doesn't install it yet.
+
+- `plan` reads `connect:` (R383). It says who decides, and with a
+  credential it asks Nodrail's new `GET /api/v1/runtime/identity` whose it
+  is, failing when it belongs to another workspace or environment; it never
+  prints it. `decide: cloud` and `enforce: watch` are checked but refused
+  for now (`!`), so `apply` doesn't set up a project that would silently
+  decide on this machine. `decide: local` works as before. See "Connect to
+  Nodrail" in `docs/playbooks.md`.
+- With `decide: cloud`, `plan` compares the policy live in the environment
+  with the lock, through Nodrail's new `GET /api/v1/rules/live`. It reports
+  in sync, "apply publishes" (with its preview), or drift: rules changed in
+  Nodrail or by another project, refused unless `--replace-live`. `apply`
+  publishes the locked policy, tagged with the project's `id` and lock,
+  before it writes any file.
+- `decide: cloud` works for Claude Code (connected mode PR 3). `apply`
+  installs `nodrail connect hook` on every event the plugin hooks. It runs
+  the local guards first (protect list, setup, run ledger, connections'
+  data), then asks Nodrail with `@nodrail/client`'s hook, using the
+  credential `connect:` names. `.nodrail/connect.json` holds references
+  only. `apply` refuses when the live policy can't be checked. `status`
+  knows the connected hook.
+
 ## 0.4.0
 
 Uses `@nodrail/policy-engine` 0.6.0, published with it: engine levels 4

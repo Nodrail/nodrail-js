@@ -16,11 +16,7 @@ export {
   type RunOptions,
 } from "./sdk.ts";
 export { receiptOf, type ReadReceipt, type StepOptions } from "./runs.ts";
-export {
-  authorize,
-  WITHDRAW_TIMEOUT_MS,
-  type AuthorizeOptions,
-} from "./authorize.ts";
+export { authorize, type AuthorizeOptions } from "./authorize.ts";
 export { REPORT_RETRY_MS } from "./errors.ts";
 export {
   withContractFields,

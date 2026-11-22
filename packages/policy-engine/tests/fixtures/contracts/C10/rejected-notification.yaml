@@ -41,7 +41,7 @@ nodrail.yaml:
       source: { receipt: reviewer }
       where: { lesson: "anything" }
       fields: [verdict, issue]
-      to: { role: approver }
+      to: { role: admin }
 expect:
   - { code: not-reported, path: nodrail.yaml.notifications.leaky.fields.1 }
   - { code: not-reported, path: nodrail.yaml.notifications.leaky.where.lesson }

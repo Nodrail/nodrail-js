@@ -32,7 +32,6 @@ const SURFACE_WORDS: Record<string, string> = {
   S05: "evidence",
   S06: "a memory record",
   S07: "a file",
-  S08: "an approval form",
   S09: "inventory labels",
 };
 

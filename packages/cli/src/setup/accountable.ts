@@ -39,7 +39,7 @@ let last: { text: string; document: PolicyDocument | null } | null = null;
 export function effectiveDocument(effective: string): PolicyDocument | null {
   if (last?.text === effective) return last.document;
   const compiled = compilePolicies([
-    { name: "effective.apf.yaml", text: effective },
+    { name: "effective.yaml", text: effective },
   ]);
   last = { text: effective, document: compiled.ok ? compiled.document : null };
   return last.document;

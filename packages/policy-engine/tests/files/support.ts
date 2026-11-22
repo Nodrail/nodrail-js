@@ -10,7 +10,7 @@ import { compileContracts } from "../../src/shapes/index";
 export const FIXTURES = join(import.meta.dirname, "../fixtures/files");
 
 const agent = (name: string) => ({
-  apiVersion: "apf.nodrail.com/v1alpha1",
+  apiVersion: "nodrail.com/v1alpha1",
   kind: "Agent",
   metadata: { name },
   spec: {},

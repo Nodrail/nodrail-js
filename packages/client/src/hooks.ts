@@ -14,16 +14,12 @@ import {
   runKey,
 } from "@nodrail/policy-engine/hook-runs";
 import { blockedText } from "./blocked-text.ts";
-import {
-  resolveConnection,
-  waitMsFrom,
-  type Environment,
-} from "./connection.ts";
+import { resolveConnection, type Environment } from "./connection.ts";
 import { localReadTools } from "./setup.ts";
 import { revisionAt } from "./subject.ts";
 import { hookContractFields } from "./hook-contracts.ts";
 // Not ./index.ts: the hook bundles only the client, never the SDK.
-import { authorize, WITHDRAW_TIMEOUT_MS } from "./authorize.ts";
+import { authorize } from "./authorize.ts";
 import {
   NodrailClient,
   type Decision,
@@ -37,19 +33,15 @@ export {
   type HookResult,
 } from "@nodrail/policy-engine/actions";
 
-export const HOOK_VERSION = "0.6.0";
+export const HOOK_VERSION = "0.7.0";
 
-/**
- * Longer than the wait for a person, and short enough that withdrawing the
- * request still fits in the hook's own time limit.
- */
-const HOOK_DEADLINE_MS = 345_000;
+/** Nodrail answers at once; past this the call is denied, within the hook's own time limit. */
+const HOOK_DEADLINE_MS = 25_000;
 
 export type AgentKind = "claude-code" | "codex";
 
 export type HookDeps = {
   fetch?: typeof fetch;
-  sleep?: (ms: number) => Promise<void>;
   agent?: AgentKind;
   deadlineMs?: number;
 };
@@ -151,21 +143,14 @@ async function within<T>(work: Promise<T>, ms: number): Promise<T | null> {
 }
 
 /**
- * Codex runs the tool if a hook times out, so this always answers first. At
- * the deadline the wait stops, and the request gets a moment to be withdrawn
- * before the answer, which is a block whatever happens meanwhile.
+ * Codex runs the tool if a hook times out, so this always answers first:
+ * past the deadline the answer is a block, whatever happens meanwhile.
  */
 async function decideInTime(
-  ask: (signal: AbortSignal) => Promise<Decision>,
+  ask: Promise<Decision>,
   deadlineMs: number,
 ): Promise<Decision> {
-  const stop = new AbortController();
-  const asked = ask(stop.signal);
-  const answer = await within(asked, deadlineMs);
-  if (answer) return answer;
-  stop.abort();
-  await within(asked, WITHDRAW_TIMEOUT_MS + 500);
-  return timedOut;
+  return (await within(ask, deadlineMs)) ?? timedOut;
 }
 
 async function beforeTool(
@@ -195,9 +180,7 @@ async function beforeTool(
     );
   const descriptor = describeToolCall(name, input as Input, text(event.cwd));
   if (!descriptor)
-    return deny(
-      "Nodrail: this call could not be described for review, so it is blocked.",
-    );
+    return deny("Nodrail: this call could not be described, so it is blocked.");
   let run: RunRef | undefined;
   try {
     run = runOf(event, env);
@@ -216,15 +199,11 @@ async function beforeTool(
   if ("refusal" in fields) return deny(fields.refusal);
 
   const decision = await decideInTime(
-    (signal) =>
-      authorize(client, fields.action, key, {
-        waitMs: waitMsFrom(env),
-        sleep: deps.sleep,
-        run,
-        signal,
-        // The work the agent's session is in, as the runtime reads it.
-        subject: revisionAt(text(event.cwd) ?? process.cwd()),
-      }),
+    authorize(client, fields.action, key, {
+      run,
+      // The work the agent's session is in, as the runtime reads it.
+      subject: revisionAt(text(event.cwd) ?? process.cwd()),
+    }),
     deps.deadlineMs ?? HOOK_DEADLINE_MS,
   );
   // Staying silent hands back to the agent's own permissions: a Nodrail allow

@@ -32,8 +32,9 @@
   effect: allow
 
 # package.json also holds scripts, the package manager and commit-hook
-# commands, all of which run code. A person reviews each change.
-- rule: Change package.json with a person (file.write)
+# commands, all of which run code, so the deps agent never changes it:
+# bumping a range is yours.
+- rule: Never change package.json (file.write)
   id: deps-manifest-file-write
   agent: deps
   tool: files
@@ -41,12 +42,12 @@
   resource: { kind: file, match: any }
   condition:
     - { field: file_name, op: eq, value: package.json }
-    - { field: inside_cwd, op: eq, value: true }
-  effect: require_approval
+  effect: deny
 
 # package.json also holds scripts, the package manager and commit-hook
-# commands, all of which run code. A person reviews each change.
-- rule: Change package.json with a person (file.edit)
+# commands, all of which run code, so the deps agent never changes it:
+# bumping a range is yours.
+- rule: Never change package.json (file.edit)
   id: deps-manifest-file-edit
   agent: deps
   tool: files
@@ -54,8 +55,7 @@
   resource: { kind: file, match: any }
   condition:
     - { field: file_name, op: eq, value: package.json }
-    - { field: inside_cwd, op: eq, value: true }
-  effect: require_approval
+  effect: deny
 
 # Installed packages and git's own files run code or hold history.
 - list: never_places

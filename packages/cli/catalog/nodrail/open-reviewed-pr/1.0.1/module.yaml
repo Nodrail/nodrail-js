@@ -19,5 +19,5 @@ roles:
   reviewer: Reviews the candidate and reports ship or not.
   dev: Changes the candidate. Its later work resets the checkers' verdicts, so they check again.
 skills:
-  - skills/author-apf-playbooks/SKILL.md
-  - skills/review-apf-permissions/SKILL.md
+  - skills/author-playbooks/SKILL.md
+  - skills/review-permissions/SKILL.md

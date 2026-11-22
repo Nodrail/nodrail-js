@@ -30,7 +30,7 @@ nodrail.yaml:
       operations:
         refund: { input: refund-args, output: refund-result }
 resources:
-  - apiVersion: apf.nodrail.com/v1alpha1
+  - apiVersion: nodrail.com/v1alpha1
     kind: Agent
     metadata: { name: deployer }
     spec: { brief: deploy-brief }

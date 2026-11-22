@@ -1,6 +1,4 @@
 import { HOST_NAMES } from "./state.ts";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import type {
   ProjectSetup,
   SetupConnection,
@@ -8,8 +6,7 @@ import type {
 import { frozenPolicy, setupOf } from "../commands/project.ts";
 import type { Env } from "../config.ts";
 import { CliError } from "../io.ts";
-import { folderHost } from "../project/host.ts";
-import { LOCK_FILE, MANIFEST_FILE, sha256 } from "../project/lockfile.ts";
+import { LOCK_FILE, MANIFEST_FILE } from "../project/lockfile.ts";
 import {
   bindingNotes,
   changeLines,
@@ -32,6 +29,8 @@ import {
 import { claudeSteps } from "./claude-settings.ts";
 import { managedChecks } from "./managed.ts";
 import { goneDataNotes, pinChecks, telemetryNote } from "./connections.ts";
+import { connectChecks, connectNotes } from "./connect.ts";
+import { fileStep, goneStep } from "./steps.ts";
 import { runningHere, testedCheck } from "./tested.ts";
 import {
   claudePluginNote,
@@ -47,7 +46,6 @@ import {
 } from "./status.ts";
 import {
   hostState,
-  otherOwners,
   readState,
   STATE_FILE,
   type Runtime,
@@ -88,6 +86,10 @@ export type SetupPlan = {
   connections: SetupConnection[];
   /** Where decisions are sent, for the secret checks and the status. */
   telemetry: ProjectSetup["telemetry"];
+  /** The Nodrail the project is connected to, for the credential check. */
+  connect: ProjectSetup["connect"];
+  /** The project's stable id, which a published policy is tied to. */
+  projectId: ProjectSetup["id"];
   state: SetupState | null;
   /** The reviewed revision the setup is made from, as the lock records it. */
   revision: Revision;
@@ -140,6 +142,7 @@ export function planSetup(input: {
   const effective = policy.text ?? "";
   const host = hostSetup(runtime, { ...input, ...policy, effective });
   checks.push(...hostChecks(input, runtime, setup, host.check));
+  checks.push(...connectChecks(setup, runtime));
   checks.push(
     ...managedChecks(runtime, {
       root,
@@ -186,6 +189,8 @@ export function planSetup(input: {
     merged,
     connections: setup.connections,
     telemetry: setup.telemetry,
+    connect: setup.connect,
+    projectId: setup.id,
     claudePlugins: pluginNames(host.settings),
     plugins: setup.plugins,
     accountable: level5,
@@ -297,6 +302,7 @@ function notesFor(
     ),
     `apply records what it writes in ${STATE_FILE}.`,
     ...(telemetry ? [telemetry] : []),
+    ...connectNotes(setup),
   ];
 }
 
@@ -369,95 +375,4 @@ function lockedPolicy(
     ];
     return { text: null, ...setupOf(plan), contractNotes };
   }
-}
-
-/** The file's bytes, null when there is none, "folder" when a folder is. */
-export function readBytes(
-  root: string,
-  path: string,
-): Buffer | null | "folder" {
-  try {
-    return readFileSync(join(root, path));
-  } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code;
-    if (code === "ENOENT" || code === "ENOTDIR") return null;
-    if (code === "EISDIR") return "folder";
-    throw error;
-  }
-}
-
-/** The state, and the host whose files a step is about. */
-type Owner = { state: SetupState | null; runtime: Runtime };
-
-function fileStep(root: string, owner: Owner, file: DesiredFile): Step {
-  const { path, why } = file;
-  // Never through a link: it could lead to a file outside the project.
-  if (folderHost(root).real(path) !== path)
-    return {
-      path,
-      action: "conflict",
-      why: `${why}; the path goes through a link`,
-    };
-  const disk = readBytes(root, path);
-  if (disk === null) return { path, action: "create", why };
-  if (disk === "folder")
-    return { path, action: "conflict", why: `${why}; a folder is there` };
-  const now = sha256(disk);
-  if (now === sha256(file.content)) return { path, action: "keep", why };
-  // A file both hosts need, last written for the other one, is nodrail's
-  // too while it holds what was written.
-  const written =
-    hostState(owner.state, owner.runtime)?.files[path] ??
-    otherOwners(owner.state, owner.runtime, path).find(
-      (other) => other.hash === now,
-    )?.hash;
-  if (written === undefined)
-    return {
-      path,
-      action: "conflict",
-      why: `${why}; already there, not written by nodrail`,
-    };
-  if (written !== now)
-    return {
-      path,
-      action: "conflict",
-      why: `${why}; edited since nodrail wrote it`,
-    };
-  return { path, action: "update", why };
-}
-
-function goneStep(
-  root: string,
-  owner: Owner,
-  path: string,
-  hash: string,
-): Step {
-  const others = otherOwners(owner.state, owner.runtime, path);
-  if (others.length > 0)
-    return {
-      path,
-      action: "keep",
-      why: `no longer needed here; kept for ${others.map((other) => HOST_NAMES[other.host]).join(" and ")}`,
-    };
-  return removalStep(root, path, hash, {
-    edited: "no longer needed, but edited since nodrail wrote it",
-    removed: "no longer needed",
-  });
-}
-
-/**
- * Taking out a file nodrail wrote: nothing to do when it's gone, and kept,
- * as a conflict, when it was edited since.
- */
-export function removalStep(
-  root: string,
-  path: string,
-  hash: string,
-  why: { edited: string; removed: string },
-): Step {
-  const disk = readBytes(root, path);
-  if (disk === null) return { path, action: "keep", why: "already removed" };
-  if (disk === "folder" || sha256(disk) !== hash)
-    return { path, action: "conflict", why: why.edited };
-  return { path, action: "remove", why: why.removed };
 }

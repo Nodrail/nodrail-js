@@ -20,17 +20,20 @@ export const governedTools =
 export const localReadTools = ["Read", "Glob", "Grep"] as const;
 const localReadMatcher = `^(${localReadTools.join("|")})$`;
 
-/** A read is checked on the machine, so this needs no time for a person. */
+/** A read is checked on the machine. */
 const READ_TIMEOUT_SECONDS = 30;
 
-/** Recording a step never waits for a person. */
+/** Recording a step is one request. */
 const STEP_TIMEOUT_SECONDS = 30;
 
 /** Codex's matcher has no lookahead, so here the governed tools are named. */
 export const codexGovernedTools = "^(Bash|apply_patch|mcp__.*)$";
 
-/** Slightly longer than the hook waits for a person. */
-const HOOK_TIMEOUT_SECONDS = 360;
+/**
+ * Slightly longer than the hook's own deadline for Nodrail's answer, so the
+ * hook always answers (a deny) before the host gives up on it.
+ */
+const HOOK_TIMEOUT_SECONDS = 30;
 
 type Command = { command: string; args?: string[] };
 

@@ -29,7 +29,7 @@ const refund = `
   tool: stripe
   operation: refunds.create
   resource: { kind: invoice, match: any }
-  effect: require_approval
+  effect: deny
 `;
 
 const call = (operationKey: string, resourceId: string, params = {}) => ({
@@ -58,7 +58,7 @@ describe("a rules file", () => {
         {
           id: "refunds",
           name: "Refunds",
-          effect: "require_approval",
+          effect: "deny",
           agentKey: null,
           installationName: null,
           toolKey: "stripe",
@@ -576,7 +576,7 @@ describe("the same engine", () => {
     "utf8",
   );
 
-  test("deny beats review beats allow, written in YAML", () => {
+  test("deny beats allow, written in YAML", () => {
     const rule = (name: string, effect: string) => `
 - rule: ${name}
   tool: stripe
@@ -584,9 +584,6 @@ describe("the same engine", () => {
   resource: { kind: invoice, match: any }
   effect: ${effect}
 `;
-    expect(
-      outcome(compile(rule("A", "allow"), rule("B", "require_approval"))),
-    ).toBe("require_approval");
     expect(outcome(compile(rule("A", "allow"), rule("B", "deny")))).toBe(
       "deny",
     );
@@ -599,7 +596,28 @@ describe("the same engine", () => {
         compile(base),
         call("refunds.create", "I", { amount: "5", currency: "USD" }),
       ),
-    ).toBe("require_approval");
+    ).toBe("deny");
+  });
+});
+
+describe("gates and budgets deny while unmet", () => {
+  test("otherwise is optional: left out, it is deny", () => {
+    const text = (otherwise: string) => `- required_engine_version: 3
+- gate: Review
+  id: review
+  command: { prefix: git push }
+  requires: [{ agent: qa, verdict: pass }]
+${otherwise}- budget: Calls
+  id: calls
+  per: run
+  tool_calls: 3
+${otherwise}`;
+    const left = ok(compile(text(""))).document;
+    const written = ok(compile(text("  otherwise: deny\n"))).document;
+    expect(left).toEqual(written);
+    if (left.version === 1) throw new Error("expected gates");
+    expect(left.gates[0]?.effect).toBe("deny");
+    expect(left.budgets[0]?.effect).toBe("deny");
   });
 });
 
@@ -621,6 +639,54 @@ describe("where problems are reported", () => {
   resource: { kind: invoice, match: any }
   effect: allow
 ${extra}`;
+
+  test("require_approval was removed: each use says what to write instead", () => {
+    const gate = `- required_engine_version: 3
+- gate: Review
+  command: { prefix: git push }
+  requires: [{ agent: qa, verdict: pass }]
+  otherwise: require_approval
+- budget: Calls
+  per: run
+  tool_calls: 3
+  otherwise: require_approval
+- budget: Spend
+  per: run
+  usd: 3
+  otherwise: allow
+`;
+    expect(
+      places(rule("").replace("effect: allow", "effect: require_approval")),
+    ).toEqual([
+      at(
+        "f0.yaml:5:11",
+        'Rule "One" uses effect: require_approval, which was removed: a rule only allows or denies, and nothing waits for a person. Use effect: deny',
+      ),
+    ]);
+    expect(places(gate)).toEqual([
+      at(
+        "f0.yaml:5:14",
+        'Gate "Review" uses otherwise: require_approval, which was removed: an unmet gate or budget denies the call with its reason',
+      ),
+      at(
+        "f0.yaml:9:14",
+        'Budget "Calls" uses otherwise: require_approval, which was removed',
+      ),
+      at(
+        "f0.yaml:13:14",
+        'Budget "Spend" has otherwise: "allow"; the only value is deny',
+      ),
+    ]);
+  });
+
+  test("an approval link was removed, and says so", () => {
+    expect(places(rule("  approval: refund\n"))).toEqual([
+      at(
+        "f0.yaml:6:3",
+        "approval (a link to an approval form) was removed: nothing waits for a person.",
+      ),
+    ]);
+  });
 
   test("an unknown key in a rule is at that key", () => {
     expect(places(rule("  efect: allow\n"))).toEqual([

@@ -18,5 +18,5 @@ roles:
   gatekeeper: Runs the mechanical checks on the candidate.
   reviewer: Reviews the candidate and reports ship or not.
 skills:
-  - skills/author-apf-playbooks/SKILL.md
-  - skills/review-apf-permissions/SKILL.md
+  - skills/author-playbooks/SKILL.md
+  - skills/review-permissions/SKILL.md

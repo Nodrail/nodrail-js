@@ -99,8 +99,8 @@ ${pairRules}
   effect: allow
 
 # Nodrail's own commands. Run by hand, the hook could write a step or a verdict
-# into the run ledger, and \`nodrail\` can approve requests, so they are for
-# you, not the agent. Starting the plugin hook through node or npx runs another
+# into the run ledger, and \`nodrail\` can change the policy itself, so they are
+# for you, not the agent. Starting the plugin hook through node or npx runs another
 # program, which no rule here allows.
 - list: nodrail_commands
   items: [nodrail, nodrail-policy, nodrail-claude-hook]
@@ -236,7 +236,9 @@ const repoWorkRules = `
   effect: deny
 
 # What the everyday commands below run. Changing it would change what an
-# allowed npm test or make does, so a person reviews it.
+# allowed npm test or make does, so the agent can't: add a dependency or a
+# script yourself, or drop these two rules if you trust the agent with what
+# your tests run.
 - list: script_places
   items:
     - package.json
@@ -249,37 +251,39 @@ const repoWorkRules = `
     - node_modules
     - .npmrc
 
-- rule: A person reviews script writes
+- rule: Never write build scripts
   tool: files
   operation: file.write
   resource: { kind: file, match: any }
   condition:
     - { field: path_parts, op: contains, list: script_places }
-  effect: require_approval
+  effect: deny
 
-- rule: A person reviews script edits
+- rule: Never edit build scripts
   tool: files
   operation: file.edit
   resource: { kind: file, match: any }
   condition:
     - { field: path_parts, op: contains, list: script_places }
-  effect: require_approval
+  effect: deny
 
-- rule: A person reviews workflow writes
+# .github holds the workflows CI runs with its secrets, and the files that
+# decide who reviews a merge, so only you change them.
+- rule: Never write workflows
   tool: files
   operation: file.write
   resource: { kind: file, match: any }
   condition:
     - { field: path_parts, op: contains, value: .github }
-  effect: require_approval
+  effect: deny
 
-- rule: A person reviews workflow edits
+- rule: Never edit workflows
   tool: files
   operation: file.edit
   resource: { kind: file, match: any }
   condition:
     - { field: path_parts, op: contains, value: .github }
-  effect: require_approval
+  effect: deny
 
 # Everyday work. These run the project's own code, which the agent can also
 # write, so allowing them trusts the agent with running code in this project.
@@ -302,12 +306,53 @@ const repoWorkRules = `
   command: { list: working_commands, match: prefix }
   effect: allow
 
-- rule: A person reviews pushes
-  command: { prefix: git push }
-  effect: require_approval
+# Pushing a feature branch is allowed when the push names its remote and
+# branch, as in git push origin my-branch.
+- rule: Push feature branches
+  command: { prefix: git push origin }
+  effect: allow
+
+# Merging to main is yours, never the agent's: a push that names main or
+# master is denied, and so is one that names no branch, which could push
+# whatever is checked out, main included. A prefix matches whole words, so
+# main-fix stays pushable.
+- list: unnamed_pushes
+  items:
+    - git push
+    - git push origin
+    - git push origin HEAD
+
+- rule: Never push without naming a branch
+  command: { list: unnamed_pushes }
+  effect: deny
+
+- list: main_pushes
+  items:
+    - git push origin main
+    - git push origin master
+    - git push origin HEAD:main
+    - git push origin HEAD:master
+    - git push --all
+    - git push --mirror
+
+- rule: Never push to main
+  command: { list: main_pushes, match: prefix }
+  effect: deny
+
+# A rule reads how a command starts, so these catch a force push whose flag
+# comes first. Protect main on the remote as well: a flag at the end, or a
+# refspec such as +feat or feat:main, isn't seen.
+- list: force_pushes
+  items:
+    - git push --force
+    - git push --force-with-lease
+    - git push -f
+    - git push origin --force
+    - git push origin --force-with-lease
+    - git push origin -f
 
 - rule: Never force push
-  command: { prefix: git push --force }
+  command: { list: force_pushes, match: prefix }
   effect: deny
 
 - rule: Never remove recursively
@@ -326,7 +371,7 @@ export const starterPacks = {
   "repo-work": {
     label: "Repository work",
     summary:
-      "Also edits, tests and commits inside the project. Pushes and changes to build scripts go to a person. Tests run code the agent can write.",
+      "Also edits, tests, commits and pushes feature branches. Pushes to main, force pushes, and changes to build scripts and workflows are denied. Tests run code the agent can write.",
     text: readOnlyRules + repoWorkRules,
   },
 } as const satisfies Record<string, StarterPack>;

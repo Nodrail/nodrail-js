@@ -18,9 +18,9 @@
       "expiresAt": null
     },
     {
-      "id": "write-repository-review",
-      "name": "Review issue writes",
-      "effect": "require_approval",
+      "id": "write-repository",
+      "name": "Write support issues",
+      "effect": "allow",
       "agentKey": "support-agent",
       "installationName": "support-dev",
       "toolKey": "github",

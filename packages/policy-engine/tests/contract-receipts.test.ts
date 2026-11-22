@@ -21,7 +21,7 @@ function contracts(manifest: unknown, agents: Record<string, string>) {
   const result = compileContracts({
     manifest,
     resources: Object.entries(agents).map(([name, receipt]) => ({
-      apiVersion: "apf.nodrail.com/v1alpha1",
+      apiVersion: "nodrail.com/v1alpha1",
       kind: "Agent",
       metadata: { name },
       spec: { receipt },

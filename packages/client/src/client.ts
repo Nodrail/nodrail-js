@@ -101,6 +101,38 @@ export function isSafeUrl(url: string) {
   );
 }
 
+/** What `GET /runtime/policy` answers. */
+export type LivePolicy = {
+  policy_revision: number;
+  published_at: string | null;
+  managed: {
+    project_id: string;
+    revision: string;
+    policy_revision: string | null;
+  } | null;
+  source: { digest: string; text: string } | null;
+};
+
+/** A call the hook decided on its host, as `POST /runtime/decisions` takes it. */
+export type HostDecision = ActionDescriptor & {
+  /** Deterministic per call on the host, so a retry is the same row. */
+  idempotency_key: string;
+  verdict: "allow" | "deny";
+  rule?: { id: string; name?: string } | null;
+  reason?: string;
+  /** ISO 8601, the host's clock. */
+  decided_at: string;
+  /** The SHA-256 (hex) of the policy file it decided with, or null. */
+  policy_digest: string | null;
+  run?: RunRef & { subject?: string | null };
+  adapter_version?: string;
+};
+
+/** One item's answer: its row, or the code it was refused with. */
+export type HostDecisionResult =
+  | { key: string; action_id: string }
+  | { key: string | null; error: { code: string } };
+
 export class NodrailClient {
   private readonly base: string;
   private readonly timeoutMs: number;
@@ -160,6 +192,16 @@ export class NodrailClient {
   }
 
   /**
+   * The live policy of this credential's environment (`policy:read`): its
+   * revision, the project and lock it came from, and the file it was
+   * published from with its SHA-256, null when it was made on screen. A
+   * host compares the digest with its own lock's.
+   */
+  async policy(): Promise<LivePolicy> {
+    return (await this.request("/policy")) as LivePolicy;
+  }
+
+  /**
    * The run is context for the decision; it is not part of the digest. With
    * a run, `subject` is the work revision it is at (null: unknown), which a
    * gate on the revision checks evidence against.
@@ -199,13 +241,26 @@ export class NodrailClient {
     }
   }
 
+  /**
+   * Calls the hook decided on this host (`decisions:write`), for Nodrail to
+   * record in their runs and Activity; it never decides them again. At most
+   * 100 per call. Each answer, in order, is the row's id or why that item
+   * wasn't recorded; a retry with the same keys answers the same rows.
+   */
+  async decisions(
+    batch: readonly HostDecision[],
+  ): Promise<HostDecisionResult[]> {
+    const body = await this.request("/decisions", {
+      body: { decisions: batch },
+    });
+    if (!isRecord(body) || !Array.isArray(body.results))
+      throw new Blocked("INVALID_RESPONSE");
+    return body.results as HostDecisionResult[];
+  }
+
   /** A step of a run starting or finishing. Grants nothing by itself. */
   step(event: StepEvent) {
     return this.request("/steps", { body: event });
-  }
-
-  async status(actionId: string) {
-    return asStatus(await this.request(`/actions/${actionId}`));
   }
 
   async findByKey(idempotencyKey: string) {
@@ -219,7 +274,7 @@ export class NodrailClient {
   /**
    * Verifies the answer is fresh and exactly for this call before trusting
    * it. `subject`: the work revision at permit time (null: unknown), sent
-   * again because the work may have changed while a person decided.
+   * again because the work may have changed since the call was submitted.
    */
   async permit(
     action: ActionStatus,
@@ -265,19 +320,6 @@ export class NodrailClient {
     )
       throw new Blocked("PERMIT_STALE", action.reference);
     return body as PermitAllow;
-  }
-
-  /**
-   * Takes back a request nobody has decided, so no one approves a call that
-   * will never run. It never allows anything; a repeat changes nothing.
-   */
-  async withdraw(actionId: string, options: { timeoutMs?: number } = {}) {
-    return asStatus(
-      await this.request(`/actions/${actionId}/withdraw`, {
-        body: {},
-        timeoutMs: options.timeoutMs,
-      }),
-    );
   }
 
   /**

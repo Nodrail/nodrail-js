@@ -86,7 +86,7 @@ describe.skipIf(windows)("the example, planned and deciding", () => {
   test("decides each call as the README's table says", async () => {
     const policy = await run(desk, ["policy", "export", "--frozen"]);
     expect(policy.code).toBe(0);
-    const file = join(desk, "effective.apf.yaml");
+    const file = join(desk, "effective.yaml");
     writeFileSync(file, policy.out);
     const connections = join(desk, "connections.json");
     const yaml = readFileSync(join(desk, "nodrail.yaml"), "utf8");
@@ -161,12 +161,20 @@ describe.skipIf(windows)("the example, planned and deciding", () => {
       await decide("support", "mcp__handbook__search", search("internal")),
     ).toBe("allow");
     expect(await decide(null, "mcp__outbox__publish", publish)).toBe("deny");
+    // Support publishes to the help center only: the blog is denied, on
+    // either host, and nothing waits for a person.
     expect(await decide("support", "mcp__outbox__publish", publish)).toBe(
-      "ask",
+      "deny",
     );
     expect(
       await decide("support", "mcp__outbox__publish", publish, "codex"),
     ).toBe("deny");
+    expect(
+      await decide("support", "mcp__outbox__publish", {
+        ...publish,
+        channel: "help-center",
+      }),
+    ).toBe("allow");
     expect(
       await decide(null, "Agent", { subagent_type: "support", prompt: "go" }),
     ).toBe("allow");

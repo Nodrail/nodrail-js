@@ -1,4 +1,4 @@
-apiVersion: apf.nodrail.com/v1alpha1
+apiVersion: nodrail.com/v1alpha1
 kind: Team
 metadata: { name: desk }
 spec:

@@ -1,5 +1,40 @@
 # Changelog
 
+## 0.7.0
+
+Uses `@nodrail/policy-engine` 0.7.0. Nothing waits for a person any more:
+a call the rules don't allow is denied, with its reason.
+
+### Removed
+
+- Waiting for a person. A call is allowed or denied at once: `authorize()`
+  no longer polls, and loses `waitMs`, `pollMs` and `signal`; `createNodrail()`,
+  `guard()` and `check()` lose `waitMs`; `NODRAIL_WAIT_SECONDS`,
+  `NodrailClient.status()`, `NodrailClient.withdraw()` and
+  `WITHDRAW_TIMEOUT_MS` are gone. A hold from an older server
+  (`APPROVAL_PENDING`, `UNKNOWN_PERMISSION_BLOCKED`) is a deny with its
+  reason.
+- `HostDecision.verdict` is `allow` or `deny`; `require_approval` is gone.
+
+### Changed
+
+- The plugin hooks' `PreToolUse` timeout is 30 seconds (it was 360, to wait
+  for a person), and the hook denies a call Nodrail hasn't answered in 25.
+- The `write-needs-review` example policy is now `write-after-review`: a gate
+  that denies issue writes until a reviewer agent has passed the work.
+
+### Added
+
+- `NodrailClient.policy()`: the live policy of the credential's environment
+  (`GET /runtime/policy`, scope `policy:read`), with the file it was published
+  from and its SHA-256, for a host that decides with its own engine.
+- `NodrailClient.decisions(batch)`: records calls the hook decided on its
+  host (`POST /runtime/decisions`, scope `decisions:write`) in their runs
+  and Activity, at most 100 per call; each item answers its row or why it
+  wasn't recorded. Nodrail never decides them again.
+- `@nodrail/client/hooks`: `runHook`, the hook the plugins ship, for a
+  command line that runs it in-process (`nodrail connect hook`).
+
 ## 0.6.0
 
 Uses `@nodrail/policy-engine` 0.6.0.
@@ -31,7 +66,7 @@ Uses `@nodrail/policy-engine` 0.6.0.
   decides. Unknown is sent as `null`, never left out or guessed. Options
   `subject` and `cwd` change how it is read.
 - `report(decision, outcome, { measured })` and `run(action, perform,
-  { measure })` send the amounts a result measured (`result.` paths, whole
+{ measure })` send the amounts a result measured (`result.` paths, whole
   non-negative numbers); any unusable amount leaves all of them out.
 - `run(..., { timeoutMs })`: a call not waited for to the end, or one that
   rejects with `AbortError`/`TimeoutError`, is reported `unknown`, not

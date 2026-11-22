@@ -1,4 +1,4 @@
-# Try APF locally
+# Write and test rules locally
 
 Use one YAML file to answer three questions. May an agent inspect the working tree? May it remove untracked files? What happens if it asks to read the commit history? You can try all three on your machine without a Nodrail account.
 
@@ -90,7 +90,7 @@ This step is optional. To apply the example policy to covered tool calls, put `r
 }
 ```
 
-The hook lets Claude Code continue on `allow`, blocks on `deny`, and asks the person at the keyboard on `require_approval`. It blocks unmatched calls by default. Set `--unmatched ask` if you want Claude Code to ask about those calls. Keep `onFailure` set to `block` so an error starting the hook stops the covered call. Protect the hook settings and policy from changes by the agent.
+The hook lets Claude Code continue on `allow` and blocks on `deny`, telling the agent why so it can change course. Nothing waits for a person. It blocks unmatched calls by default; `--unmatched allow` leaves those calls to Claude Code's own permissions instead. Keep `onFailure` set to `block` so an error starting the hook stops the covered call. Protect the hook settings and policy from changes by the agent.
 
 ### Try the hook without Claude Code
 
@@ -112,11 +112,18 @@ The two-rule example is deliberately small. To start a project policy, choose a 
 nodrail-policy init read-only > read-only.yaml
 ```
 
-**Repo work** also allows selected edits, tests and commits. Save it as `repo-work.yaml`.
+**Repo work** also allows selected edits, tests and commits, and pushing feature branches. Save it as `repo-work.yaml`.
 
 ```sh
 nodrail-policy init repo-work > repo-work.yaml
 ```
+
+Its choices block damage rather than ask about it, and each is a rule you can change:
+
+- **Pushes.** `git push origin <branch>` is allowed for a feature branch. A push that names `main` or `master` (or `HEAD:main`), `--all` or `--mirror`, and a push that names no branch (`git push`, `git push origin`), are denied: merging to main is for people to do. A force push whose flag comes first (`--force`, `-f`, `--force-with-lease`) is denied. A rule reads how a command starts, so protect main on the remote as well: a flag at the end, or a refspec such as `+feat` or `feat:main`, isn't seen.
+- **Build scripts.** Writes and edits to `package.json`, `pnpm-workspace.yaml`, makefiles, `justfile`, `Taskfile.yml`, `node_modules` and `.npmrc` are denied, since they change what an allowed `npm test` or `make` runs. Add dependencies and scripts yourself, or drop those two rules if you trust the agent with what your tests run.
+- **Workflows.** Writes and edits under `.github` are denied: workflows run with CI's secrets, and the files there decide who reviews a merge.
+- **Control files** (`.git`, `.claude`, `.codex`, shell profiles, `nodrail.yaml` and its lock) and `rm -rf` are denied, as in every pack.
 
 Validate the pack you chose with `nodrail-policy validate read-only.yaml` or `nodrail-policy validate repo-work.yaml`. Place the reviewed file at the project root and update the filename in the hook command to match. Keep the example cases paired with the original two-rule policy.
 
@@ -130,14 +137,14 @@ nodrail-policy check rules.yaml -- git status
 
 ## Share this policy with your team
 
-This step needs a Nodrail Cloud workspace. Cloud reads the same Agent Policy Format, so the `rules.yaml` you just tested imports as it is.
+This step needs a workspace on a Nodrail control plane: your own self-hosted server, or Nodrail Cloud. The control plane reads the same rules, so the `rules.yaml` you just tested imports as it is.
 
-1. [Create a free workspace](https://app.nodrail.com/signup). Cloud Free includes 1,000 governed actions per workspace each month.
+1. Sign in to your control plane and create a workspace. On Nodrail Cloud, [create a free workspace](https://app.nodrail.com/signup).
 2. Open **Policies**, choose **Import YAML** and upload `rules.yaml`.
 3. Choose **Preview** to see the rules the file adds, changes or removes, then **Publish rules**. The file replaces the environment's rules, so start from an empty environment or export the current rules first.
-4. In **Agents**, choose **Connect an agent** and follow the steps for the [Claude Code plugin](https://nodrail.com/docs/agent-plugins). Its covered calls are then decided by the shared rules, and calls the rules leave to a person wait in **Approvals** for your team.
+4. In **Agents**, choose **Connect an agent** and follow the steps for the [Claude Code plugin](https://nodrail.com/docs/agent-plugins). Its covered calls are then decided by the shared rules, and every decision is recorded for your team.
 
-**Export YAML** brings the file back, so the copy in your repository and its `cases.yaml` stay the source you review. See [Using Nodrail Cloud](https://nodrail.com/docs/cloud#policies).
+**Export YAML** brings the file back, so the copy in your repository and its `cases.yaml` stay the source you review. See [the console](https://nodrail.com/docs/cloud#policies).
 
 ## Where to go from here
 

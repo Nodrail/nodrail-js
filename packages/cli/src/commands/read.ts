@@ -91,21 +91,12 @@ export async function run(command: Command) {
 
 type Insights = {
   days: number;
-  approvals: {
-    requests: number;
-    approved: number;
+  decisions: {
+    actions: number;
+    allowed: number;
     denied: number;
-    expired: number;
-    waiting: number;
-    median_seconds_to_decide: number | null;
+    no_rule: number;
   };
-  repeated_approvals: {
-    agent_key: string;
-    tool_key: string;
-    operation_key: string;
-    resource: string;
-    approved: number;
-  }[];
 };
 
 export async function insights(command: Command) {
@@ -113,21 +104,10 @@ export async function insights(command: Command) {
   const days = command.values.days ? Number(command.values.days) : undefined;
   const data = (await (await command.api()).insights(days)) as Insights;
   command.print(data, () => {
-    const a = data.approvals;
-    const median =
-      a.median_seconds_to_decide === null
-        ? "—"
-        : `${Math.round(a.median_seconds_to_decide)}s`;
-    const repeated = data.repeated_approvals.map(
-      (item) =>
-        `  ${item.agent_key} ${item.tool_key}.${item.operation_key} ${item.resource} · approved ${item.approved}×`,
-    );
+    const d = data.decisions;
     return [
       `Last ${data.days} days`,
-      `Requests ${a.requests}: ${a.approved} approved, ${a.denied} denied, ${a.expired} expired, ${a.waiting} waiting. Median time to decide ${median}.`,
-      repeated.length
-        ? `Approvals that could be a rule:\n${repeated.join("\n")}`
-        : "No approvals repeat enough to suggest a rule.",
+      `Actions ${d.actions}: ${d.allowed} allowed, ${d.denied} denied (${d.no_rule} because no rule covered them).`,
     ].join("\n");
   });
 }

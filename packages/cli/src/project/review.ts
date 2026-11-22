@@ -91,7 +91,7 @@ export function contractsReview(
 function reviewed(baseline: Baseline) {
   if (!baseline.text) return null;
   const result = compilePolicies([
-    { name: "baseline.apf.yaml", text: baseline.text },
+    { name: "baseline.yaml", text: baseline.text },
   ]);
   return result.ok ? result.document : null;
 }

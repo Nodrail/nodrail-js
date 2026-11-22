@@ -139,8 +139,8 @@
   effect: allow
 
 # Nodrail's own commands. Run by hand, the hook could write a step or a verdict
-# into the run ledger, and `nodrail` can approve requests, so they are for
-# you, not the agent. Starting the plugin hook through node or npx runs another
+# into the run ledger, and `nodrail` can change the policy itself, so they are
+# for you, not the agent. Starting the plugin hook through node or npx runs another
 # program, which no rule here allows.
 - list: nodrail_commands
   items: [nodrail, nodrail-policy, nodrail-claude-hook]

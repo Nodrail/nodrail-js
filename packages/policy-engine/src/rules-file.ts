@@ -9,6 +9,7 @@ import {
   type RuleFields,
 } from "./file-fields.ts";
 import type { PolicyDocument } from "./policies.ts";
+import { issueMessage } from "./removed-syntax.ts";
 import {
   entryWhere,
   issuePlace,
@@ -277,7 +278,7 @@ function checkEntry(
   for (const issue of parsed.error.issues)
     collector.error(
       issuePlace(here, issue),
-      `${issue.path.join(".") || kind}: ${issue.message}`,
+      `${issue.path.join(".") || kind}: ${issueMessage(issue)}`,
     );
   return null;
 }

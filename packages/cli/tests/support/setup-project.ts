@@ -18,7 +18,7 @@ import { TELEMETRY_FILE } from "../../src/setup/connections.ts";
 import { planSetup } from "../../src/setup/plan.ts";
 import { projectFolder } from "./project-folder.ts";
 
-const api = "apiVersion: apf.nodrail.com/v1alpha1";
+const api = "apiVersion: nodrail.com/v1alpha1";
 export const windows = process.platform === "win32";
 
 export const RESOURCES = {
@@ -79,6 +79,7 @@ export function tools(version = "2.1.327") {
 export function project(
   files: Record<string, string> = RESOURCES,
   bin: string | null = tools(),
+  network?: typeof globalThis.fetch,
 ) {
   const env: Record<string, string> = {
     PATH: bin ?? "",
@@ -86,7 +87,7 @@ export function project(
       ? { PATHEXT: ".CMD", SystemRoot: process.env.SystemRoot! }
       : {}),
   };
-  const folder = projectFolder(files, env);
+  const folder = projectFolder(files, env, network);
   const plan = () => planSetup({ root: folder.cwd, home: folder.home, env });
   return { ...folder, env, plan };
 }
@@ -94,8 +95,9 @@ export function project(
 export async function locked(
   files?: Record<string, string>,
   bin?: string | null,
+  network?: typeof globalThis.fetch,
 ) {
-  const p = project(files, bin);
+  const p = project(files, bin, network);
   const lock = await p.run("policy", "lock");
   expect(lock.err).toBe("");
   return p;
@@ -181,7 +183,7 @@ export const leadFiles = (p: ReturnType<typeof project>) => ({
 
 /** The document the hook compiles an effective policy into; it must compile. */
 export function hookDocument(text: string): Record<string, any> {
-  const compiled = compilePolicies([{ name: "effective.apf.yaml", text }]);
+  const compiled = compilePolicies([{ name: "effective.yaml", text }]);
   if (!compiled.ok) throw new Error(JSON.stringify(compiled.issues));
   return compiled.document as Record<string, any>;
 }

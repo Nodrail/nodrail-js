@@ -3,7 +3,7 @@ nodrail.yaml:
   shapes:
     review-brief: { properties: { issue: { type: string } } }
 resources:
-  - apiVersion: apf.nodrail.com/v1alpha1
+  - apiVersion: nodrail.com/v1alpha1
     kind: Agent
     metadata: { name: reviewer }
     spec: { brief: reveiw-brief }

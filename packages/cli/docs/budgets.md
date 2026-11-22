@@ -48,7 +48,7 @@ A project without numeric budgets gets exactly the files and settings it got bef
 | `across`                                                               | Who counts it                           | Local setup                                                                                                                              |
 | ---------------------------------------------------------------------- | --------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
 | `run` (default for `per: step` and `per: run`; `per: day` must say it) | this run's ledger, under the run's lock | enforced                                                                                                                                 |
-| `environment`                                                          | the shared online authority             | **fails activation**: shared budgets are enforced only on a Cloud-managed connection, and the local hook would hold every call it covers |
+| `environment`                                                          | the shared online authority             | **fails activation**: shared budgets are enforced only on a control-plane-managed connection, and the local hook would hold every call it covers |
 
 `per: day` counts the calendar day in its `timezone` (IANA), 23 or 25 hours when the clocks change. `plan` lists each budget with its label, unit, window, scope and how it is enforced here, and refuses `across: environment`; `nodrail contracts explain <budget>` says the same for one budget.
 
@@ -69,7 +69,7 @@ Reservations without a known outcome (each still counts)
 
 Your word on one reservation, once you know what happened: `--released` gives the slot back, `--consumed` keeps it counted. The note is required and kept in the ledger. It is written under the run's lock, so the hook's next decision sees it, and it replaces the runtime's settlement. `--run <run>` names the run when the key is in more than one.
 
-Only the person on this machine reconciles local reservations; the setup guard refuses `nodrail` to agents. In Cloud, admins and policy managers reconcile shared budgets there, audited; the two don't mirror each other.
+Only the person on this machine reconciles local reservations; the setup guard refuses `nodrail` to agents. On the control plane, admins and policy managers reconcile shared budgets there, audited; the two don't mirror each other.
 
 ## Limits that stay
 

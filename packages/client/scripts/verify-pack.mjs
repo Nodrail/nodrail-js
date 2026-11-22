@@ -90,15 +90,15 @@ const client = new NodrailClient({
 const decision = await authorize(client, descriptor, "key");
 if (decision.allowed) throw new Error("allowed while unreachable");
 
-const nodrail = createNodrail({ credential: "c", waitMs: 0, env: {}, fetch: async () => { throw new Error("down"); } });
+const nodrail = createNodrail({ credential: "c", env: {}, fetch: async () => { throw new Error("down"); } });
 let ran = false;
 const guarded = nodrail.guard({ send: { name: "send", execute: () => { ran = true; } } });
 await guarded.send.execute({});
 if (ran) throw new Error("a guarded tool ran while unreachable");
 if (typeof codexHooks("x").PreToolUse[0].matcher !== "string") throw new Error("setup");
 
-const expected = { "read-allowed": "allow", "write-needs-review": "require_approval", "deny-sensitive": "deny" };
-const calls = { "read-allowed": ["issues.read", "acme/support"], "write-needs-review": ["issues.update", "a/b"], "deny-sensitive": ["repositories.delete", "a/b"] };
+const expected = { "read-allowed": "allow", "write-after-review": "deny", "deny-sensitive": "deny" };
+const calls = { "read-allowed": ["issues.read", "acme/support"], "write-after-review": ["issues.update", "a/b"], "deny-sensitive": ["repositories.delete", "a/b"] };
 for (const [name, outcome] of Object.entries(expected)) {
   const name_ = name + ".yaml";
   const compiled = compilePolicies([{ name: name_, text: await readFile("node_modules/@nodrail/client/examples/policies/" + name_, "utf8") }]);

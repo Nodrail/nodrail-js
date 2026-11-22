@@ -93,11 +93,8 @@ describe("a missing or wrong-typed parameter", () => {
   test.each([
     ["missing", {}],
     ["a string", { amount: "5" }],
-  ])("%s still lets a deny or review rule apply", (_label, params) => {
+  ])("%s still lets a deny rule apply", (_label, params) => {
     expect(conditionsMatch(amountUnder("deny"), descriptor(params))).toBe(true);
-    expect(
-      conditionsMatch(amountUnder("require_approval"), descriptor(params)),
-    ).toBe(true);
   });
 
   test("in with no item of the same type never helps an allow", () => {

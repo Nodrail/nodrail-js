@@ -11,7 +11,6 @@ import { bind, type Registry } from "./registry.ts";
 import type { Path } from "./resolve.ts";
 import type { ResolvedShape } from "./types.ts";
 import { validateValue } from "./validate.ts";
-import { compileWhere, single } from "./where.ts";
 
 const M = "nodrail.yaml";
 
@@ -334,63 +333,6 @@ function bindFiles(registry: Registry) {
   }
 }
 
-// S08, and the routes C04 reads.
-function bindApprovals(registry: Registry) {
-  for (const [name, form] of Object.entries(
-    registry.manifest.approvals ?? {},
-  )) {
-    const at = [M, "approvals", name];
-    const request = bind(
-      registry,
-      {
-        surface: "S08",
-        name: `request:${name}`,
-        shape: form.request,
-        options: {},
-      },
-      [...at, "request"],
-    );
-    if (form.decision)
-      bind(
-        registry,
-        {
-          surface: "S08",
-          name: `decision:${name}`,
-          shape: form.decision,
-          options: {},
-        },
-        [...at, "decision"],
-      );
-    const projected = registry.projections.get(form.request)?.shape;
-    form.routes.forEach((route, index) => {
-      const here = [...at, "routes", index];
-      if (!route.where && index < form.routes.length - 1)
-        registry.report(
-          "route-order",
-          here,
-          "A route without where catches everything; only the last can",
-        );
-      // Cloud routes on what it receives: reported request fields only.
-      const conditions =
-        route.where && request && projected
-          ? compileWhere(
-              route.where,
-              single(request, projected),
-              [...here, "where"],
-              registry.report,
-            )
-          : [];
-      registry.consumers.push({
-        consumer: "C04",
-        at: here.join("."),
-        bindings: [`request:${name}`],
-        conditions: conditions ?? [],
-        detail: { approvers: route.approvers },
-      });
-    });
-  }
-}
-
 // S09
 function bindInventory(registry: Registry) {
   const inventory = registry.manifest.inventory;
@@ -424,6 +366,5 @@ export function bindAll(registry: Registry, resources: unknown[]) {
   bindEvidence(registry);
   bindMemory(registry);
   bindFiles(registry);
-  bindApprovals(registry);
   bindInventory(registry);
 }

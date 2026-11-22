@@ -31,11 +31,3 @@ export function resolveConnection(env: Environment) {
       null,
   };
 }
-
-const DEFAULT_WAIT_SECONDS = 300;
-
-/** How long to wait for a person. Unreadable values mean not waiting. */
-export function waitMsFrom(env: Environment) {
-  const seconds = Number(env.NODRAIL_WAIT_SECONDS ?? DEFAULT_WAIT_SECONDS);
-  return Number.isFinite(seconds) ? Math.max(0, seconds) * 1000 : 0;
-}

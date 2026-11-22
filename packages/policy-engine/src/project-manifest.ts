@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { agentConnectionsField, connectionsField } from "./connections.ts";
 import { agentPluginsField, pluginsField } from "./plugins.ts";
+import { connectField } from "./connect-schema.ts";
 import { telemetryField } from "./telemetry-schema.ts";
 
 /** A project's composition: what it imports, in order, and with what. */
@@ -123,6 +124,8 @@ export const setupFields = {
   tested: testedField.optional(),
   /** What `nodrail observe` records, and when it runs (preview). */
   observe: observeField.optional(),
+  /** The Nodrail this project is connected to, and who decides (R383). */
+  connect: connectField.optional(),
 };
 
 /** nodrail.yaml, or a local manifest it imports. */

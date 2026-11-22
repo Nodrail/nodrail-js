@@ -54,7 +54,7 @@ nodrail.yaml:
   receipts:
     reviewer: { shape: reviewer-result, format: fenced }
 resources:
-  - apiVersion: apf.nodrail.com/v1alpha1
+  - apiVersion: nodrail.com/v1alpha1
     kind: Agent
     metadata: { name: reviewer }
     spec: { instructions: ./agents/reviewer.md, receipt: reviewer }
@@ -131,7 +131,6 @@ Every attachment names a shape from the registry. The binding names in the secon
 | S05 | `evidence.<name>: { shape, producers, subject }`                                                                                                                                                        | `evidence:<name>`                   |
 | S06 | `memory.<name>: { shape, connection, operations, writers, deleters, max_records }`                                                                                                                      | `memory:<name>`                     |
 | S07 | `files.<name>: { root, pattern, frontmatter, sections, max_bytes, writers }`                                                                                                                            | `file:<name>`                       |
-| S08 | `approvals.<name>: { request, decision, routes }`; a `require_approval` rule or gate names it with `approval: <name>`.                                                                                  | `request:<name>`, `decision:<name>` |
 | S09 | `inventory: { shape, values }`                                                                                                                                                                          | `inventory`                         |
 
 ### S01 receipts
@@ -172,13 +171,13 @@ nodrail.yaml:
     qa: { shape: qa-result }
 resources:
   - {
-      apiVersion: apf.nodrail.com/v1alpha1,
+      apiVersion: nodrail.com/v1alpha1,
       kind: Agent,
       metadata: { name: developer },
       spec: { receipt: developer },
     }
   - {
-      apiVersion: apf.nodrail.com/v1alpha1,
+      apiVersion: nodrail.com/v1alpha1,
       kind: Agent,
       metadata: { name: qa },
       spec: {},
@@ -187,7 +186,7 @@ resources:
 
 #### How a receipt is read (enforced, engine level 4)
 
-One function, `readContractReceipt(message, contract, dispatchedAgent)` from `@nodrail/policy-engine/contracts`, reads a receipt for the local hook and for Cloud. It returns one typed value and a state:
+One function, `readContractReceipt(message, contract, dispatchedAgent)` from `@nodrail/policy-engine/contracts`, reads a receipt for the local hook and for the control plane. It returns one typed value and a state:
 
 - **valid**: the value, its verdict, the findings count derived by the runtime, and agent-reported usage.
 - **invalid**: no verdict. Issues name a path and a code, never a value. Besides the value codes below, capture adds `parse` (not YAML, a key twice), `identity` (the receipt names another agent than the one dispatched) and `size` (the block that ends the message is over 8 KiB).
@@ -234,7 +233,7 @@ The compiled document is `version: 3`: each agent's resolved receipt contract, p
 
 ### S02–S04 briefs and tools
 
-A brief, a tool's input and a tool's result accept no roles. A brief is validated before a covered dispatch; a prose prompt is not a brief. Input is validated before the provider is called, against the same action descriptor that is evaluated and approved. A result is validated after the provider returns: an invalid result is unusable downstream, and the execution it reports is recorded apart from its conformance.
+A brief, a tool's input and a tool's result accept no roles. A brief is validated before a covered dispatch; a prose prompt is not a brief. Input is validated before the provider is called, against the same action descriptor that is evaluated. A result is validated after the provider returns: an invalid result is unusable downstream, and the execution it reports is recorded apart from its conformance.
 
 #### Briefs and tool inputs (enforced, engine level 4)
 
@@ -249,7 +248,7 @@ The states stay distinct: **valid**; **invalid**; **missing** (no block, or none
 
 **Tool input.** A call to a connection operation with a declared `input` is checked with `checkInput(contract, input)` (`/contract-values`): strict, so an argument the shape doesn't declare is `unknown`; over 16 KiB is `size`. The call is matched by the tool and operation it is judged as (`mcp__stripe__refund` is `stripe refund`). Arguments under a `secret` or `pii` classification are shown to reviewers as `[classified]` (`withoutClassified`); the input's fingerprint still binds the exact call.
 
-`where` on a rule or a gate reads `input.<path>` (the operation named by `tool` and `operation`) or `brief.<path>` (a rule on starting one agent: `resource: { kind: agent, match: exact, value: <agent> }`), with the same matcher as gate requirements. Every condition must hold, and a missing value satisfies none. A document checked without validated values (another evaluator, a simulation) never lets an allow with `where` match, and still lets a deny or review match. A result (`result.`) is read where the call is mediated, never by this hook.
+`where` on a rule or a gate reads `input.<path>` (the operation named by `tool` and `operation`) or `brief.<path>` (a rule on starting one agent: `resource: { kind: agent, match: exact, value: <agent> }`), with the same matcher as gate requirements. Every condition must hold, and a missing value satisfies none. A document checked without validated values (another evaluator, a simulation) never lets an allow with `where` match, and still lets a deny match. A result (`result.`) is read where the call is mediated, never by this hook.
 
 ```yaml
 - required_engine_version: 4
@@ -281,12 +280,12 @@ The states stay distinct: **valid**; **invalid**; **missing** (no block, or none
   resource: { kind: mcp_tool, match: any }
   where: { input.amount: { max: 5000 }, input.environment: staging }
   effect: allow
-- rule: Large refunds go to a person
+- rule: Never refund large amounts
   tool: stripe
   operation: refund
   resource: { kind: mcp_tool, match: any }
   where: { input.amount: { min: 5001 } }
-  effect: require_approval
+  effect: deny
 - rule: Never refund in production
   tool: stripe
   operation: refund
@@ -326,9 +325,9 @@ nodrail.yaml:
 
 #### Evidence requirements (enforced, engine level 5)
 
-> **Cloud.** The local hook enforces evidence requirements at engine level 5. Nodrail Cloud's side, taking `externally-verified` evidence from CI and answering the status a hook asks, arrives with the matching Cloud release.
+> **Control plane.** The local hook enforces evidence requirements at engine level 5. The control plane's side, taking `externally-verified` evidence from CI and answering the status a hook asks, arrives with the matching server release.
 
-A gate requirement `{ evidence, authority, subject: revision, where }` needs `required_engine_version: 5` in its file, and so does `evidence` in a rule file's `contracts` entry. It compiles to a version 4 document: the gate's `evidence` list, each pinned to the evidence contract's digest, and the document's `evidence` contracts with their producers. In v1 every evidence requirement says `subject: revision`; `subject: none` evidence is for views and insights only. A `where` on a `classification: secret` path of evidence is refused: Cloud never keeps a secret path, so the condition could never be evaluated there.
+A gate requirement `{ evidence, authority, subject: revision, where }` needs `required_engine_version: 5` in its file, and so does `evidence` in a rule file's `contracts` entry. It compiles to a version 4 document: the gate's `evidence` list, each pinned to the evidence contract's digest, and the document's `evidence` contracts with their producers. In v1 every evidence requirement says `subject: revision`; `subject: none` evidence is for views and insights only. A `where` on a `classification: secret` path of evidence is refused: the control plane never keeps a secret path, so the condition could never be evaluated there.
 
 ```yaml
 - required_engine_version: 5
@@ -372,55 +371,36 @@ A requirement is met by the latest event of that evidence whose subject is the c
 Where each event comes from:
 
 - `runtime-observed` events come from the ledger folder's `evidence/<name>.jsonl`, written by `nodrail evidence run`. Readers dedupe on the event id. Events match by subject only, so a copied old line never satisfies new work.
-- `externally-verified` evidence is Cloud's to confirm. With `nodrail-policy hook --evidence <file>` (`{ url, workspace_revision }`, and the person's token in `NODRAIL_TOKEN` with the `read` scope), the hook asks `GET /api/v1/evidence/status` only about the requirements of gates that cover the call and aren't met locally. It asks by gate id, requirement index and subject, never with a condition of its own, and waits at most 3 seconds.
+- `externally-verified` evidence is the control plane's to confirm. With `nodrail-policy hook --evidence <file>` (`{ url, workspace_revision }`, and the person's token in `NODRAIL_TOKEN` with the `read` scope), the hook asks `GET /api/v1/evidence/status` only about the requirements of gates that cover the call and aren't met locally. It asks by gate id, requirement index and subject, never with a condition of its own, and waits at most 3 seconds.
   - A positive answer is cached for 5 minutes per requirement and subject. A negative one is never cached.
   - Offline, an unpublished revision, a token without `read`, a timeout or an error leave the requirement unmet, with the reason.
   - Copilot's native hook reads local evidence only.
 
-`@nodrail/policy-engine/revision` exports `cleanRevision(commit)`, the revision a clean checkout of that commit reads: Cloud ties a CI run's `sha` to the local subject with it. A `pull_request` run's merge commit never matches a local head.
+`@nodrail/policy-engine/revision` exports `cleanRevision(commit)`, the revision a clean checkout of that commit reads: the control plane ties a CI run's `sha` to the local subject with it. A `pull_request` run's merge commit never matches a local head.
 
 ### S06 memory through a connection
 
-The record shape needs exactly one `kind`. `writers` maps each kind value to the agents that may create or update it; `deleters` may delete. An operation's `input`, if declared, must be the record shape. Storing a lesson never promotes it to a rule: that is a separate approved policy change. A memory contract adds no storage and never deletes data.
+The record shape needs exactly one `kind`. `writers` maps each kind value to the agents that may create or update it; `deleters` may delete. An operation's `input`, if declared, must be the record shape. Storing a lesson never promotes it to a rule: that is a separate policy change a person makes. A memory contract adds no storage and never deletes data.
 
 ### S07 files
 
 `root` is a project folder; `pattern` a `.md` path below it where `*` matches within one folder level (no `**`). `frontmatter` is a shape for the leading `---` YAML block (core schema, so dates stay quoted strings); `sections` are required level-2 (`## `) headings, matched by exact trimmed text, a name given twice (in any case) is refused; `{ name, optional: true }` makes one optional. Files are UTF-8, at most `max_bytes` (default 64 KiB, at most 256 KiB). Duplicate sections, traversal and unsafe links are rejected when content is validated. Existing protected `data:` paths stay protected.
 
-### S08 approval forms and S09 inventory
+### S09 inventory
 
 ```yaml contracts
 nodrail.yaml:
   shapes:
-    refund-request:
-      properties:
-        purpose: { type: string, max: 300, report: true }
-        risk: { values: [low, medium, high], report: true }
-        rollback: { type: string, max: 300, report: true }
-        amount: { type: integer, min: 1, unit: usd_cents, report: true }
-        customer_email: { type: string, max: 254, classification: pii }
     project-labels:
       properties:
         team: { values: [payments, growth], report: true }
         cost_centre: { values: [cc-100, cc-120], report: true }
-  approvals:
-    refund:
-      request: refund-request
-      routes:
-        - { where: { amount: { min: 10000 } }, approvers: { role: admin } }
-        - { approvers: { role: approver } }
   inventory:
     shape: project-labels
     values: { team: payments, cost_centre: cc-120 }
-policy:
-  - required_engine_version: 4
-  - rule: Refunds need a person
-    tool: stripe
-    operation: refund
-    resource: { kind: charge, match: any }
-    effect: require_approval
-    approval: refund
 ```
+
+S08, approval forms (`approvals:` in `nodrail.yaml` and `approval:` on a rule or gate), was removed with `require_approval`: nothing waits for a person. A file that still has either fails to compile and says so; a rule allows or denies, and a gate, budget or evidence says when a call is allowed.
 
 Inventory labels are single values, validated against the shape at compile. Labels describe; they never grant a role, move billing or change a project's tenant.
 
@@ -443,7 +423,6 @@ Consumer fields in rule files need `required_engine_version: 4` in the file; evi
 | C01 | Gate `requires:` entries gain `where`, `authority`, `subject: revision`, and an evidence form `{ evidence, authority, where, subject }`.                                                                             | Verdicts must be ones the receipt declares; a receipt is `agent-reported`, so asking it for more is an error; evidence must have a producer of the required authority; `subject: revision` needs evidence declared with it.                                    |
 | C02 | Rule and gate `where:` with paths starting `input.`, `result.` (the operation named by `tool` and `operation`) or `brief.` (a rule on starting an agent: `resource: { kind: agent, match: exact, value: <agent> }`). | `result` conditions decide what may use a result next, never permission retroactively.                                                                                                                                                                         |
 | C03 | Budget `sum: { tool, operation, path }` and `unit:`                                                                                                                                                                  | The path is an `integer` (whole minor units) whose `unit` equals the budget's. An `input.` path is known before the call (admission, reservable); a `result.` path is measured after it and is never a guaranteed cap. Agent-reported usage never feeds these. |
-| C04 | `approvals.<name>.routes: [{ where, approvers }]`                                                                                                                                                                    | First matching route wins; only the last may omit `where`. Approvers are a server role (`admin`, `policy_manager`, `approver`) or a server-owned group. No match, or an empty group, stays blocked. Routing never grants permission.                           |
 | C05 | `views.<name>: { source, columns, filters }`                                                                                                                                                                         | Columns are reported scalars; filters reported enums, booleans, dates or numbers.                                                                                                                                                                              |
 | C06 | Test `cases: [{ name, target, value, expect, issues, projection }]`                                                                                                                                                  | `target` is a binding name or `shape:<name>`. Side-effect free: no tool runs.                                                                                                                                                                                  |
 | C07 | The lock's `contracts:` section                                                                                                                                                                                      | See [Digests and the lock](#digests-and-the-lock).                                                                                                                                                                                                             |
@@ -451,11 +430,11 @@ Consumer fields in rule files need `required_engine_version: 4` in the file; evi
 | C09 | `insights.<name>: { source, measure, path, group }`                                                                                                                                                                  | `measure` is `count`, `validity`, `verdicts` or `rework` (receipts) or `sum` (a reported number with a unit). Groups are reported enums or booleans. Denominators include missing, invalid and unsupported records.                                            |
 | C10 | `notifications.<name>: { source, where, fields, to }`                                                                                                                                                                | Fields and conditions read reported values only. Exports and the API apply the same projection.                                                                                                                                                                |
 
-`source` is `{ receipt: <name> }`, `{ evidence: <name> }`, `{ memory: <name> }` or `{ approval: <name> }` (its request). C04, C05, C09 and C10 run off the machine, so every path they name must be reported.
+`source` is `{ receipt: <name> }`, `{ evidence: <name> }` or `{ memory: <name> }`. C05, C09 and C10 run off the machine, so every path they name must be reported. A notification goes `to` a server role, `admin` or `policy_manager`. C04, approval routing, was removed with approval forms.
 
 ### Numeric budgets (enforced, engine level 5)
 
-> **Cloud.** The local hook enforces numeric budgets at engine level 5. Nodrail Cloud doesn't enforce them yet; that support is pending and arrives with the matching Cloud release.
+> **Control plane.** The local hook enforces numeric budgets at engine level 5. The control plane doesn't enforce them yet; that support arrives with the matching server release.
 
 A numeric budget needs `required_engine_version: 5` in its file and compiles into a version 4 document's `limits`. A file's legacy `tool_calls`, `tokens` and `usd` budgets stay in `budgets`, read as before. A budget counts exactly one thing:
 
@@ -471,7 +450,7 @@ Labels follow from the source and can't be configured. Sources never mix in one 
 
 - **`limit`.** A whole number above 0, in minor units. A measured tokens budget's limit is its `tokens` value.
 - **`per`.** `step`, `run` or `day`. A day needs `timezone`, an IANA name: the day is local, so it is 23 or 25 hours when the clocks change.
-- **`across`.** `run` (the default for a step or run) or `environment`, and `per: day` must say which. `across: environment` needs the shared online authority: the local hook holds every call such a budget covers ("shared budgets are enforced only on a Cloud-managed connection"), and plan fails its activation.
+- **`across`.** `run` (the default for a step or run) or `environment`, and `per: day` must say which. `across: environment` needs the shared online authority: the local hook holds every call such a budget covers ("shared budgets are enforced only on a control-plane-managed connection"), and plan fails its activation.
 
 ```yaml
 - required_engine_version: 5
@@ -581,7 +560,7 @@ nodrail.yaml:
       }
 resources:
   - {
-      apiVersion: apf.nodrail.com/v1alpha1,
+      apiVersion: nodrail.com/v1alpha1,
       kind: Agent,
       metadata: { name: reviewer },
       spec: { receipt: reviewer },
@@ -631,7 +610,7 @@ Parsing a declaration is not enforcing it, so every place a contract can be writ
 
 ## Digests and the lock
 
-A digest is `sha256:` and the hex SHA-256 of `nodrail:<domain>:v1`, a newline, and the RFC 8785 (JCS) canonical JSON of what it pins. Domains: `shape`, `projection`, `binding`, `workspace`, `value`, `approval`. Display prefixes are never identity.
+A digest is `sha256:` and the hex SHA-256 of `nodrail:<domain>:v1`, a newline, and the RFC 8785 (JCS) canonical JSON of what it pins. Domains: `shape`, `projection`, `binding`, `workspace`, `value`. Display prefixes are never identity.
 
 - **Shape (contract) digest**: the resolved shape, `extends` merged, with every field explicit: `type` (`enum`, `object` and `list` included), `optional`, `for` (null when absent), `report` (null when unstated), `classification`, `role`, and the type's bounds with defaults filled in (`min: 0, max: 1000` for strings, `min: 0, max: 50` for lists, `null` for unset number and date bounds, `unit`). The shape's name and parent are not part of it: the same content has the same digest.
 - **Projection digest**: the projected shape and its withheld paths.
@@ -659,7 +638,7 @@ A lock that differs from the recompiled contracts is refused until the change is
 | `agent-reported`       | An agent's receipt or claim.                                                            | Requirements on `agent-reported`.                                             |
 | `runtime-observed`     | The local runtime (hook, adapter) saw it.                                               | `runtime-observed` and below.                                                 |
 | `externally-verified`  | A verifier configured on the server, with authenticated evidence for the exact subject. | Every gate authority.                                                         |
-| `person-authenticated` | A person signed in to Cloud: forms, decisions, labels.                                  | Only what asks for a person; never stands in for the others, nor they for it. |
+| `person-authenticated` | A person signed in to the control plane: labels.                                                    | Only what asks for a person; never stands in for the others, nor they for it. |
 
 Structure proves conformance, not truth: `anchor: fresh`, `tests_passed: true` or `usage.usd: 0` in a valid receipt prove nothing. Provenance is relative to the deployment's trust boundary; local records can be altered by whoever owns the machine. Passing a gate never grants a permission the policy lacks.
 
@@ -677,7 +656,7 @@ The full value is validated locally against the full pinned contract. A separate
 - Built-in safe fields keep their behavior: the `verdict` and `usage` roles are reported unless they say `report: false`; the findings count is derived by the runtime and reported with the envelope.
 - The projected schema is itself a shape: the reported properties with their types, bounds and `for` text, and the withheld paths by name. Descriptions of withheld properties never leave the machine.
 
-A required property left out by the projection does not make the projected record malformed: the projection is validated against the projected schema, where it isn't required. Cloud records the producer's full-validation state with its authority (`validation.at: local`) and does not attest to what it never saw. A reported record can't resolve an approval or satisfy an authoritative Cloud gate. When a Cloud authorization needs a private value, it is submitted through that authorized channel under its own disclosure rules, or the requirement stays unmet.
+A required property left out by the projection does not make the projected record malformed: the projection is validated against the projected schema, where it isn't required. The control plane records the producer's full-validation state with its authority (`validation.at: local`) and does not attest to what it never saw. A reported record can't satisfy an authoritative control-plane gate. When a control-plane authorization needs a private value, it is submitted through that authorized channel under its own disclosure rules, or the requirement stays unmet.
 
 The same projection applies to run events, schema descriptions, examples, errors, previews, notifications, exports, charts and the API.
 
@@ -685,23 +664,17 @@ The same projection applies to run events, schema descriptions, examples, errors
 
 | Operation                                                 | Token scope                                                | Server roles                                                          |
 | --------------------------------------------------------- | ---------------------------------------------------------- | --------------------------------------------------------------------- |
-| Read projected schemas, reported records, views, insights | `workspace:read`                                           | Per existing view rules; approvers and viewers see their own sources. |
+| Read projected schemas, reported records, views, insights | `workspace:read`                                           | Per existing view rules; viewers see their own sources.               |
 | Publish contracts (with the workspace revision)           | `policies:write`                                           | admin, policy_manager                                                 |
 | Report projected records                                  | `inventory:write` (reporting only)                         | Any member, for their own machines. Never authorizes.                 |
 | Submit authoritative evidence                             | a new `evidence:submit`, held by configured verifiers only | —                                                                     |
-| Create an approval request from a runtime                 | `actions:submit`                                           | —                                                                     |
-| Decide an approval                                        | `approvals:decide`, and eligible by the route              | admin, approver (routing can narrow, never widen)                     |
 | Edit inventory labels                                     | `policies:write` through the published workspace           | admin, policy_manager                                                 |
 
-Existing reporting-only tokens gain no policy, evidence or approval privileges. Tenancy comes from the authenticated context, never from a field.
+Existing reporting-only tokens gain no policy or evidence privileges. Tenancy comes from the authenticated context, never from a field.
 
 ### Retention
 
 Contract and projection revisions are immutable and kept as long as any retained record references them; a record whose contract is gone is shown as "contract unavailable", never revalidated against a later one. Records follow the workspace's existing retention, deletion and export. Persistent memory and files are never removed by `destroy` and stay out of configuration locks; their schema and path bindings are locked.
-
-### Approvals bind the exact action
-
-A decision is valid for one binding: the action descriptor's digest, the request contract's digest and the request values' digest, the decision contract's digest and the policy revision. Changing any of them, an edited argument or a form whose schema moved on, needs a new decision; a stale form can't approve a changed action.
 
 ## Validation and issues
 
@@ -709,14 +682,14 @@ States stay distinct: **valid**, **invalid** (no usable verdict, never recovered
 
 Value issue codes: `required`, `unknown`, `type`, `enum`, `too-short`, `too-long`, `too-few`, `too-many`, `below`, `above`, `duplicate`, and `size` (path `(value)`: an input, brief or result over its byte limit).
 
-Compile issue codes: `grammar`, `unknown-shape`, `extends-chain`, `depth`, `property-count`, `role-placement`, `role-count`, `role-required`, `role-unsupported`, `report-classified`, `reserved-name`, `header-nesting`, `unknown-reference`, `binding-conflict`, `kind-value`, `inventory-shape`, `value`, `route-order`, `approval-effect`, `path`, `path-type`, `path-through-list`, `not-reported`, `verdict-value`, `authority`, `subject`, `unit`, `engine-level`, `collision`, `lock-mismatch`, `case-failed`. Every issue is an error; there are no warnings.
+Compile issue codes: `grammar`, `unknown-shape`, `extends-chain`, `depth`, `property-count`, `role-placement`, `role-count`, `role-required`, `role-unsupported`, `report-classified`, `reserved-name`, `header-nesting`, `unknown-reference`, `binding-conflict`, `kind-value`, `inventory-shape`, `value`, `path`, `path-type`, `path-through-list`, `not-reported`, `verdict-value`, `authority`, `subject`, `unit`, `engine-level`, `collision`, `lock-mismatch`, `case-failed`. Every issue is an error; there are no warnings.
 
 ## Limits
 
 | What                                                         | Bytes                                        |
 | ------------------------------------------------------------ | -------------------------------------------- |
 | Receipt block, fences included                               | 8 KiB                                        |
-| Brief, tool input, evidence, memory record, approval request | 16 KiB                                       |
+| Brief, tool input, evidence, memory record                   | 16 KiB                                       |
 | Tool result                                                  | 64 KiB                                       |
 | File                                                         | 64 KiB by default, `max_bytes` up to 256 KiB |
 | Inventory labels                                             | 4 KiB                                        |

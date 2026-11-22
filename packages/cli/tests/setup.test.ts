@@ -80,7 +80,7 @@ describe("nodrail plan", () => {
       "+ .claude/agents/publisher.md",
       "+ .claude/skills/release-notes/SKILL.md",
       "+ .claude/skills/release-notes/template.md",
-      "+ .nodrail/effective.apf.yaml",
+      "+ .nodrail/effective.yaml",
       "+ .nodrail/protected.txt",
       "+ .claude/settings.json",
       "Agent loner isn't on team release; it isn't set up.",
@@ -132,7 +132,7 @@ resources/team.yaml
 skills/release-notes
 `);
     // The policy is the frozen export, team rules included.
-    const effective = file(".nodrail/effective.apf.yaml")!;
+    const effective = file(".nodrail/effective.yaml")!;
     expect(effective).toContain("lead may start publisher");
     expect((await p.run("policy", "export", "--frozen")).out).toBe(
       effective.replace(/\n$/, ""),
@@ -147,7 +147,7 @@ skills/release-notes
               {
                 type: "command",
                 command:
-                  'nodrail policy hook "$CLAUDE_PROJECT_DIR/.nodrail/effective.apf.yaml" --protect-list "$CLAUDE_PROJECT_DIR/.nodrail/protected.txt" --agent lead',
+                  'nodrail policy hook "$CLAUDE_PROJECT_DIR/.nodrail/effective.yaml" --protect-list "$CLAUDE_PROJECT_DIR/.nodrail/protected.txt" --agent lead',
                 onFailure: "block",
               },
             ],
@@ -269,7 +269,7 @@ skills/release-notes
     const { code, out } = await p.run("plan");
     expect(code).toBe(1);
     expect(out).toContain("! policy: No nodrail.lock.yaml here.");
-    expect(out).not.toContain(".nodrail/effective.apf.yaml");
+    expect(out).not.toContain(".nodrail/effective.yaml");
     expect(out).toContain("+ .claude/agents/lead.md");
   });
 
@@ -513,7 +513,7 @@ describe("nodrail apply", () => {
     expect((await p.run("policy", "lock")).code).toBe(0);
     expect(applied(p).map((step) => [step.path, step.action])).toEqual([
       [".claude/agents/lead.md", "update"],
-      [".nodrail/effective.apf.yaml", "update"],
+      [".nodrail/effective.yaml", "update"],
       [".claude/agents/publisher.md", "remove"],
     ]);
     const second = await p.run("apply", "--yes");
@@ -657,7 +657,7 @@ describe.skipIf(windows)("Codex", () => {
       [".codex/agents/publisher.toml", "create"],
       [".codex/config.toml", "create"],
       [".codex/hooks.json", "create"],
-      [".nodrail/effective.apf.yaml", "create"],
+      [".nodrail/effective.yaml", "create"],
       [".nodrail/protected.txt", "create"],
     ]);
     expect(plan.checks).toContainEqual({
@@ -833,8 +833,8 @@ describe.skipIf(windows)("one nodrail.yaml for both hosts", () => {
     const { hosts } = p.state();
     expect(Object.keys(hosts).sort()).toEqual(["claude-code", "codex"]);
     // The effective policy is the same for both, and both own it.
-    expect(hosts.codex!.files[".nodrail/effective.apf.yaml"]).toBe(
-      hosts["claude-code"]!.files[".nodrail/effective.apf.yaml"],
+    expect(hosts.codex!.files[".nodrail/effective.yaml"]).toBe(
+      hosts["claude-code"]!.files[".nodrail/effective.yaml"],
     );
     for (const host of ["claude-code", "codex"]) {
       const again = await p.as(host, "apply", "--yes");
@@ -867,7 +867,7 @@ describe.skipIf(windows)("one nodrail.yaml for both hosts", () => {
     const actions = Object.fromEntries(
       plan.steps.map((step) => [step.path, step.action]),
     );
-    expect(actions[".nodrail/effective.apf.yaml"]).toBe("keep");
+    expect(actions[".nodrail/effective.yaml"]).toBe("keep");
     expect(actions[".claude/agents/publisher.md"]).toBe("remove");
     expect((await p.as("claude-code", "apply", "--yes")).code).toBe(0);
     expect(existsSync(join(p.cwd, ".claude/agents/publisher.md"))).toBe(false);
@@ -893,7 +893,7 @@ describe.skipIf(windows)("one nodrail.yaml for both hosts", () => {
     });
     expect(plan.runtime).toBe("claude-code");
     expect(
-      plan.steps.find((step) => step.path === ".nodrail/effective.apf.yaml")
+      plan.steps.find((step) => step.path === ".nodrail/effective.yaml")
         ?.action,
     ).toBe("keep");
   });

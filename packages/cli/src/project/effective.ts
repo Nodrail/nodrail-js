@@ -22,7 +22,7 @@ const compiled = (name: string, text: string) =>
   compilePolicies([{ name, text }]);
 
 /**
- * The project's policy as one ordinary APF file, and its compiled document.
+ * The project's policy as one ordinary rules file, and its compiled document.
  * The files are joined as written, so comments stay; the result must compile
  * to exactly what the files compile to separately. If joining ever changed
  * the meaning, the document is rendered back instead, and checked the same.
@@ -48,7 +48,7 @@ export function effectivePolicy(sources: PolicySource[]) {
     } catch {
       continue;
     }
-    const one = compiled("effective.apf.yaml", written);
+    const one = compiled("effective.yaml", written);
     if (one.ok && isDeepStrictEqual(one.document, separate.document))
       return { text: written, document: separate.document };
   }

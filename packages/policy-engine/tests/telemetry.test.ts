@@ -26,25 +26,7 @@ import {
 } from "../src/telemetry";
 import { telemetryObserver } from "../src/hook-telemetry";
 import { hasSecret, secretName, secretValue } from "../src/secret-refs";
-import { cli } from "./run-cli.ts";
-
-/**
- * Makes `home` the person's home (HOME on Unix, USERPROFILE on Windows,
- * which `os.homedir()` reads there). Answers what puts it back.
- */
-function homeAt(home: string) {
-  const saved = {
-    HOME: process.env.HOME,
-    USERPROFILE: process.env.USERPROFILE,
-  };
-  process.env.HOME = home;
-  process.env.USERPROFILE = home;
-  return () => {
-    for (const [name, value] of Object.entries(saved))
-      if (value === undefined) delete process.env[name];
-      else process.env[name] = value;
-  };
-}
+import { cli, homeAt } from "./run-cli.ts";
 
 const MARKER = "zebra-marker-5512";
 
@@ -524,10 +506,10 @@ describe("the hook's observer", () => {
         join(folder, "status.json"),
         JSON.stringify({ retryAfter: Date.now() + 60_000 }),
       );
-      const ask = JSON.stringify({
-        hookSpecificOutput: { permissionDecision: "ask" },
+      const denied = JSON.stringify({
+        hookSpecificOutput: { permissionDecision: "deny" },
       });
-      for (const stdout of ["", ask, "not json"])
+      for (const stdout of ["", denied, "not json"])
         observer.observe({ judged: judged(stdout), event: null, agent: null });
       const told = readFileSync(join(folder, "spool.jsonl"), "utf8")
         .trim()
@@ -536,7 +518,7 @@ describe("the hook's observer", () => {
           (line) =>
             (JSON.parse(line) as SpanRecord).attributes["nodrail.decision"],
         );
-      expect(told).toEqual(["allow", "require_approval", "deny"]);
+      expect(told).toEqual(["allow", "deny", "deny"]);
       // The queue can't be written: the decision stands, with a warning.
       rmSync(folder, { recursive: true });
       writeFileSync(folder, "");

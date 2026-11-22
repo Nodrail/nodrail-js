@@ -16,9 +16,11 @@
   operation: publish
   resource: { kind: channel, match: any }
   effect: deny
-- rule: Support publishes after a person's review
+# Support publishes to the help center only; any other channel, the blog
+# included, has no rule that allows it, so it is denied.
+- rule: Support publishes to the help center
   agent: support
   tool: outbox
   operation: publish
-  resource: { kind: channel, match: any }
-  effect: require_approval
+  resource: { kind: channel, match: exact, value: help-center }
+  effect: allow

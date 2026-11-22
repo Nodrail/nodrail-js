@@ -142,7 +142,7 @@ describe("a missing state", () => {
     const p = await locked();
     await p.run("apply", "--yes");
     rmSync(join(p.cwd, ".nodrail/setup-state.json"));
-    writeFileSync(join(p.cwd, ".nodrail/effective.apf.yaml"), "# edited\n");
+    writeFileSync(join(p.cwd, ".nodrail/effective.yaml"), "# edited\n");
     const plan = await p.run("plan", "--json");
     expect(json(plan.out).notes).toContainEqual(
       expect.stringContaining(

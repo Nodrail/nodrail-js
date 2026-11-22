@@ -2,6 +2,7 @@
 // the grammar, merge module contracts, resolve shapes, attach them, check
 // every consumer, digest the closure, then check the lock and test cases.
 import canonicalize from "canonicalize";
+import { issueMessage } from "../removed-syntax.ts";
 import { bindAll } from "./attachments.ts";
 import { compilePolicy } from "./consumers.ts";
 import { compileOutputs } from "./outputs.ts";
@@ -85,13 +86,13 @@ const M = "nodrail.yaml";
 const zodIssues = (
   report: Report,
   at: Path,
-  issues: { path: PropertyKey[]; message: string }[],
+  issues: { path: PropertyKey[]; message: string; code?: string }[],
 ) => {
   for (const issue of issues)
     report(
       "grammar",
       [...at, ...(issue.path as (string | number)[])],
-      issue.message,
+      issueMessage(issue),
     );
 };
 

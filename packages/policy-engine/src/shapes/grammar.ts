@@ -254,20 +254,8 @@ const fileDecl = z
     message: "Give frontmatter, sections or both",
   });
 
-// S08 + C04: approval forms and their routes.
-export const SERVER_ROLES = ["admin", "policy_manager", "approver"] as const;
-const approvers = z.union([
-  z.strictObject({ role: z.enum(SERVER_ROLES) }),
-  z.strictObject({ group: shapeName }),
-]);
-const approvalDecl = z.strictObject({
-  request: shapeName,
-  decision: shapeName.optional(),
-  routes: z
-    .array(z.strictObject({ where: whereDecl.optional(), approvers }))
-    .min(1)
-    .max(LIMITS.routes),
-});
+/** The control plane's roles a notification can go to. */
+export const SERVER_ROLES = ["admin", "policy_manager"] as const;
 
 // S09: inventory labels.
 const inventoryDecl = z.strictObject({
@@ -280,7 +268,6 @@ export const sourceDecl = z.union([
   z.strictObject({ receipt: shapeName }),
   z.strictObject({ evidence: shapeName }),
   z.strictObject({ memory: shapeName }),
-  z.strictObject({ approval: shapeName }),
 ]);
 const paths = (min: number) => z.array(pathText).min(min).max(LIMITS.columns);
 const viewDecl = z.strictObject({
@@ -329,7 +316,6 @@ export const contractFields = {
   evidence: z.record(shapeName, evidenceDecl).optional(),
   memory: z.record(shapeName, memoryDecl).optional(),
   files: z.record(shapeName, fileDecl).optional(),
-  approvals: z.record(shapeName, approvalDecl).optional(),
   inventory: inventoryDecl.optional(),
   views: z.record(shapeName, viewDecl).optional(),
   insights: z.record(shapeName, insightDecl).optional(),
@@ -356,6 +342,7 @@ export const SETUP_KEYS = [
   "telemetry",
   "tested",
   "observe",
+  "connect",
 ] as const;
 const setupKeys = Object.fromEntries(
   SETUP_KEYS.map((key) => [key, z.unknown().optional()]),
@@ -397,7 +384,6 @@ export const policyItem = z
     effect: z.string().optional(),
     otherwise: z.string().optional(),
     where: whereDecl.optional(),
-    approval: shapeName.optional(),
     requires: z.array(z.unknown()).optional(),
     sum: z
       .strictObject({ tool: z.string(), operation: z.string(), path: pathText })

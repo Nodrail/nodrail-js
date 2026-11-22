@@ -17,7 +17,7 @@ import {
   windows,
 } from "./support/setup-project.ts";
 
-const api = "apiVersion: apf.nodrail.com/v1alpha1";
+const api = "apiVersion: nodrail.com/v1alpha1";
 
 const CONTRACTS = `shapes:
   review:
@@ -84,7 +84,7 @@ spec:
   "nodrail.yaml": `${RESOURCES["nodrail.yaml"]}  - ./policies/contracts.yaml\n${CONTRACTS}`,
 };
 
-const EFFECTIVE = ".nodrail/effective.apf.yaml";
+const EFFECTIVE = ".nodrail/effective.yaml";
 
 async function setUp() {
   const p = await locked(FILES);

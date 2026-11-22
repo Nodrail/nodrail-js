@@ -27,7 +27,7 @@ nodrail.yaml:
       operations: { create: create_entities, delete: remove_everything }
       writers: { lessons: [developer], rule: [ghost] }
 resources:
-  - apiVersion: apf.nodrail.com/v1alpha1
+  - apiVersion: nodrail.com/v1alpha1
     kind: Agent
     metadata: { name: developer }
     spec: {}

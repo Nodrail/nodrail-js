@@ -42,7 +42,7 @@ async function main() {
   if (!isToolCall(stdin)) failure = 0;
   const result = await runHook(stdin, process.env, { agent });
   if (result.stderr) process.stderr.write(result.stderr);
-  // A request still waiting for a person must not hold the answer back.
+  // The answer is written in full before the process ends.
   if (result.stdout)
     process.stdout.write(result.stdout, () => process.exit(result.exitCode));
   else process.exit(result.exitCode);
