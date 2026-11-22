@@ -1,0 +1,81 @@
+description: >-
+  A merge gate on the real team: QA passed with no flaky checks, the reviewer
+  shipped with no blockers, and verified CI passed on this exact revision. A
+  receipt is agent-reported; only the evidence requirement asks for more.
+nodrail.yaml:
+  shapes:
+    reviewer-result:
+      properties:
+        verdict:
+          {
+            values: [ship, ship-with-debt, fix-first, unassessable],
+            role: verdict,
+          }
+        issue: { type: string, max: 100 }
+        findings:
+          role: findings
+          report: true
+          properties:
+            blocker: { type: integer, min: 0 }
+            major: { type: integer, min: 0 }
+        lesson: { type: string, max: 300, optional: true }
+    qa-result:
+      properties:
+        verdict: { values: [pass, fail], role: verdict }
+        checks: { type: integer, min: 0, report: true }
+        flaky: { type: integer, min: 0, optional: true, report: true }
+    ci-result:
+      properties:
+        status: { values: [passed, failed], report: true }
+        tests: { type: integer, min: 0, report: true }
+        duration_ms: { type: integer, min: 0, unit: ms, report: true }
+        log_url: { type: string, max: 500 }
+  receipts:
+    reviewer: { shape: reviewer-result }
+    qa: { shape: qa-result }
+  evidence:
+    ci-tests:
+      shape: ci-result
+      producers:
+        - { class: externally-verified, verifier: github-actions }
+      subject: revision
+resources:
+  - apiVersion: apf.nodrail.com/v1alpha1
+    kind: Agent
+    metadata: { name: developer }
+    spec: {}
+  - apiVersion: apf.nodrail.com/v1alpha1
+    kind: Agent
+    metadata: { name: qa }
+    spec: { receipt: qa }
+  - apiVersion: apf.nodrail.com/v1alpha1
+    kind: Agent
+    metadata: { name: reviewer }
+    spec: { receipt: reviewer }
+policy:
+  - required_engine_version: 5
+  - list: builders
+    items: [developer]
+  - gate: Reviewed and tested before merge
+    tool: github
+    operation: pr.merge
+    resource: { kind: repository, match: any }
+    requires:
+      - {
+          agent: qa,
+          verdict: pass,
+          since: { list: builders },
+          where: { flaky: 0 },
+        }
+      - agent: reviewer
+        verdict: [ship, ship-with-debt]
+        since: { list: builders }
+        where: { findings.blocker: 0, findings.major: { max: 2 } }
+        subject: revision
+      - {
+          evidence: ci-tests,
+          authority: externally-verified,
+          subject: revision,
+          where: { status: passed, tests: { min: 1 } },
+        }
+    otherwise: deny

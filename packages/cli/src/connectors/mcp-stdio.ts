@@ -6,11 +6,22 @@ export type Tool = {
   name: string;
   description: string;
   inputSchema: object;
+  /** An MCP output schema, passed on as the provider declared it. */
+  outputSchema?: object;
   call: (input: Record<string, unknown>) => Promise<ToolAnswer>;
 };
 
-/** What a tool call gives back: text for the model, flagged when it failed. */
-export type ToolAnswer = { text: string; isError?: boolean };
+/**
+ * What a tool call gives back: text for the model, flagged when it failed.
+ * A proxied provider's answer keeps its own MCP `content` blocks and
+ * `structuredContent`; `text` then only stands for them in messages.
+ */
+export type ToolAnswer = {
+  text: string;
+  isError?: boolean;
+  content?: unknown[];
+  structuredContent?: Record<string, unknown>;
+};
 
 type Request = {
   jsonrpc?: string;
@@ -18,6 +29,37 @@ type Request = {
   method?: string;
   params?: { name?: unknown; arguments?: unknown; protocolVersion?: unknown };
 };
+
+/** A tool as tools/list shows it. */
+const listed = ({ name, description, inputSchema, outputSchema }: Tool) => ({
+  name,
+  description,
+  inputSchema,
+  ...(outputSchema ? { outputSchema } : {}),
+});
+
+/** The result, or the error, of one tools/call. */
+async function toolsCall(tools: readonly Tool[], params: Request["params"]) {
+  const tool = tools.find((each) => each.name === params?.name);
+  if (!tool)
+    return {
+      error: { code: -32602, message: `No tool ${String(params?.name)}` },
+    };
+  const args =
+    typeof params?.arguments === "object" && params.arguments !== null
+      ? (params.arguments as Record<string, unknown>)
+      : {};
+  const result = await tool.call(args);
+  return {
+    result: {
+      content: result.content ?? [{ type: "text", text: result.text }],
+      ...(result.structuredContent
+        ? { structuredContent: result.structuredContent }
+        : {}),
+      ...(result.isError ? { isError: true } : {}),
+    },
+  };
+}
 
 /**
  * A Model Context Protocol server on stdio, as Claude Code and Codex start
@@ -52,36 +94,9 @@ export function serveMcp(input: {
       });
     if (method === "ping") return send({ id, result: {} });
     if (method === "tools/list")
-      return send({
-        id,
-        result: {
-          tools: input.tools.map(({ name, description, inputSchema }) => ({
-            name,
-            description,
-            inputSchema,
-          })),
-        },
-      });
-    if (method === "tools/call") {
-      const tool = input.tools.find((each) => each.name === params?.name);
-      if (!tool)
-        return send({
-          id,
-          error: { code: -32602, message: `No tool ${String(params?.name)}` },
-        });
-      const args =
-        typeof params?.arguments === "object" && params.arguments !== null
-          ? (params.arguments as Record<string, unknown>)
-          : {};
-      const result = await tool.call(args);
-      return send({
-        id,
-        result: {
-          content: [{ type: "text", text: result.text }],
-          ...(result.isError ? { isError: true } : {}),
-        },
-      });
-    }
+      return send({ id, result: { tools: input.tools.map(listed) } });
+    if (method === "tools/call")
+      return send({ id, ...(await toolsCall(input.tools, params)) });
     send({ id, error: { code: -32601, message: `No method ${method}` } });
   };
   return new Promise((done) => {

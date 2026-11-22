@@ -63,6 +63,8 @@ export const ruleFields = {
   resource: fileResource.optional(),
   command: fileCommand.optional(),
   condition: z.array(conditionEntry).max(20).optional(),
+  // Engine version 4: typed conditions on a declared input or brief.
+  where: z.record(z.string(), z.unknown()).optional(),
   effect: z.string().optional(),
   agent: z.string().nullable().optional(),
   installation: z.string().nullable().optional(),

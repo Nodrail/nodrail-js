@@ -16,6 +16,7 @@ import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
 import { cli } from "./run-cli.ts";
+import { hookAnswer } from "./support/hook-answers.ts";
 
 const RULES = `
 - required_engine_version: 3
@@ -124,17 +125,7 @@ async function step(s: Session, id: string, type: string, verdict: string) {
   await s.stop(id, type, receipt(verdict));
 }
 
-const decision = (stdout: string) =>
-  stdout
-    ? (
-        JSON.parse(stdout) as {
-          hookSpecificOutput: {
-            permissionDecision: string;
-            permissionDecisionReason: string;
-          };
-        }
-      ).hookSpecificOutput
-    : { permissionDecision: "allow", permissionDecisionReason: "" };
+const decision = hookAnswer;
 
 const saved = process.env.NODRAIL_LEDGER;
 afterEach(() => {

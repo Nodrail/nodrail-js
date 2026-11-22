@@ -1,0 +1,55 @@
+description: >-
+  Side-effect-free contract tests: expected-valid and expected-invalid
+  values, with the projection each valid one must produce. No tool runs.
+nodrail.yaml:
+  shapes:
+    reviewer-result:
+      properties:
+        verdict:
+          {
+            values: [ship, ship-with-debt, fix-first, unassessable],
+            role: verdict,
+          }
+        issue: { type: string, max: 100 }
+        findings:
+          role: findings
+          report: true
+          properties:
+            blocker: { type: integer, min: 0 }
+            major: { type: integer, min: 0 }
+        lesson: { type: string, max: 300, optional: true }
+    qa-result:
+      properties:
+        verdict: { values: [pass, fail], role: verdict }
+        checks: { type: integer, min: 0, report: true }
+        flaky: { type: integer, min: 0, optional: true, report: true }
+    ci-result:
+      properties:
+        status: { values: [passed, failed], report: true }
+        tests: { type: integer, min: 0, report: true }
+        duration_ms: { type: integer, min: 0, unit: ms, report: true }
+        log_url: { type: string, max: 500 }
+  receipts:
+    reviewer: { shape: reviewer-result }
+    qa: { shape: qa-result }
+  evidence:
+    ci-tests:
+      shape: ci-result
+      producers:
+        - { class: externally-verified, verifier: github-actions }
+      subject: revision
+cases:
+  - name: a clean ship
+    target: receipt:reviewer
+    value: { verdict: ship, issue: ENG-7, findings: { blocker: 0, major: 0 } }
+    expect: valid
+    projection: { verdict: ship, findings: { blocker: 0, major: 0 } }
+  - name: unassessable still needs the issue
+    target: receipt:reviewer
+    value: { verdict: unassessable, findings: { blocker: 0, major: 0 } }
+    expect: invalid
+    issues: ["issue: required"]
+  - name: the shape itself, without a binding
+    target: shape:ci-result
+    value: { status: failed, tests: 3, duration_ms: 10, log_url: x }
+    expect: valid

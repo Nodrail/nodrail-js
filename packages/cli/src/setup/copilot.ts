@@ -3,14 +3,14 @@ import { join } from "node:path";
 import type { ProjectSetup, SetupAgent } from "@nodrail/policy-engine/yaml";
 import { stringify } from "yaml";
 import type { Env } from "../config.ts";
-import { observeCommand } from "./claude-code.ts";
+import type { CompiledContracts } from "../contracts/engine.ts";
+import { observeCommand, usesLimits, usesRuns } from "./claude-code.ts";
 import { hookReads, mcpServerEntries } from "./connections.ts";
 import type { Check } from "./plan.ts";
 import type { Activation } from "./status.ts";
 import {
   byPath,
   EFFECTIVE_FILE,
-  instructionsOf,
   PROTECT_LIST,
   teamFiles,
   type DesiredFile,
@@ -44,7 +44,7 @@ export function copilotHookCommand(
   return `nodrail policy hook ${quoted(join(real, EFFECTIVE_FILE))} --protect-list ${quoted(join(real, PROTECT_LIST))}${reads} --host copilot --agent ${entry}`;
 }
 
-function agentFile(root: string, agent: SetupAgent, team: string) {
+function agentFile(agent: SetupAgent, team: string, body: string) {
   const front = {
     name: agent.name,
     description:
@@ -53,15 +53,30 @@ function agentFile(root: string, agent: SetupAgent, team: string) {
   return `---
 # Written by nodrail apply from ${agent.file}. Change that file, not this one.
 ${stringify(front, { lineWidth: 0 })}---
-${instructionsOf(root, agent, team)}`;
+${body}`;
 }
 
-function hooksFile(root: string, entry: string, setup: ProjectSetup) {
+function hooksFile(
+  root: string,
+  entry: string,
+  setup: ProjectSetup,
+  effective: string,
+) {
   const hook = (command: string) => [
     { type: "command", bash: command, timeoutSec: 20 },
   ];
+  const policy = copilotHookCommand(root, entry, setup);
   const hooks = {
-    preToolUse: hook(copilotHookCommand(root, entry, setup)),
+    preToolUse: hook(policy),
+    // A run's steps, when the policy has gates, budgets or receipts: the
+    // same hook reads Copilot's subagentStart and subagentStop, the final
+    // text and its receipt in `response`.
+    ...(usesRuns(effective)
+      ? { subagentStart: hook(policy), subagentStop: hook(policy) }
+      : {}),
+    // Numeric budgets settle on a call's outcome: postToolUse carries it,
+    // success or not, in `toolResult.resultType`.
+    ...(usesLimits(effective) ? { postToolUse: hook(policy) } : {}),
     // Copilot asks the person to trust the folder once, then runs both.
     ...(setup.observe.sessionStart
       ? {
@@ -87,6 +102,8 @@ export function copilotSetup(input: {
   setup: ProjectSetup;
   effective: string;
   inputs: string[];
+  contracts?: CompiledContracts | null;
+  env?: Env;
 }) {
   const { root, setup } = input;
   const parts = teamFiles({ ...input, skillsFolder: ".github/skills" });
@@ -102,12 +119,12 @@ export function copilotSetup(input: {
   for (const agent of parts.members)
     files.push({
       path: `.github/agents/${agent.name}.agent.md`,
-      content: Buffer.from(agentFile(root, agent, team.name)),
+      content: Buffer.from(agentFile(agent, team.name, parts.body(agent))),
       why: `agent ${agent.name}`,
     });
   files.push({
     path: COPILOT_HOOKS,
-    content: Buffer.from(hooksFile(root, team.entry, setup)),
+    content: Buffer.from(hooksFile(root, team.entry, setup, input.effective)),
     why: "the policy hook",
   });
   if (setup.connections.length > 0)

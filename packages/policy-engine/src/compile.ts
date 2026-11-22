@@ -3,6 +3,7 @@
 import type { z } from "zod";
 import { classifyCommand } from "./commands.ts";
 import { reportSchemaIssues } from "./compile-issues.ts";
+import { compileGateContracts, documentOf } from "./compile-contracts.ts";
 import {
   compileBudgets,
   compileGates,
@@ -43,10 +44,9 @@ function slug(text: string) {
 
 const MAX_CONDITIONS = 20;
 
-type Used = { lists: Set<string>; macros: Set<string> };
 type RuleEntry = State["rules"] extends Map<string, infer R> ? R : never;
 /** What compiling one set of files shares: what was read, used and reported. */
-type Compiling = { state: State; used: Used; collector: Collector };
+type Compiling = import("./compile-runs.ts").Compiling;
 /** How deep inside macros a condition sits, and how many are left to spend. */
 type Nesting = { stack: string[]; budget: { left: number } };
 
@@ -333,6 +333,7 @@ function compileRule(name: string, rule: RuleEntry, compiling: Compiling) {
       ? resourceExpansions(rule, naming, compiling)
       : commandExpansions(rule, naming, compiling);
   if (!expansions) return [];
+  const where = compiling.contracts?.where.get(rule);
   return expansions.flatMap((plain) =>
     variants.map(({ conditions, item }) => {
       const expansion =
@@ -355,6 +356,7 @@ function compileRule(name: string, rule: RuleEntry, compiling: Compiling) {
           resource: expansion.resource,
           conditions,
           expiresAt: rule.expires ?? null,
+          ...(where ? { where } : {}),
         },
         compiled: {
           id: expansion.id,
@@ -405,6 +407,8 @@ export function compilePolicies(sources: PolicySource[]): CompileResult {
     collector,
   };
 
+  // Contracts first: a rule's `where` is compiled against them.
+  compiling.contracts = compileGateContracts(compiling);
   const results: ReturnType<typeof compileRule> = [];
   for (const [name, rule] of state.rules) {
     if (rule.enabled === false) {
@@ -420,18 +424,8 @@ export function compilePolicies(sources: PolicySource[]): CompileResult {
   warnUnused(compiling);
 
   const compiled = results.map((result) => result.compiled);
-  const outputs = (items: { output: unknown }[]) =>
-    items.map((item) => item.output);
-  // Only a document that needs them is version 2, so every other stays readable by older engines.
   const parsed = policyDocument.safeParse(
-    gates.length || budgets.length
-      ? {
-          version: 2,
-          rules: outputs(results),
-          gates: outputs(gates),
-          budgets: outputs(budgets),
-        }
-      : { version: 1, rules: outputs(results) },
+    documentOf({ rules: results, gates, budgets }, compiling.contracts),
   );
   if (!parsed.success)
     reportSchemaIssues(

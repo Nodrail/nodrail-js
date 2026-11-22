@@ -1,4 +1,13 @@
 import type { Condition, Effect, ResourceScope } from "./policies.ts";
+import type { CompiledCondition } from "./shapes/types.ts";
+import { matchWhere } from "./shapes/validate.ts";
+
+/**
+ * The validated values a call's typed `where` reads (engine version 4):
+ * `input`, the call's arguments that passed the operation's declared input;
+ * `brief`, the started agent's brief that passed its contract.
+ */
+export type ContractValues = { input?: unknown; brief?: unknown };
 
 export type Descriptor = {
   agentId: string;
@@ -20,6 +29,8 @@ export type EvaluatedRule = {
   resource: ResourceScope;
   conditions: Condition[];
   expiresAt: Date | null;
+  /** Typed conditions on declared values (C02); only with contracts. */
+  where?: CompiledCondition[];
 };
 
 export type Evaluation = {
@@ -94,10 +105,31 @@ export function conditionsMatch(rule: EvaluatedRule, descriptor: Descriptor) {
   });
 }
 
+/**
+ * A rule's typed `where` against the validated values: every condition must
+ * hold, and a missing value satisfies none. When the call carries no
+ * validated value for a root the rule reads (nothing checked it against a
+ * contract), an allow never matches and a deny or review still does, as
+ * with conditions on parameters.
+ */
+function whereMatches(rule: EvaluatedRule, values: ContractValues | null) {
+  if (!rule.where?.length) return true;
+  const roots = new Set(rule.where.map((condition) => condition.path[0]));
+  const checked = [...roots].every(
+    (root) =>
+      values !== null &&
+      (root === "input" || root === "brief") &&
+      values[root] !== undefined,
+  );
+  if (!checked) return rule.effect !== "allow";
+  return matchWhere(rule.where, values);
+}
+
 export function matches(
   rule: EvaluatedRule,
   descriptor: Descriptor,
   now: Date,
+  values: ContractValues | null = null,
 ) {
   if (rule.expiresAt && rule.expiresAt <= now) return false;
   if (rule.agentId && rule.agentId !== descriptor.agentId) return false;
@@ -107,7 +139,8 @@ export function matches(
     rule.toolKey === descriptor.toolKey &&
     rule.operationKey === descriptor.operationKey &&
     resourceMatches(rule.resource, descriptor) &&
-    conditionsMatch(rule, descriptor)
+    conditionsMatch(rule, descriptor) &&
+    whereMatches(rule, values)
   );
 }
 
@@ -116,9 +149,10 @@ function evaluateOne(
   descriptor: Descriptor,
   rules: EvaluatedRule[],
   now: Date,
+  values: ContractValues | null,
 ): Evaluation {
   const matched = rules
-    .filter((rule) => matches(rule, descriptor, now))
+    .filter((rule) => matches(rule, descriptor, now, values))
     .sort((a, b) => a.logicalRuleId.localeCompare(b.logicalRuleId));
   for (const effect of ["deny", "require_approval", "allow"] as const) {
     const winner = matched.find((rule) => rule.effect === effect);
@@ -145,8 +179,9 @@ export function evaluate(
   descriptor: Descriptor,
   rules: EvaluatedRule[],
   now: Date,
+  values: ContractValues | null = null,
 ): Evaluation {
-  const whole = evaluateOne(descriptor, rules, now);
+  const whole = evaluateOne(descriptor, rules, now, values);
   const parts = chainOf(descriptor);
   if (!parts || whole.outcome === "deny") return whole;
   const each = parts.map((part) =>
@@ -159,6 +194,7 @@ export function evaluate(
       },
       rules,
       now,
+      values,
     ),
   );
   const first = (outcome: Evaluation["outcome"]) =>

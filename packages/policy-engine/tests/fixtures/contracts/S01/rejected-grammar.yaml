@@ -1,0 +1,13 @@
+description: >-
+  Unknown keys fail, and so do bounds that don't fit the type: a key from a
+  later dialect (pattern) is refused, never ignored; a string holds at most
+  1,000 characters; a boolean has no max.
+nodrail.yaml:
+  shapes:
+    brief:
+      properties:
+        ticket: { type: string, pattern: "^ENG-[0-9]+$" }
+        summary: { type: string, max: 5000 }
+        flag: { type: boolean, max: 1 }
+expect:
+  - { code: grammar, path: nodrail.yaml.shapes.brief.properties.ticket }

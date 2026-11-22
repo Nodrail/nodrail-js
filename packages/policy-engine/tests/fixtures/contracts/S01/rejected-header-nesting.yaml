@@ -1,0 +1,15 @@
+description: The header bridge reads flat key-value lines; nesting needs format fenced. Findings counts (`0 blocker / 1 major`) are the one object a header line can fill.
+nodrail.yaml:
+  shapes:
+    reviewer-result:
+      properties:
+        verdict: { values: [ship, fix-first], role: verdict }
+        findings:
+          role: findings
+          properties: { blocker: { type: integer, min: 0 } }
+        scope:
+          properties: { files: { type: integer, min: 0 } }
+  receipts:
+    reviewer: { shape: reviewer-result, format: header }
+expect:
+  - { code: header-nesting, path: nodrail.yaml.receipts.reviewer.format }

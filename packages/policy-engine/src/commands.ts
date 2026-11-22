@@ -6,7 +6,111 @@ export type CommandShape = {
   text: string;
   /** Set when a compound is only simple commands chained, to be judged one by one. */
   parts?: string[];
+  /** What ran it unchanged, such as `rtk` or `nohup`: rules judge `text`. */
+  via?: string;
 };
+
+// Programs that run the command after them unchanged, read in shapes known
+// exactly, so a rule on `kubectl` also judges `rtk kubectl` and
+// `nohup kubectl`. Any other shape stays a whole the rules can't split.
+
+/** rtk subcommands that run the program of the same name with the same arguments. */
+const rtkPrograms = new Set(
+  `git gh glab aws psql pnpm docker kubectl oc curl wget cargo go deno bun bunx
+   npx dotnet tsc jest vitest playwright prisma prettier ruff mypy pytest rspec
+   rubocop rake ls tree find grep rg ast-grep wc gt`.split(/\s+/),
+);
+/** rtk subcommands that run the command after them. */
+const rtkRunners = new Set([
+  "bypass",
+  "proxy",
+  "err",
+  "test",
+  "summary",
+  "run",
+]);
+/** rtk's own commands, which run nothing else: judged as `rtk <command>`. */
+const rtkOwn = new Set(
+  `gain discover session cc-economics hook-audit methods pipeline plugins tasks
+   telemetry config init trust untrust verify read smart json deps env log learn
+   recall rewrite help -h --help -V --version`.split(/\s+/),
+);
+
+type Unwrapped = { words: string[]; via: string[] };
+
+/** rtk [-v|--skip-env] <subcommand> …: the command it runs, or null if unknown. */
+function unwrapRtk(words: string[]): Unwrapped | null {
+  let at = 1;
+  while (/^(?:-v{1,3}|--verbose|--skip-env)$/.test(words[at] ?? "")) at += 1;
+  const sub = words[at] ?? "";
+  if (rtkOwn.has(sub)) return { words, via: [] };
+  if (rtkPrograms.has(sub))
+    return { words: words.slice(at), via: words.slice(0, at) };
+  if (!rtkRunners.has(sub)) return null;
+  at += 1;
+  // -c, --command and --shell take a string a shell reads.
+  while (words[at] === "--skip-env") at += 1;
+  if (words[at]?.startsWith("-")) return null;
+  return { words: words.slice(at), via: words.slice(0, at) };
+}
+
+/** How many words a known prefix takes before its command, or null. */
+function prefixLength(words: string[]): number | null {
+  const [program, ...args] = words;
+  const flags = (pattern: RegExp) => {
+    let at = 0;
+    while (pattern.test(args[at] ?? "")) at += 1;
+    return at + 1;
+  };
+  switch (program) {
+    case "nohup":
+      return 1;
+    case "time":
+      return flags(/^-p$/);
+    case "caffeinate":
+      return flags(/^-[dimsu]+$/);
+    case "nice":
+      if (/^-\d{1,2}$/.test(args[0] ?? "")) return 2;
+      return args[0] === "-n" && /^-?\d{1,2}$/.test(args[1] ?? "") ? 3 : 1;
+    case "timeout": {
+      const at = flags(/^--(?:preserve-status|foreground)$/) - 1;
+      return /^\d{1,6}(?:\.\d{1,3})?[smhd]?$/.test(args[at] ?? "")
+        ? at + 2
+        : null;
+    }
+    default:
+      return 0;
+  }
+}
+
+/** Wrappers read in a row, such as `rtk proxy nohup …`; more is judged whole. */
+const MAX_WRAPPERS = 4;
+
+/**
+ * The command a line really runs, with the wrappers in front of it, or null
+ * for a wrapper used in a shape not known here. Rules judge `words`.
+ */
+function unwrap(words: string[]): Unwrapped | null {
+  let rest = words;
+  const via: string[] = [];
+  // One pass per wrapper, and one more to find the command they run.
+  for (let depth = 0; depth <= MAX_WRAPPERS; depth += 1) {
+    let next: Unwrapped | null;
+    if (rest[0] === "rtk") next = unwrapRtk(rest);
+    else {
+      const taken = prefixLength(rest);
+      if (taken === null) return null;
+      next = { words: rest.slice(taken), via: rest.slice(0, taken) };
+    }
+    if (!next) return null;
+    if (!next.via.length) return { words: rest, via };
+    // An option the prefix doesn't take is not a program.
+    if (!next.words.length || next.words[0]?.startsWith("-")) return null;
+    via.push(...next.via);
+    rest = next.words;
+  }
+  return null;
+}
 
 /**
  * Anything that chains, substitutes, redirects or escapes cannot be judged by
@@ -89,6 +193,10 @@ function fragmentReachesSecret(fragment: string) {
   return fragment.split(/[\\/]/).some(isSecretName);
 }
 
+/** An assignment in front, or a program that runs other code. */
+const hidesItsProgram = (words: string[]) =>
+  assignment.test(words[0] ?? "") || runsAnotherCommand(words);
+
 function runsAnotherCommand(words: string[]) {
   if (namesASecret(words)) return true;
   const first = words[0] ?? "";
@@ -106,8 +214,11 @@ function runsAnotherCommand(words: string[]) {
   );
 }
 
-/** Splits like a shell does, or null if the quoting never closes. */
-function splitWords(line: string) {
+/**
+ * Splits like a shell does, or null if the quoting never closes. `breaks`
+ * are the characters that end a word outside quotes.
+ */
+function splitWords(line: string, breaks = " \t") {
   const words: string[] = [];
   let word = "";
   let started = false;
@@ -119,7 +230,7 @@ function splitWords(line: string) {
     } else if (char === '"' || char === "'") {
       quote = char;
       started = true;
-    } else if (char === " " || char === "\t") {
+    } else if (breaks.includes(char)) {
       if (started) words.push(word);
       word = "";
       started = false;
@@ -184,12 +295,18 @@ function splitChain(text: string) {
 function judgeSimple(text: string): CommandShape {
   const compound = { operation: "command.compound", text } as const;
   if (shellSyntax.test(text) || unusualWhitespace.test(text)) return compound;
-  const words = splitWords(text);
-  if (!words?.length) return compound;
-  if (assignment.test(words[0] ?? "") || runsAnotherCommand(words))
-    return compound;
-  return { operation: "command.run", text: render(words) };
+  const split = splitWords(text);
+  if (!split?.length || assignment.test(split[0] ?? "")) return compound;
+  const inner = unwrap(split);
+  if (!inner || hidesItsProgram(inner.words)) return compound;
+  return simpleShape(inner);
 }
+
+const simpleShape = ({ words, via }: Unwrapped): CommandShape => ({
+  operation: "command.run",
+  text: render(words),
+  ...(via.length ? { via: render(via) } : {}),
+});
 
 /** The simple commands in a chain, or null if any part isn't simple. */
 function chainParts(text: string) {
@@ -235,13 +352,61 @@ export function plainWords(line: string): string[] | null {
     return null;
   const words = splitWords(text);
   if (!words?.length || assignment.test(words[0] ?? "")) return null;
-  return words;
+  const inner = unwrap(words);
+  if (!inner || assignment.test(inner.words[0] ?? "")) return null;
+  return inner.words;
+}
+
+/**
+ * Every word of a line as the shell would hand it to a program, quotes
+ * joined (`".git/nod""rail"` is `.git/nodrail`), with chains, pipes,
+ * redirects and subshells as breaks between words. Null when the quoting
+ * never closes. For finding the paths a line names, not for judging it.
+ */
+export const shellWords = (line: string) => splitWords(line, " \t\r\n;&|<>()`");
+
+/**
+ * Each command of a line as its program sees it: the chain's parts, quotes
+ * joined, redirects as breaks, wrappers (`nohup`, `rtk proxy`…) taken off.
+ * For finding what a line writes, not for judging it.
+ */
+export function programWords(line: string): string[][] {
+  const text = trimShellSpace(line);
+  // A line the chain splitter refuses (a lone `&`, `;;`) is cut on every
+  // separator: more parts can only make a later part look later.
+  return (splitChain(text) ?? text.split(/[;&|\n]+/)).flatMap((part) => {
+    // Quoting cut by that split is read as plain words.
+    const words = shellWords(part) ?? part.split(/[\s'"]+/).filter(Boolean);
+    if (!words.length) return [];
+    return [unwrap(words)?.words ?? words];
+  });
+}
+
+/** Short options run together, `-rs`, or long ones, as one list of letters or names. */
+const hasOption = (args: string[], letters: RegExp, long: string[]) =>
+  args.some(
+    (word) =>
+      (/^-[^-]/.test(word) && letters.test(word.slice(1))) ||
+      long.some((name) => word === name || word.startsWith(`${name}=`)),
+  );
+
+/** Whether a command makes a link: `ln`, `link`, `cp -s`. */
+export function makesLink(words: string[]) {
+  const program = (words[0] ?? "").split("/").pop() ?? "";
+  if (program === "ln" || program === "link") return true;
+  return (
+    program === "cp" && hasOption(words.slice(1), /s/, ["--symbolic-link"])
+  );
 }
 
 /** Judges a line a shell would run. */
 export function classifyCommand(line: string): CommandShape {
   const text = trimShellSpace(line);
   const parts = chainParts(text);
+  // A link made in one part and used in the next doesn't exist yet when the
+  // line is judged, so such a line is judged whole (R376).
+  if (parts && programWords(text).some(makesLink))
+    return { operation: "command.compound", text };
   return parts
     ? { operation: "command.compound", text, parts }
     : judgeSimple(text);
@@ -249,8 +414,7 @@ export function classifyCommand(line: string): CommandShape {
 
 /** Judges arguments run directly, where nothing is shell syntax. */
 export function classifyArguments(words: string[]): CommandShape {
-  return {
-    operation: runsAnotherCommand(words) ? "command.compound" : "command.run",
-    text: render(words),
-  };
+  const inner = unwrap(words);
+  if (inner && !runsAnotherCommand(inner.words)) return simpleShape(inner);
+  return { operation: "command.compound", text: render(words) };
 }

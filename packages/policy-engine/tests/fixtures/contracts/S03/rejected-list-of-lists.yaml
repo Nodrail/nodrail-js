@@ -1,0 +1,13 @@
+description: A list of lists has no path conditions could name; use a list of objects.
+nodrail.yaml:
+  shapes:
+    batch-args:
+      properties:
+        rows: { type: list, of: { type: list, of: { type: string } } }
+  connections:
+    sheets:
+      command: npx
+      operations:
+        append: { input: batch-args }
+expect:
+  - { code: grammar, path: nodrail.yaml.shapes.batch-args.properties.rows.of }

@@ -342,9 +342,11 @@ describe("runs and steps", () => {
     );
     expect(result.stdout).toBe("");
     const [submitted] = server.requests.filter((r) => r.path === "/actions");
+    // Outside a git repository the revision is unknown: sent as null, never left out.
     expect(submitted?.body.run).toEqual({
       key: "session:s1",
       step: { id: "a1", agent: "qa" },
+      subject: null,
     });
   });
 
@@ -358,7 +360,7 @@ describe("runs and steps", () => {
       },
     );
     const [submitted] = server.requests.filter((r) => r.path === "/actions");
-    expect(submitted?.body.run).toEqual({ key: "issue-42" });
+    expect(submitted?.body.run).toEqual({ key: "issue-42", subject: null });
   });
 
   test("without a run, none is sent", async () => {
@@ -397,7 +399,11 @@ describe("runs and steps", () => {
       await runHook(pre({ cwd: repo, session_id: "pinned" }), env, {
         fetch: server.fetch,
       });
-      keys.push(server.requests.find((r) => r.path === "/actions")?.body.run);
+      const run = server.requests.find((r) => r.path === "/actions")?.body
+        .run as { key: string; subject: unknown };
+      // The work in a real repository has a revision; the key is what's pinned.
+      expect(run.subject).toMatch(/^sha256:[0-9a-f]{64}$/);
+      keys.push({ key: run.key });
     }
     expect(keys).toEqual([
       { key: "github.com/acme/app/feature/a" },

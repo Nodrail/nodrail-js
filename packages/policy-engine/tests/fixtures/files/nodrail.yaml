@@ -1,0 +1,64 @@
+# File contracts (S07) for the artifacts DC-04.2 names. Each folder next to
+# this file holds a valid example and rejected ones; tests/files reads them.
+shapes:
+  memory-note:
+    properties:
+      name: { type: string, max: 120 }
+      description: { type: string, max: 300 }
+      type: { values: [user, feedback, project, reference], role: kind }
+  adr:
+    properties:
+      status: { values: [proposed, accepted, superseded] }
+      date: { type: date }
+      deciders: { of: { type: string, max: 64 }, max: 10, optional: true }
+  lesson:
+    properties:
+      kind: { values: [lesson], role: kind }
+      applies: { type: string, max: 200 }
+      review: { type: date, optional: true }
+  eval-record:
+    properties:
+      suite: { type: string, max: 80 }
+      score: { type: number, min: 0, max: 1 }
+      passed: { type: boolean }
+  tracker-issue:
+    properties:
+      state: { values: [open, in-progress, done] }
+      labels: { of: { values: [bug, feature, docs, chore] }, max: 5 }
+files:
+  memory:
+    root: ./memory
+    pattern: "*.md"
+    frontmatter: memory-note
+    writers: [scribe]
+  adr:
+    root: ./docs/adr
+    pattern: "*.md"
+    frontmatter: adr
+    sections: [Context, Decision, Consequences]
+    writers: [architect, scribe]
+  handoff:
+    root: ./notes/handovers
+    pattern: "*/HANDOVER.md"
+    sections:
+      [Goal, State, Next steps, { name: Open questions, optional: true }]
+  lesson:
+    root: ./memory/lessons
+    pattern: "*.md"
+    frontmatter: lesson
+    sections: [Why, How to apply]
+  eval:
+    root: ./evals
+    pattern: "runs/*.md"
+    frontmatter: eval-record
+    sections: [Setup, Results]
+    max_bytes: 4096
+  pr-body:
+    root: ./.github/pr-bodies
+    pattern: "*.md"
+    sections: [Summary, Test plan, { name: Risks, optional: true }]
+  tracker:
+    root: ./tracker
+    pattern: "issues/*.md"
+    frontmatter: tracker-issue
+    sections: [Problem, Acceptance]

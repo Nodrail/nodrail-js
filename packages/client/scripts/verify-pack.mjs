@@ -184,6 +184,14 @@ export const wrong: string = guard((n: number) => String(n), { name: "f" })(1);
     fail(`the hook grew to ${Buffer.byteLength(bundled)} bytes`);
   for (const marker of ["ZodError", "YAMLParseError"])
     if (bundled.includes(marker)) fail(`the hook bundles ${marker}`);
+  // The checker it loads for a call a declared contract covers, next to it.
+  writeFileSync(
+    join(folder, "checker.mjs"),
+    `const m = await import("./node_modules/@nodrail/client/dist/nodrail-hook-contracts.mjs");
+if (typeof m.withContractFields !== "function") throw new Error("no withContractFields");
+`,
+  );
+  run("node", ["checker.mjs"], folder);
 
   console.log("Package check passed: installed and used outside the monorepo.");
 } finally {

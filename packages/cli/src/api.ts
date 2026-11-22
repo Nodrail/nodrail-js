@@ -136,6 +136,19 @@ export type IntendedRevision = {
   published_at: string;
 };
 
+/** An evidence verifier (DC-03.1): who may submit externally verified evidence. */
+export type Verifier = {
+  id: string;
+  name: string;
+  kind: string;
+  repository: string;
+  jobWorkflowRef: string;
+  environments: string[];
+  audience: string;
+  revokedAt: string | null;
+  [field: string]: unknown;
+};
+
 export type Query = Record<string, string | number | undefined>;
 
 /** An answer from the API that isn't a success, with its code and request id. */
@@ -277,6 +290,11 @@ export class NodrailApi {
 
   previewRules(yaml: string) {
     return this.call<Preview>("POST", "/rules/preview", { body: { yaml } });
+  }
+
+  /** Evidence verifiers, revoked ones too (`read`). */
+  verifiers() {
+    return this.call<Page<Verifier>>("GET", "/verifiers");
   }
 
   intendedRevision(projectId: string) {

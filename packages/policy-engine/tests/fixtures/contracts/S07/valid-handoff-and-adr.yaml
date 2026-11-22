@@ -1,0 +1,49 @@
+description: >-
+  File contracts for HANDOVER.md (required sections only) and ADRs
+  (frontmatter plus sections). Dates in frontmatter are quoted YYYY-MM-DD
+  strings; YAML never turns them into dates.
+nodrail.yaml:
+  shapes:
+    adr-front:
+      properties:
+        status:
+          { values: [proposed, accepted, superseded], role: kind, report: true }
+        date: { type: date, report: true }
+        deciders: { type: list, of: { type: string, max: 80 }, max: 10 }
+  files:
+    handoffs:
+      root: ./notes/handovers
+      pattern: "*/HANDOVER.md"
+      sections:
+        [
+          Date,
+          Goal,
+          Status,
+          Next steps,
+          Key files,
+          Decisions and gotchas,
+          Resume,
+        ]
+      max_bytes: 32768
+      writers: [developer]
+    adrs:
+      root: ./docs/adr
+      pattern: "*.md"
+      frontmatter: adr-front
+      sections: [Context, Decision, { name: Consequences, optional: true }]
+resources:
+  - apiVersion: apf.nodrail.com/v1alpha1
+    kind: Agent
+    metadata: { name: developer }
+    spec: {}
+cases:
+  - name: an accepted ADR
+    target: file:adrs
+    value: { status: accepted, date: "2026-11-21", deciders: [alex] }
+    expect: valid
+    projection: { status: accepted, date: "2026-11-21" }
+  - name: a timestamp is not a date
+    target: file:adrs
+    value: { status: accepted, date: "2026-11-21T10:12:52Z", deciders: [] }
+    expect: invalid
+    issues: ["date: type"]

@@ -15,6 +15,7 @@ import {
   spoolFolder,
 } from "@nodrail/policy-engine/command-line";
 import type { Env } from "../config.ts";
+import type { CompiledContracts } from "../contracts/engine.ts";
 import { askServer } from "./json-lines.ts";
 import type { DesiredFile } from "./team-files.ts";
 import { basename, join, resolve } from "node:path";
@@ -96,7 +97,10 @@ export const runnerArgs = (file: string, name: string) => [
   name,
 ];
 
-export function connectionsFile(setup: ProjectSetup): DesiredFile | null {
+export function connectionsFile(
+  setup: ProjectSetup,
+  contracts: CompiledContracts | null = null,
+): DesiredFile | null {
   if (setup.connections.length === 0 && !pluginServers(setup)) return null;
   const connections = Object.fromEntries(
     setup.connections.map((each) => [each.name, each.spec]),
@@ -105,14 +109,65 @@ export function connectionsFile(setup: ProjectSetup): DesiredFile | null {
   const plugins = pluginCalls(
     Object.fromEntries(setup.plugins.map((each) => [each.name, each.spec])),
   );
+  const mediated = mediatedContracts(
+    setup.connections.map((each) => each.name),
+    contracts,
+  );
   return {
     path: CONNECTIONS_FILE,
     content: Buffer.from(
-      `${JSON.stringify(Object.keys(plugins).length > 0 ? { connections, plugins } : { connections }, null, 2)}\n`,
+      `${JSON.stringify(
+        {
+          connections,
+          ...(Object.keys(plugins).length > 0 ? { plugins } : {}),
+          ...(mediated ? { contracts: mediated } : {}),
+        },
+        null,
+        2,
+      )}\n`,
     ),
     why: "the tool connections, for the hook and to start them",
   };
 }
+
+/**
+ * What each connection with a declared `input` or `output` is checked
+ * against, as `nodrail connection run` reads it: its bindings and their
+ * compiled shapes, pinned by digest, in the file apply writes. Null when no
+ * connection declares one, so that file stays as it was.
+ */
+export function mediatedContracts(
+  names: string[],
+  contracts: CompiledContracts | null,
+): Record<string, ConnectionContracts> | null {
+  const found: Record<string, ConnectionContracts> = {};
+  for (const name of names) {
+    const bindings = (contracts?.bindings ?? []).filter(
+      (b) =>
+        (b.surface === "S03" || b.surface === "S04") &&
+        b.shape !== null &&
+        b.name.slice(b.name.indexOf(":") + 1).startsWith(`${name}.`),
+    );
+    if (bindings.length === 0) continue;
+    found[name] = {
+      bindings: bindings.map(({ name: binding, surface, shape }) => ({
+        name: binding,
+        surface,
+        shape,
+      })),
+      shapes: Object.fromEntries(
+        bindings.map((b) => [b.shape!, contracts!.shapes[b.shape!]!]),
+      ),
+    };
+  }
+  return Object.keys(found).length > 0 ? found : null;
+}
+
+/** A connection's slice of the compiled contracts: enough to mediate it. */
+export type ConnectionContracts = {
+  bindings: { name: string; surface: string; shape: string | null }[];
+  shapes: Record<string, CompiledContracts["shapes"][string]>;
+};
 
 /** Whether a plugin brings a server whose calls the hook must read. */
 const pluginServers = (setup: Partial<Pick<ProjectSetup, "plugins">>) =>

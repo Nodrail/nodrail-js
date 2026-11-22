@@ -1,0 +1,29 @@
+description: >-
+  Two definitions of one name never win by import order: a project shape
+  and a module's differ, so compile refuses both.
+nodrail.yaml:
+  shapes:
+    review-result:
+      properties:
+        verdict: { values: [ship, fix-first], role: verdict }
+modules:
+  - ref: "@nodrail/review@1.2.0"
+    shapes:
+      review-result:
+        properties:
+          verdict: { values: [ship, ship-with-debt, fix-first], role: verdict }
+          findings:
+            {
+              role: findings,
+              type: list,
+              of: { values: [correctness, security, tests] },
+              max: 10,
+              report: true,
+            }
+    receipts:
+      reviewer: { shape: review-result }
+  - ref: "@acme/review"
+    shapes: {}
+expect:
+  - { code: collision, path: modules.0.shapes.review-result }
+  - { code: grammar, path: modules.1.ref }

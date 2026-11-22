@@ -1,0 +1,11 @@
+description: agent is the receipt envelope's identity, checked against the dispatch; a property can't take it.
+nodrail.yaml:
+  shapes:
+    qa-result:
+      properties:
+        verdict: { values: [pass, fail], role: verdict }
+        agent: { type: string, max: 63 }
+  receipts:
+    qa: { shape: qa-result }
+expect:
+  - { code: reserved-name, path: nodrail.yaml.receipts.qa.shape }

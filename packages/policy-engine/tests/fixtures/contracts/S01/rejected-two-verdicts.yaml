@@ -1,0 +1,14 @@
+description: A receipt has exactly one verdict.
+nodrail.yaml:
+  shapes:
+    reviewer-result:
+      properties:
+        verdict: { values: [ship, fix-first], role: verdict }
+        overall: { values: [pass, fail], role: verdict }
+  receipts:
+    reviewer: { shape: reviewer-result }
+expect:
+  - {
+      code: role-count,
+      path: nodrail.yaml.shapes.reviewer-result.properties.overall,
+    }

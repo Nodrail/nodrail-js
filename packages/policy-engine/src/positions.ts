@@ -63,12 +63,12 @@ export function entryWhere(
 
 /** Where an entry's problem is: the first path that exists, else the entry. */
 export function pick(
-  entry: Place & { where?: Where },
+  entry: Place & { locate?: Where },
   paths: Path[],
   part: Part = "value",
 ): Place {
   for (const path of paths) {
-    const place = entry.where?.(path, part);
+    const place = entry.locate?.(path, part);
     if (place) return place;
   }
   return { file: entry.file, line: entry.line, column: entry.column };
@@ -79,14 +79,14 @@ export function pick(
  * field, or an appended item, is where the later entry wrote it.
  */
 export function layered(
-  earlier: object & { where: Where },
+  earlier: object & { locate: Where },
   later: Where,
   override: Record<string, string>,
 ): Where {
   return (path, part) => {
     const [field, index, ...rest] = path;
     if (typeof field !== "string" || !(field in override))
-      return earlier.where(path, part);
+      return earlier.locate(path, part);
     const before: unknown = (earlier as Record<string, unknown>)[field];
     const kept =
       override[field] === "append" && Array.isArray(before) ? before.length : 0;
@@ -95,7 +95,7 @@ export function layered(
         typeof index === "number" ? [field, index - kept, ...rest] : path,
         part,
       );
-    return earlier.where(path, part);
+    return earlier.locate(path, part);
   };
 }
 
@@ -105,13 +105,13 @@ export const upward = (path: Path): Path[] =>
 
 /** Where a schema problem is: an unknown key at that key, else the value. */
 export function issuePlace(
-  entry: Place & { where?: Where },
+  entry: Place & { locate?: Where },
   issue: { code: string; path: PropertyKey[]; keys?: string[] },
 ): Place {
   const path = issue.path.filter(
     (key): key is string | number => typeof key !== "symbol",
   );
   const unknown = issue.code === "unrecognized_keys" ? issue.keys?.[0] : null;
-  const atKey = unknown ? entry.where?.([...path, unknown], "key") : null;
+  const atKey = unknown ? entry.locate?.([...path, unknown], "key") : null;
   return atKey ?? pick(entry, upward(path));
 }

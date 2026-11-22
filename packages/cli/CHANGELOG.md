@@ -1,5 +1,162 @@
 # Changelog
 
+## 0.4.0
+
+Uses `@nodrail/policy-engine` 0.6.0, published with it: engine levels 4
+and 5 (declared contracts, evidence and numeric budgets).
+
+### Added
+
+- Engine level 5 (Wave 3): evidence and numeric budgets in a project.
+  - With numeric budgets, `apply` registers the policy hook on
+    `PostToolUse` and `PostToolUseFailure` (Claude Code), `PostToolUse`
+    (Codex) and `postToolUse` (Copilot), so reservations settle. A project
+    without them gets byte-identical files and settings.
+  - `nodrail evidence run <name> -- <cmd>`: reads the revision before and
+    after the command and the JSON it wrote to `$NODRAIL_EVIDENCE_OUT`;
+    nothing written is `missing`, a revision that changed is an unknown
+    subject. `evidence show` lists the events and what each gate makes of
+    them. `evidence submit` sends a GitHub Actions result to Cloud with the
+    job's OIDC token (exit 0 stored, 3 refused, 4 unreachable). See
+    `docs/evidence.md`.
+  - `nodrail budgets status` and `budgets reconcile <key>
+    --consumed|--released --note`: the local ledger's numbers and the
+    person's word on an unknown reservation, with the engine's `/ledger`.
+    See `docs/budgets.md`.
+  - `plan` lists each budget's label (enforced allowance, measured usage,
+    agent-reported usage), window and scope, and each evidence
+    requirement's authority and producers; it fails activation for
+    `across: environment` in a local setup, for runtime-observed evidence
+    without the setup guard, and for a missing or revoked verifier (checked
+    with Cloud when there is a token). `contracts explain` says the same for
+    a gate or a budget.
+  - `apply` writes `.nodrail/evidence.json` (`{ url, workspace_revision }`)
+    and gives the hook `--evidence` when a gate reads evidence a verifier
+    produces, and `.nodrail/contracts.json` (the compiled brief and input
+    contracts) for the Cloud hook to send `params.brief`.
+
+### Changed
+
+- Gates now use only each agent's latest finished step, per revision with
+  `subject: revision` (engine, R375). Existing gates change too, including
+  level-3 gates without contracts: a QA `pass` followed by a QA `fail` now
+  closes a gate that 0.3.2 left open.
+
+### Fixed
+
+- Evidence can be declared with nodrail.yaml's contracts: `evidence:` sits
+  next to `shapes:` and `receipts:`, and the generated `nodrail.yaml
+  (contracts)` entry carries it, at engine level 5 only when there is some.
+  A rule file's own evidence entry is refused while nodrail.yaml declares
+  contracts ("declare them once"). Projects without evidence get the same
+  files as before.
+- The hook keeps agents out of the run ledger, and `plan` fails activation
+  for runtime-observed evidence when that guard isn't on (R364).
+- `contracts explain evidence:<name>` explains the evidence (producers,
+  subject, the gates that read it and with which authority), also when it
+  is declared in a rule file.
+- `plan` and `evidence show` list a command gate once, by its declared id.
+- `status` sees `disableAllHooks` in the project's `.claude/settings.json`,
+  as `plan` does, and lists it under "Since apply", as it does a policy
+  hook removed, narrowed to some tools, or edited to drop its protect list.
+- A project whose policy compiles to a version 4 document could not be
+  locked: the effective policy was rendered back before the joined files
+  were tried, and the engine can't render version 4 yet.
+
+- Declared receipt contracts: `shapes:` and
+  `receipts:` in `nodrail.yaml`, `spec.receipt` and `spec.brief` on Agent
+  resources, compiled by the engine's contracts compiler. `apply` writes
+  one marked receipt section, with an example that validates against the
+  contract, into each generated agent file; source files are untouched.
+- `nodrail contracts render <agent>`, `validate <target> <file>` and
+  `explain <binding|gate>`: offline, side-effect free.
+- The lock records the contracts' digests and the resolved bindings; `policy
+lock` and `plan` classify a change as breaking, disclosure (a field newly
+  reported), unknown or compatible. See `docs/contracts.md`.
+
+- Receipts are enforced: the effective policy carries the receipts the
+  agents end with as one `contracts` entry (engine level 4), so the hook
+  reads each agent's final message against its contract, and a gate's
+  `where:` on a receipt is checked. Claude Code and Copilot both run the
+  hook on a subagent's start and stop whenever the policy has gates,
+  budgets or receipts (Copilot had no step hooks before: its gates never
+  opened). On Codex nothing captures a receipt yet, so a gate that waits
+  for one stays closed.
+- `nodrail contracts validate` reads a message with the engine's own
+  receipt reader, fenced or `format: header`, and says the verdict and
+  findings count it reads. Each generated example is read back the same
+  way before it is written. A header receipt's example writes the verdict
+  word in capitals, and its section says the verdict may be in any case.
+
+### Changed
+
+- The CLI imports the engine's public `@nodrail/policy-engine/contracts`
+  subpath; no more source aliases, and no `canonicalize` dependency.
+- A contracts entry in a rule file of a project whose `nodrail.yaml`
+  declares contracts is refused: declare them once, in `nodrail.yaml`.
+
+A project that declares no contracts is locked and set up byte for byte as
+before, apart from the engine level its lock records (now 4).
+
+### Briefs and operation inputs enforced by the hook
+
+- The effective policy's `contracts` entry now also carries each Agent's
+  brief, as declared, and each connection operation's `input`, with the
+  shapes they need. The hook checks a dispatch's brief before the agent
+  starts and a call's arguments before any rule (DC-02.1, DC-02.2); rules
+  and gates read them with `where` on `brief.` and `input.`. On Codex the
+  dispatch prompt is encrypted, so starting an agent that has a brief is
+  denied. A project that declares a brief or an input gets a new effective
+  policy: lock it again.
+- The object form of `spec.brief` (`format: header` with aliases) is
+  rendered as `key: value` lines, and `validate brief:` and the generated
+  examples use the engine's `readBrief`, the hook's own reader.
+- Header findings counts: render writes a findings object as
+  `findings: 0 blocker / 1 major`, `validate` says `1 finding (0 blocker /
+1 major)` (`findingsLine` in `--json`), and `explain` describes it.
+- `plan` lists each `where` on a brief or input field the projection
+  doesn't report: Nodrail Cloud never meets it (fail-closed); `explain`
+  marks it.
+- `validate input:` checks arguments with the engine's `checkInput`.
+
+### Briefs (preview)
+
+- An Agent's `spec.brief` is written into the files of the agents that
+  start it (the Team's handoffs): one marked section with the
+  `nodrail-brief` block to end the dispatch prompt with, each property, and
+  an example that is validated and read back before it is written. Nothing
+  checks a dispatch yet: that is the engine's brief reader (DC-02.1).
+- `nodrail contracts render <agent>` prints every section of an agent's
+  file; `render brief:<agent>` the brief section alone. `validate
+brief:<agent>` reads a dispatch prompt's final `nodrail-brief` block, and
+  `validate`/`explain` take `input:<c>.<tool>` and `output:<c>.<tool>`.
+- `policy lock` and `plan` classify brief and connection-shape changes: a
+  narrowed brief, input or output is breaking; a newly declared input or
+  output is breaking (calls or results that passed are now refused or
+  withheld); a removed one is `unknown`, to review as a policy change.
+
+### Connectors: mediated input and result contracts (preview)
+
+- A mediated connection checks an operation's declared `input` before the
+  provider is called (a refused call never reaches it) and its declared
+  `output` before the agent may use the result. An invalid or unreadable
+  result is withheld with the paths that fail; the provider is called once
+  and never again by Nodrail. Each call is recorded with what the provider
+  did (`succeeded`, `failed`, `not-called`, `unknown`) apart from whether its
+  input and result conform (`valid`, `invalid`, `unsupported`). Errors and
+  records never hold a value. Works for Nodrail's own connectors and for any
+  MCP server on stdio behind a proxy. See `docs/connectors.md`.
+- Wired: `nodrail.yaml` accepts `connections.<c>.operations.<tool>.input`
+  and `output`, locks them, and `apply` writes each mediated connection's
+  compiled contracts into `.nodrail/connections.json`. `nodrail connection
+run` then serves that connection mediated: Nodrail's own connectors in
+  process, any other provider through the proxy, each given exactly the
+  environment the connection declares. Records go to
+  `.nodrail/records/<connection>/calls.jsonl`, which `destroy` keeps. A
+  connection that declares neither starts as before.
+- MCP tool answers keep a provider's `content` blocks, `structuredContent`
+  and `outputSchema`.
+
 ## 0.3.2
 
 Uses `@nodrail/policy-engine` 0.5.2: a git that doesn't answer in time

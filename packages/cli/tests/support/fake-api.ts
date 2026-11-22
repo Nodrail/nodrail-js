@@ -57,7 +57,13 @@ export function fakeApi(options: Options = {}) {
   const role = options.role ?? "admin";
   const seen: Seen[] = [];
   const approval = pendingApproval();
-  const state = { revision: 3, yaml: CURRENT_YAML, ruleChanged: false };
+  const state = {
+    revision: 3,
+    yaml: CURRENT_YAML,
+    ruleChanged: false,
+    /** The live version is level 5: Cloud refuses to show it as a file. */
+    notRenderable: false,
+  };
   const can = {
     read: true,
     decide: scopes.includes("decide") && roleCan[role].decide,
@@ -179,10 +185,13 @@ export function fakeApi(options: Options = {}) {
       body: { ...run(), timeline: timeline() },
     }),
     "GET /insights": () => ({ status: 200, body: insights() }),
-    "GET /rules": () => ({
-      status: 200,
-      body: { environment: "development", yaml: state.yaml },
-    }),
+    "GET /rules": () =>
+      state.notRenderable
+        ? error(409, "VERSION_NOT_RENDERABLE")
+        : {
+            status: 200,
+            body: { environment: "development", yaml: state.yaml },
+          },
     "POST /rules/preview": preview,
     "POST /rules/publish": publish,
   };

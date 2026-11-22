@@ -4,6 +4,9 @@ import { login, logout, showWhoami } from "./commands/auth.ts";
 import { activity, insights, run, runs } from "./commands/read.ts";
 import { connection } from "./commands/connection.ts";
 import { connector } from "./commands/connector.ts";
+import { budgets } from "./commands/budgets.ts";
+import { evidence } from "./commands/evidence.ts";
+import { contracts } from "./commands/contracts.ts";
 import { example } from "./commands/example.ts";
 import { policy } from "./commands/policy.ts";
 import { add } from "./commands/project.ts";
@@ -66,6 +69,7 @@ const commands: Record<string, Entry> = {
   add: { run: add, options: [] },
   plan: { run: plan, options: ["runtime", "require-active"] },
   example: { run: example, options: [] },
+  contracts: { run: contracts, options: [] },
   apply: { run: apply, options: ["yes", "runtime"] },
   destroy: { run: destroy, options: ["yes", "runtime"] },
   status: { run: status, options: ["runtime"] },
@@ -104,6 +108,9 @@ Project policy (offline, no account; run where nodrail.yaml is)
   plugin fetch [name]    Copy a plugin from git at its pinned commit; --check compares (preview)
   workspace publish      Make the lock here the revision your team should run (preview)
   workspace show         The team's intended revision next to the lock and each host (preview)
+  contracts render <agent>      The receipt section for an agent's file (preview)
+  contracts validate <t> <file> Check a sample against a contract, offline (preview)
+  contracts explain <b|gate>    What a binding or gate asks for, and what satisfies it (preview)
 
 Policies (offline, no account), the same as nodrail-policy
   policy init <pack>     A starter rules file: read-only or repo-work
@@ -114,6 +121,13 @@ Policies (offline, no account), the same as nodrail-policy
   policy --help          Every policy command and its flags
   connection run <file> <name>  Start a tool connection; hosts run this
   connector <name>       Nodrail's connectors: http-search, files-search, outbox
+
+Evidence and budgets (engine level 5; a person runs these, never an agent)
+  evidence run <name> -- <cmd>   Run a check and record what it wrote to $NODRAIL_EVIDENCE_OUT
+  evidence submit <name>         From GitHub Actions: send a result to Cloud with the job's OIDC token
+  evidence show <name>           Evidence recorded here, and the gates reading it
+  budgets status                 Numeric budgets as the local run ledger counts them
+  budgets reconcile <key>        Settle an unknown reservation: --consumed|--released --note
 
 Options
   --json                 Machine-readable output on stdout
@@ -157,6 +171,9 @@ export async function main(argv: string[], io: Io): Promise<number> {
     if (argv[0] === "connection") return await connection(argv.slice(1), io);
     if (argv[0] === "connector")
       return await connector(argv.slice(1), io, VERSION);
+    // Their own flags, and `run` passes everything after -- to the command.
+    if (argv[0] === "evidence") return await evidence(argv.slice(1), io);
+    if (argv[0] === "budgets") return await budgets(argv.slice(1), io);
     const { values, positionals } = parse(argv);
     if (values.version) {
       io.out(VERSION);

@@ -51,6 +51,8 @@ const explanations: Record<string, string> = {
     "The rules changed since the preview. Pull them again, merge your edits and push again.",
   INVALID_INPUT: "Nodrail refused the request as invalid.",
   RATE_LIMITED: "Too many requests with this token. Wait a minute and retry.",
+  VERSION_NOT_RENDERABLE:
+    "The live rules use numeric budgets or evidence requirements (engine level 5), which Cloud can't show as a file yet. Keep the rules file you published as the source: edit it and push it again.",
 };
 
 /** One line for the person, with the code and request id for support. */

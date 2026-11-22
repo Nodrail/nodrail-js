@@ -30,5 +30,11 @@ export function projectFolder(
     return { code, out: terminal.stdout(), err: terminal.stderr() };
   };
   const run = (...argv: string[]) => runFrom(cwd, ...argv);
-  return { cwd, home, read, write, run, runFrom };
+  /** `nodrail` run here with this on stdin, as a host runs a hook. */
+  const runWith = async ({ stdin }: { stdin: string }, ...argv: string[]) => {
+    const terminal = fakeIo({ cwd, home, fetch, env, stdin });
+    const code = await terminal.run(...argv);
+    return { code, out: terminal.stdout(), err: terminal.stderr() };
+  };
+  return { cwd, home, read, write, run, runFrom, runWith };
 }

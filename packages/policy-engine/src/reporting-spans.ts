@@ -63,7 +63,14 @@ export function runEventSpan(input: {
   if (event.step) attributes["nodrail.step"] = event.step;
   if (event.type === "step.finished") {
     if (event.verdict) attributes["nodrail.verdict"] = event.verdict;
-    attributes["nodrail.findings"] = String(event.findings.length);
+    // A contract's count is the runtime's; past what Cloud takes, it is left out, not clamped.
+    const findings = event.receipt?.findings ?? event.findings.length;
+    if (findings <= 1000) attributes["nodrail.findings"] = String(findings);
+    // A contract receipt's state and digest; its values never leave here.
+    if (event.receipt) {
+      attributes["nodrail.receipt.state"] = event.receipt.state;
+      attributes["nodrail.receipt.contract"] = event.receipt.contract;
+    }
     if (event.usage.tokens !== undefined)
       attributes["nodrail.usage.tokens"] = String(event.usage.tokens);
     if (event.usage.usd !== undefined)
@@ -74,6 +81,22 @@ export function runEventSpan(input: {
     attributes["nodrail.operation"] = event.operation;
     attributes["nodrail.outcome"] = event.outcome;
     attributes["nodrail.change"] = String(event.change === true);
+  }
+  if (event.type === "connection.call") {
+    // States, digests and the execution only: never a value.
+    const { call } = event;
+    attributes["nodrail.tool"] = call.connection;
+    attributes["nodrail.operation"] = call.operation;
+    attributes["nodrail.execution"] = call.execution;
+    attributes["nodrail.delivered"] = String(call.delivered);
+    for (const [side, check] of [
+      ["input", call.input],
+      ["result", call.result],
+    ] as const)
+      if (check) {
+        attributes[`nodrail.${side}.state`] = check.state;
+        attributes[`nodrail.${side}.contract`] = check.contract;
+      }
   }
   const at = nanos(event.at);
   return {

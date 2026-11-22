@@ -176,9 +176,21 @@ export function bindingProblem(type: ParameterType, value: string) {
 
 /** The first field a manifest gets wrong, and why. */
 export function invalidField(
-  issues: { path: PropertyKey[]; message: string }[],
+  issues: {
+    path: PropertyKey[];
+    message: string;
+    code?: string;
+    keys?: string[];
+  }[],
 ) {
   const issue = issues[0];
+  // A key the manifest doesn't know: name it where it is.
+  if (issue?.code === "unrecognized_keys" && issue.keys?.length) {
+    const named = issue.keys.map((key) =>
+      [...issue.path.map(String), key].join("."),
+    );
+    return `The manifest's fields are not valid: ${named.join(", ")}: unknown key${named.length > 1 ? "s" : ""}`;
+  }
   const at = issue?.path.map(String).join(".");
   return issue && at
     ? `The manifest's fields are not valid: ${at}: ${issue.message}`

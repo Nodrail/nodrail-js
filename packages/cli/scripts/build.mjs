@@ -3,7 +3,11 @@ import { build } from "esbuild";
 
 rmSync("dist", { recursive: true, force: true });
 
-const shared = { platform: "node", format: "esm", target: "node22" };
+const shared = {
+  platform: "node",
+  format: "esm",
+  target: "node22",
+};
 
 // The library: its index and the API client, which @nodrail/mcp imports.
 await build({

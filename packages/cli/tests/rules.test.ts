@@ -29,6 +29,26 @@ describe("rules pull", () => {
   });
 });
 
+describe("a level 5 live version", () => {
+  test("pull explains why Cloud can't show it as a file", async () => {
+    const api = fakeApi();
+    api.state.notRenderable = true;
+    const t = at(api);
+    expect(await t.run("rules", "pull")).toBe(1);
+    expect(t.stderr()).toContain("can't show as a file yet");
+    expect(t.stderr()).toContain("VERSION_NOT_RENDERABLE");
+  });
+
+  test("push still previews and publishes, without a line diff", async () => {
+    const api = writer();
+    api.state.notRenderable = true;
+    const t = at(api);
+    expect(await t.run("rules", "push", "rules.yaml", "--yes")).toBe(0);
+    expect(t.stdout()).toContain("there is no line diff");
+    expect(t.stdout()).toContain("Published revision 4.");
+  });
+});
+
 describe("rules push", () => {
   test("previews, shows the diff, asks and publishes what it previewed", async () => {
     const api = writer();

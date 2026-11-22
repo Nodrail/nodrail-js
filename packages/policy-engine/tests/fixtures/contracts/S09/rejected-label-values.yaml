@@ -1,0 +1,13 @@
+description: Values must validate against the label shape; labels are flat.
+nodrail.yaml:
+  shapes:
+    project-labels:
+      properties:
+        team: { values: [payments, growth], report: true }
+        owners: { type: list, of: { type: string } }
+  inventory:
+    shape: project-labels
+    values: { team: billing, owners: [] }
+expect:
+  - { code: inventory-shape, path: nodrail.yaml.inventory.shape }
+  - { code: value, path: nodrail.yaml.inventory.values.team }

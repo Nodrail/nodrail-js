@@ -1,0 +1,21 @@
+description: >-
+  Inventory labels with allowed values. Labels describe; they never grant
+  RBAC, move billing or change which tenant a project belongs to.
+nodrail.yaml:
+  shapes:
+    project-labels:
+      properties:
+        team: { values: [payments, growth, platform], report: true }
+        cost_centre: { values: [cc-100, cc-120], report: true }
+        tier: { type: integer, min: 1, max: 3, report: true }
+        owner_email:
+          { type: string, max: 254, classification: pii, optional: true }
+  inventory:
+    shape: project-labels
+    values: { team: payments, cost_centre: cc-120, tier: 1 }
+cases:
+  - name: the declared labels
+    target: inventory
+    value: { team: payments, cost_centre: cc-120, tier: 1, owner_email: a@b.c }
+    expect: valid
+    projection: { team: payments, cost_centre: cc-120, tier: 1 }

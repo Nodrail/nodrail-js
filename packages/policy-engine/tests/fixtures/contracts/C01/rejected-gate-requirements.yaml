@@ -1,0 +1,74 @@
+description: >-
+  Requirements the contracts can't support: a verdict the receipt never
+  gives, a receipt asked to be runtime-observed, evidence asked for an
+  authority none of its producers has, and a path that isn't declared.
+nodrail.yaml:
+  shapes:
+    reviewer-result:
+      properties:
+        verdict:
+          {
+            values: [ship, ship-with-debt, fix-first, unassessable],
+            role: verdict,
+          }
+        issue: { type: string, max: 100 }
+        findings:
+          role: findings
+          report: true
+          properties:
+            blocker: { type: integer, min: 0 }
+            major: { type: integer, min: 0 }
+        lesson: { type: string, max: 300, optional: true }
+    qa-result:
+      properties:
+        verdict: { values: [pass, fail], role: verdict }
+        checks: { type: integer, min: 0, report: true }
+        flaky: { type: integer, min: 0, optional: true, report: true }
+    ci-result:
+      properties:
+        status: { values: [passed, failed], report: true }
+        tests: { type: integer, min: 0, report: true }
+        duration_ms: { type: integer, min: 0, unit: ms, report: true }
+        log_url: { type: string, max: 500 }
+  receipts:
+    reviewer: { shape: reviewer-result }
+    qa: { shape: qa-result }
+  evidence:
+    ci-tests:
+      shape: ci-result
+      producers:
+        - { class: runtime-observed }
+      subject: revision
+resources:
+  - apiVersion: apf.nodrail.com/v1alpha1
+    kind: Agent
+    metadata: { name: developer }
+    spec: {}
+  - apiVersion: apf.nodrail.com/v1alpha1
+    kind: Agent
+    metadata: { name: qa }
+    spec: { receipt: qa }
+  - apiVersion: apf.nodrail.com/v1alpha1
+    kind: Agent
+    metadata: { name: reviewer }
+    spec: { receipt: reviewer }
+policy:
+  - required_engine_version: 5
+  - gate: Reviewed before merge
+    tool: github
+    operation: pr.merge
+    resource: { kind: repository, match: any }
+    requires:
+      - { agent: reviewer, verdict: [approve], where: { findings.critical: 0 } }
+      - { agent: qa, verdict: pass, authority: runtime-observed }
+      - {
+          evidence: ci-tests,
+          authority: externally-verified,
+          where: { status: passed },
+        }
+    otherwise: deny
+expect:
+  - { code: verdict-value, path: policy.1.requires.0.verdict }
+  - { code: path, path: policy.1.requires.0.where.findings.critical }
+  - { code: authority, path: policy.1.requires.1.authority }
+  - { code: authority, path: policy.1.requires.2.authority }

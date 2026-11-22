@@ -58,7 +58,8 @@ What a gate does:
 2. **No history means unmet.** With no run, a step that reported no verdict, or a verdict not in the list, the gate holds. So does a step whose start wasn't recorded.
 3. **A builder still running counts as the latest work.** So does any action it took.
 4. **The step must cover all of the work.** A QA step that started before the last build action and finished after it saw only part of the build, so it doesn't count.
-5. **It never weakens the rules.** The rules decide first. An unmet gate can only make that stricter: when no rule matches, the action stays blocked even if the gate only asks for a review.
+5. **The latest step decides.** Only the agent's latest finished step counts, per revision when the requirement has `subject: revision`. A later step that fails, reports another verdict or ends with an invalid receipt closes a gate an earlier step opened, with no work between.
+6. **It never weakens the rules.** The rules decide first. An unmet gate can only make that stricter: when no rule matches, the action stays blocked even if the gate only asks for a review.
 
 ### What counts as a change
 
@@ -235,6 +236,7 @@ What the hook does with each event:
 | `PreToolUse` | An action: tool, operation, outcome, and the step that took it (`agent_id`, `agent_type`), or `main` | Rules, gates and budgets, with the run's history |
 | `SubagentStart` | The step starts | Nothing |
 | `SubagentStop` | The step finishes, with the receipt read from its last message | Nothing; a step that sent no receipt finishes with no verdict |
+| `PreToolUse` on `SubagentHandback` | A subagent in `auto` permission mode hands back its report: the step finishes with the receipt it carries once the call goes ahead (it does when no rule covers it), and the stop that follows, which carries no message, adds nothing | With a receipt contract, an invalid or missing receipt is denied so the subagent resends |
 
 Starting a subagent is `tool: claude-code`, `operation: agent`, with the subagent's type as an `agent` resource. Claude Code's earlier name for the tool, `Task`, is described the same way. Types are named the way runs name agents: lowercase, with anything but letters, digits, `_` and `-` turned into `-`, so `vercel:deployment-expert` is `vercel-deployment-expert`. A start with no type is `general-purpose`.
 
@@ -279,7 +281,7 @@ A ledger line that can't be read blocks the next action rather than being skippe
 
 `require_approval` asks the person at the keyboard. Their answer is Claude Code's, not recorded by Nodrail.
 
-**Protect the ledger.** It is a file, and an agent that can write to `.git` can write a verdict into it. The `repo-work` starter pack denies file writes and edits under `.git`, shell redirection is never a simple command, so a prefix rule doesn't cover it, and both packs deny running `nodrail-policy` and `nodrail-claude-hook`, which could record a step by hand. If you write your own rules, deny writes to `.git` too, and if you move the ledger with `NODRAIL_LEDGER`, deny writes to that folder.
+**Protect the ledger.** It is a file, and an agent that can write to `.git` can write a verdict into it. The `repo-work` starter pack denies file writes and edits under `.git`, shell redirection is never a simple command, so a prefix rule doesn't cover it, and both packs deny running `nodrail-policy` and `nodrail-claude-hook`, which could record a step by hand. If you write your own rules, deny writes to `.git` too, and if you move the ledger with `NODRAIL_LEDGER`, deny writes to that folder. A hook given `--protect-list` (as `nodrail apply` sets it up) also checks this itself: file tools changing `.git` or the ledger are denied, and so are shell commands that name a path there (as written, spliced from quoted pieces, or with a wildcard that could match it), link to it, or copy a tree onto it. Reading shell commands is best effort, not a sandbox: a path built when the command runs, or a program that writes files on its own, isn't seen, so keep your own deny rules too.
 
 That is not enough against an agent set on it. `repo-work` lets the agent write tests and run them, and a test can write to the ledger like any other program. Local gates catch mistakes and keep an honest team of agents in order; they don't stop a determined agent. Cloud keeps the history on its server, where code the agent runs can't reach it.
 

@@ -1,0 +1,16 @@
+description: A memory record needs exactly one kind property; kind decides the write policy.
+nodrail.yaml:
+  shapes:
+    loose-note: { properties: { text: { type: string } } }
+  connections:
+    memory:
+      command: npx
+      operations: { create_entities: {} }
+  memory:
+    notes:
+      shape: loose-note
+      connection: memory
+      operations: { create: create_entities }
+      writers: {}
+expect:
+  - { code: role-required, path: nodrail.yaml.memory.notes }

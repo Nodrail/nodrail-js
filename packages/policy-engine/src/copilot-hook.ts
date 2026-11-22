@@ -87,6 +87,8 @@ for (const [claude, copilot] of Object.entries({
   WebFetch: "web_fetch",
   WebSearch: "web_search",
   Task: "task",
+  // Copilot 1.0.114 names its dispatch `Agent` here, with `agent_type`.
+  Agent: "task",
 }))
   builtIns[claude] = builtIns[copilot]!;
 
@@ -165,16 +167,23 @@ export function copilotEvents(
     const files = patchFiles(text(args.input) || text(args.patch));
     if (files.length === 0)
       return "Nodrail: this patch names no file, so it is blocked.";
-    return files.map(({ path, adds }) => {
+    return files.map(({ path, adds }, index) => {
       const file_path = isAbsolute(path) || !cwd ? path : join(cwd, path);
-      return as(
-        adds
+      // Each file is its own call to the hook: one id would make the second
+      // a repeated delivery of the first, given the first's decision.
+      const id =
+        typeof event.toolCallId === "string" && files.length > 1
+          ? { tool_use_id: `${event.toolCallId}#${index}` }
+          : {};
+      return as({
+        ...(adds
           ? { tool_name: "Write", tool_input: { file_path, content: "" } }
           : {
               tool_name: "Edit",
               tool_input: { file_path, old_string: "", new_string: "" },
-            },
-      );
+            }),
+        ...id,
+      } as Translated);
     });
   }
   const builtIn = builtIns[name];
@@ -284,4 +293,67 @@ export function claudeAnswerFor(answer: HookResult): HookResult {
     stderr: "",
     exitCode: 0,
   };
+}
+
+const STEP_EVENTS = new Set(["SubagentStart", "SubagentStop"]);
+
+/** The event as an object, or null when it isn't one. */
+function objectOf(stdin: string): Record<string, unknown> | null {
+  try {
+    const event: unknown = JSON.parse(stdin);
+    return typeof event === "object" && event !== null
+      ? (event as Record<string, unknown>)
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * A call's outcome under Copilot, as the Claude Code PostToolUse or
+ * PostToolUseFailure it is, or null for anything else: Copilot's own
+ * postToolUse carries `toolResult.resultType`, which its preToolUse never
+ * does. Only settles budgets; never judged.
+ */
+export function copilotSettleEvent(stdin: string): string | null {
+  const said = objectOf(stdin);
+  if (!said) return null;
+  const name = text(said.hook_event_name);
+  if (name === "PostToolUse" || name === "PostToolUseFailure") return stdin;
+  const result = said.toolResult as { resultType?: unknown } | undefined;
+  if (typeof result !== "object" || result === null) return null;
+  return JSON.stringify({
+    hook_event_name:
+      result.resultType === "success" ? "PostToolUse" : "PostToolUseFailure",
+    session_id: said.sessionId,
+    cwd: said.cwd,
+    tool_use_id: said.toolCallId,
+    tool_name: text(said.toolName),
+  });
+}
+
+/**
+ * A subagent starting or stopping under Copilot, as the Claude Code event it
+ * is, or null for a tool call. Copilot's own hooks send `subagentStart` and
+ * `subagentStop` with `agentId`, `agentType` and, on a stop, the final text
+ * in `response` (verified with Copilot CLI 1.0.114); its Claude-compatible
+ * hooks already send Claude Code's shape, the text in
+ * `last_assistant_message`.
+ */
+export function copilotStepEvent(stdin: string): string | null {
+  const said = objectOf(stdin);
+  if (!said) return null;
+  if (STEP_EVENTS.has(text(said.hook_event_name))) return stdin;
+  if (said.toolName !== undefined || !text(said.agentId)) return null;
+  const stop = "response" in said || "stopReason" in said;
+  return JSON.stringify({
+    hook_event_name: stop ? "SubagentStop" : "SubagentStart",
+    session_id: said.sessionId,
+    cwd: said.cwd,
+    agent_id: said.agentId,
+    agent_type: said.agentType ?? said.agentName,
+    ...(stop && typeof said.response === "string"
+      ? { last_assistant_message: said.response }
+      : {}),
+  });
 }

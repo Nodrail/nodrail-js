@@ -1,0 +1,44 @@
+description: >-
+  A playbook module ships its contract; the project imports it at an exact
+  version and binds its reviewer. The project repeating the identical
+  definition is not a collision.
+nodrail.yaml:
+  shapes:
+    review-result:
+      properties:
+        verdict: { values: [ship, ship-with-debt, fix-first], role: verdict }
+        findings:
+          {
+            role: findings,
+            type: list,
+            of: { values: [correctness, security, tests] },
+            max: 10,
+            report: true,
+          }
+modules:
+  - ref: "@nodrail/review@1.2.0"
+    shapes:
+      review-result:
+        properties:
+          verdict: { values: [ship, ship-with-debt, fix-first], role: verdict }
+          findings:
+            {
+              role: findings,
+              type: list,
+              of: { values: [correctness, security, tests] },
+              max: 10,
+              report: true,
+            }
+    receipts:
+      reviewer: { shape: review-result }
+resources:
+  - apiVersion: apf.nodrail.com/v1alpha1
+    kind: Agent
+    metadata: { name: reviewer }
+    spec: { receipt: reviewer }
+cases:
+  - name: the playbook's own example
+    target: receipt:reviewer
+    value: { verdict: fix-first, findings: [security] }
+    expect: valid
+    projection: { verdict: fix-first, findings: [security] }

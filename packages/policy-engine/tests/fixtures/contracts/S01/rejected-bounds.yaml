@@ -1,0 +1,14 @@
+description: >-
+  Bounds must fit the type once the grammar parses: a string holds at most
+  1,000 characters, a boolean has no max, min can't pass max.
+nodrail.yaml:
+  shapes:
+    brief:
+      properties:
+        summary: { type: string, max: 5000 }
+        flag: { type: boolean, max: 1 }
+        size: { type: integer, min: 10, max: 2 }
+expect:
+  - { code: grammar, path: nodrail.yaml.shapes.brief.properties.summary.max }
+  - { code: grammar, path: nodrail.yaml.shapes.brief.properties.flag.max }
+  - { code: grammar, path: nodrail.yaml.shapes.brief.properties.size.min }

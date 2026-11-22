@@ -1,11 +1,27 @@
 // The hook never lets an agent change the rules it enforces. Rules in the
 // files can be wrong or missing; this holds whatever they say.
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { basename, dirname, join, resolve } from "node:path";
+import {
+  basename,
+  dirname,
+  isAbsolute,
+  join,
+  relative,
+  resolve,
+  sep,
+} from "node:path";
 import { CHANGING_FILE_OPERATIONS } from "./changes.ts";
 import { canonicalPath, isWithin } from "./paths.ts";
 import type { ActionDescriptor } from "./protocol.ts";
+import { shellWords } from "./commands.ts";
+import { writesOntoRoot } from "./shell-writes.ts";
+import {
+  git,
+  ledgerDirectory,
+  nodrailDirectory,
+  type Environment,
+} from "./run-key.ts";
 
 /** The rule files and folders the hook loaded, as file tools name paths. */
 export function protectedPaths(paths: string[], cwd = process.cwd()) {
@@ -55,8 +71,11 @@ export function touchedRules(
   return null;
 }
 
-/** A setup's project folder and the paths in it no agent may touch. */
-export type SetupGuard = { root: string; paths: string[] };
+/**
+ * A setup's project folder and the paths in it no agent may touch. `roots`:
+ * places no wildcard may reach either (the run ledger, git's folders).
+ */
+export type SetupGuard = { root: string; paths: string[]; roots?: string[] };
 
 /** The setup a protect list names, the list, and the writes nodrail stages at home. */
 export function setupGuard(list: string): SetupGuard {
@@ -69,6 +88,51 @@ export function setupGuard(list: string): SetupGuard {
       canonicalPath(resolve(list)),
       canonicalPath(join(homedir(), ".nodrail")),
     ],
+  };
+}
+
+/**
+ * The run ledger, wherever it resolves for this folder, and the session pins
+ * kept with it (R364): `NODRAIL_LEDGER` when set, else Nodrail's directory
+ * (`.git/nodrail`, or ~/.nodrail outside git). The hook and the person's
+ * `nodrail evidence run` write there; an agent never may, or it could
+ * forge the steps, reservations and evidence a gate reads.
+ */
+export function ledgerGuardPath(cwd: string, env: Environment) {
+  return canonicalPath(
+    env.NODRAIL_LEDGER ? ledgerDirectory(cwd, env) : nodrailDirectory(cwd, env),
+  );
+}
+
+/**
+ * Git's own folders for this folder (R374): the worktree's and the shared
+ * one, which hold its hooks, its config and Nodrail's ledger. Git commands
+ * change them through `git`, never by naming them.
+ */
+function gitFolders(cwd: string) {
+  return ["--git-dir", "--git-common-dir"].flatMap((flag) => {
+    const found = git(cwd, ["rev-parse", flag]);
+    return found ? [canonicalPath(resolve(cwd, found))] : [];
+  });
+}
+
+/**
+ * The setup guard with the run ledger and git's folders, as seen from each
+ * folder, protected too, and kept from any wildcard.
+ */
+export function withLedger(
+  guard: SetupGuard,
+  cwds: string[],
+  env: Environment,
+): SetupGuard {
+  const roots = [
+    canonicalPath(join(guard.root, ".git")),
+    ...cwds.flatMap((cwd) => [ledgerGuardPath(cwd, env), ...gitFolders(cwd)]),
+  ];
+  return {
+    ...guard,
+    paths: [...new Set([...guard.paths, ...roots])],
+    roots: [...new Set([...(guard.roots ?? []), ...roots])],
   };
 }
 
@@ -136,7 +200,7 @@ export function touchedData(
 const words = (command: string) =>
   command.split(/[\s;|&<>()`'"=:$]+/).filter(Boolean);
 
-const wordPath = (word: string, cwd: string) =>
+export const wordPath = (word: string, cwd: string) =>
   canonicalPath(resolve(cwd, word.replace(/^~(?=$|\/)/, homedir())));
 
 const NODRAIL_PROGRAMS = new Set([
@@ -145,37 +209,179 @@ const NODRAIL_PROGRAMS = new Set([
   "nodrail-claude-hook",
 ]);
 
+/** Every word a line names: read leniently, and as the shell joins quotes. */
+function namedWords(command: string) {
+  const joined = (shellWords(command) ?? []).flatMap((word) => [
+    word,
+    ...word.split(/[=:]/),
+  ]);
+  return [...new Set([...words(command), ...joined])].filter(Boolean);
+}
+
+export const GLOB = /[*?[]/;
+
+/** One wildcard segment as a pattern; `[` with no `]` is itself. */
+function segmentPattern(segment: string) {
+  let source = "";
+  for (let at = 0; at < segment.length; at += 1) {
+    const char = segment[at]!;
+    const close = char === "[" ? segment.indexOf("]", at + 2) : -1;
+    if (char === "*") source += ".*";
+    else if (char === "?") source += ".";
+    else if (close > 0) {
+      const inner = segment.slice(at + 1, close).replace(/^[!^]/, "^");
+      source += `[${inner.replaceAll("\\", "\\\\")}]`;
+      at = close;
+    } else source += char.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
+  }
+  // Case-insensitive, as macOS and Windows disks are.
+  return new RegExp(`^${source}$`, "i");
+}
+
+/** Whether a segment as written could name `name`; a wildcard skips dotfiles. */
+function segmentMatches(segment: string, name: string) {
+  if (!GLOB.test(segment)) return segment.toLowerCase() === name.toLowerCase();
+  if (name.startsWith(".") && !segment.startsWith(".")) return false;
+  return segmentPattern(segment).test(name);
+}
+
+/** A wildcard word's literal folder and the segments from its first wildcard. */
+export function wildcardParts(word: string, cwd: string) {
+  const written = word.replace(/^~(?=$|\/)/, homedir());
+  // Not join(): it would fold `x*/..` away before it is read.
+  const full = isAbsolute(written) ? written : `${cwd}/${written}`;
+  const parts = full.split(/[\\/]/);
+  const first = parts.findIndex((part) => GLOB.test(part));
+  if (first < 0) return null;
+  return {
+    folder: canonicalPath(resolve(sep, ...parts.slice(0, first))),
+    rest: parts.slice(first).filter(Boolean),
+  };
+}
+
+/** At most this many paths a wildcard is expanded to; more could be anything. */
+const MAX_EXPANDED = 500;
+
+/**
+ * The paths a wildcard names on disk now, as the shell would expand it,
+ * links followed by the caller; null when there are too many to read.
+ */
+export function expandWildcard(
+  folder: string,
+  rest: string[],
+): string[] | null {
+  let found = [folder];
+  for (const segment of rest) {
+    if (!GLOB.test(segment)) {
+      found = found.map((path) => join(path, segment));
+      continue;
+    }
+    const next: string[] = [];
+    for (const path of found) {
+      let names: string[] = [];
+      try {
+        names = readdirSync(path);
+      } catch {
+        continue;
+      }
+      for (const name of names)
+        if (segmentMatches(segment, name)) next.push(join(path, name));
+      if (next.length > MAX_EXPANDED) return null;
+    }
+    found = next;
+  }
+  return found;
+}
+
+/**
+ * Whether a wildcard word could name a root, a folder holding one, or a
+ * path inside one (R374): `.gi?/nodrail/x`, `.c*`, `sub/alt*`. Its literal
+ * folders are resolved; what follows the first wildcard is matched segment
+ * by segment, and a `..` after it could go anywhere. What it names on disk
+ * is checked as literal paths too, so a link (`sub/g*` to `.git`) counts.
+ */
+function wildcardReaches(
+  word: string,
+  cwd: string,
+  roots: string[],
+  named: (path: string) => boolean,
+) {
+  const parts = wildcardParts(word, cwd);
+  if (!parts) return false;
+  const { folder, rest } = parts;
+  if (rest.includes("..")) return true;
+  const pattern = [...folder.split(sep).filter(Boolean), ...rest];
+  const byPattern = roots.some((root) => {
+    const names = root.split(sep).filter(Boolean);
+    const shared = Math.min(names.length, pattern.length);
+    for (let at = 0; at < shared; at += 1)
+      if (!segmentMatches(pattern[at]!, names[at]!)) return false;
+    return true;
+  });
+  if (byPattern) return true;
+  const expanded = expandWildcard(folder, rest);
+  return (
+    expanded === null || expanded.some((path) => named(canonicalPath(path)))
+  );
+}
+
+/**
+ * The places no wildcard may reach: the guard's roots, and the setup's
+ * dot folders in the project (`.nodrail`, `.claude`, …).
+ */
+function wildcardRoots(guard: SetupGuard) {
+  const dotted = guard.paths.filter((path) => {
+    const inside = relative(guard.root, path);
+    return inside.startsWith(".") && !inside.startsWith("..");
+  });
+  return [...new Set([...(guard.roots ?? []), ...dotted])];
+}
+
 /**
  * What in a shell command touches the setup, or null. A shell command can
  * write any file it names, and none of its words can be trusted to only
  * read, so a command naming a setup path at all is refused, as is Nodrail
  * itself run by any path or through a package runner. Words are read
- * leniently: quotes and shell punctuation split them, so a quoted or joined
- * path still counts. A word naming the project folder itself doesn't, or
- * every command run on the whole project would be refused.
+ * leniently (quotes and shell punctuation split them) and as the shell
+ * joins them (`".git/nod""rail"`), so a quoted, joined or spliced path
+ * still counts, and a wildcard that could reach git's folders, the ledger
+ * or a setup dot folder counts too (R374). A word naming the project folder
+ * itself doesn't, or every command run on the whole project would be refused.
  */
 export function touchedSetup(
   command: string,
   cwd: string,
   guard: SetupGuard,
 ): string | null {
-  for (const word of words(command)) {
+  const roots = wildcardRoots(guard);
+  const onto = writesOntoRoot(command, cwd, roots);
+  if (onto !== null) return onto;
+  for (const word of namedWords(command)) {
     if (
       NODRAIL_PROGRAMS.has(basename(word)) ||
       /@nodrail\/(?:cli|policy-engine)/.test(word)
     )
       return word;
-    const path = wordPath(word, cwd);
-    for (const protectedPath of guard.paths) {
-      if (isWithin(path, protectedPath)) return word;
-      // A folder holding a setup path, inside the project: rm -r resources.
-      if (
-        path !== guard.root &&
-        isWithin(path, guard.root) &&
-        isWithin(protectedPath, path)
+    if (
+      GLOB.test(word) &&
+      wildcardReaches(word, cwd, roots, (path) =>
+        namesSetupPath(path, { ...guard, paths: roots }),
       )
-        return word;
-    }
+    )
+      return word;
+    if (namesSetupPath(wordPath(word, cwd), guard)) return word;
   }
   return null;
+}
+
+/** Whether a path is a setup path, in one, or a project folder holding one. */
+function namesSetupPath(path: string, guard: SetupGuard) {
+  return guard.paths.some(
+    (protectedPath) =>
+      isWithin(path, protectedPath) ||
+      // A folder holding a setup path, inside the project: rm -r resources.
+      (path !== guard.root &&
+        isWithin(path, guard.root) &&
+        isWithin(protectedPath, path)),
+  );
 }

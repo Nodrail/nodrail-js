@@ -1,6 +1,7 @@
 // The types of the TypeScript SDK's public surface.
 import type { Environment } from "./connection.ts";
 import type { NodrailBlockedError } from "./sdk.ts";
+import type { CallContracts } from "./contract-fields.ts";
 
 /** The shorthand accepted everywhere an action is described. */
 export type ActionInput = {
@@ -71,4 +72,31 @@ export type NodrailOptions = {
    * and budgets can see its history. Default: NODRAIL_RUN, else no run.
    */
   run?: string;
+  /**
+   * The work revision sent with a call in a run, so a gate on the revision
+   * (evidence such as CI for this exact commit) can be checked. Default: the
+   * git work tree at `cwd`, read at submit and again at permit. A function
+   * reads it your way; null sends it as unknown, which keeps such gates
+   * unmet. Never a value an agent supplies.
+   */
+  subject?: (() => string | null) | null;
+  /** Where the default subject reads the work tree. Default: process.cwd(). */
+  cwd?: string;
+  /**
+   * The published input contracts, by `<tool>.<operation>` (a guarded
+   * tool is `<name>.call`): a guarded call is checked against its own, and
+   * Cloud sees each classified argument as `[classified]`.
+   */
+  contracts?: CallContracts | null;
+};
+
+/** How `run` performs an action. */
+export type RunOptions<T> = {
+  /**
+   * After this long, the call is no longer waited for and is reported as
+   * `unknown`: it may still finish, so it was neither done nor not done.
+   */
+  timeoutMs?: number;
+  /** The amounts the result measured, for budgets that sum them. */
+  measure?: (result: T) => readonly { path: string; value: number }[];
 };

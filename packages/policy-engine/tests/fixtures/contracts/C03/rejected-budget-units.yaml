@@ -1,0 +1,51 @@
+description: Units must be equal, the selector must be an integer, and unit goes with sum.
+nodrail.yaml:
+  shapes:
+    refund-args:
+      properties:
+        amount: { type: integer, min: 1, unit: usd_cents, report: true }
+        currency: { values: [usd, eur], report: true }
+        charge: { type: string, max: 64 }
+        lines:
+          {
+            type: list,
+            of: { properties: { sku: { type: string } } },
+            max: 20,
+            optional: true,
+          }
+    refund-result:
+      properties:
+        status: { values: [succeeded, pending, failed], report: true }
+        amount: { type: integer, min: 0, unit: usd_cents, report: true }
+    deploy-brief:
+      properties:
+        environment: { values: [staging, production] }
+        change: { type: string, max: 200 }
+  connections:
+    stripe:
+      command: npx
+      operations:
+        refund: { input: refund-args, output: refund-result }
+policy:
+  - required_engine_version: 5
+  - budget: Refunds in dollars
+    sum: { tool: stripe, operation: refund, path: input.amount }
+    unit: usd
+    limit: 200
+    per: run
+    otherwise: deny
+  - budget: Refunds by currency
+    sum: { tool: stripe, operation: refund, path: input.currency }
+    unit: usd_cents
+    limit: 1
+    per: run
+    otherwise: deny
+  - budget: Unit alone
+    unit: usd_cents
+    tool_calls: 3
+    per: run
+    otherwise: deny
+expect:
+  - { code: unit, path: policy.1.unit }
+  - { code: path-type, path: policy.2.sum.path }
+  - { code: unit, path: policy.3.unit }

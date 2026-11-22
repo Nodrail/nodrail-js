@@ -1,0 +1,36 @@
+description: >-
+  The description of notes changed after the lock was written: descriptions
+  are reviewed content, so the contract digest moves and the lock refuses it.
+nodrail.yaml:
+  shapes:
+    qa-result:
+      for: What QA reports
+      properties:
+        verdict: { values: [pass, fail], role: verdict }
+        checks: { type: integer, min: 0, report: true }
+        notes:
+          {
+            type: string,
+            max: 500,
+            optional: true,
+            for: "Anything else worth knowing",
+          }
+  receipts:
+    qa: { shape: qa-result }
+resources:
+  - apiVersion: apf.nodrail.com/v1alpha1
+    kind: Agent
+    metadata: { name: qa }
+    spec: {}
+lock:
+  dialect: 1
+  digest: "sha256:663eb951642db55608ff5e76620423fafcb184499e8e16f7d937063e466c03a4"
+  shapes:
+    qa-result:
+      {
+        contract: "sha256:626c1a8c1b71399f98c29f2b35090fb6182db79a5769f83cfd8a6b02b64294d8",
+        projection: "sha256:aa7b8b8a57971392e1b0a0af09c85245efdd7996f7ea2a6651bdfb5c2ffc247c",
+      }
+expect:
+  - { code: lock-mismatch, path: lock.digest }
+  - { code: lock-mismatch, path: lock.shapes.qa-result }

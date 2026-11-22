@@ -75,6 +75,8 @@ export function claudeActivation(input: {
   const user = input.env.CLAUDE_CONFIG_DIR ?? join(input.home, ".claude");
   for (const path of [
     join(user, "settings.json"),
+    // The project's own, which plan also refuses to set up over.
+    join(input.root, ".claude/settings.json"),
     join(input.root, ".claude/settings.local.json"),
   ])
     if (settingsAt(path)?.disableAllHooks === true)

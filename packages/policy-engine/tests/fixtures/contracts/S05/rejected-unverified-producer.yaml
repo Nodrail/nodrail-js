@@ -1,0 +1,10 @@
+description: externally-verified names the verifier configured to check it; a bare claim proves nothing.
+nodrail.yaml:
+  shapes:
+    ci-result: { properties: { status: { values: [passed, failed] } } }
+  evidence:
+    ci-tests:
+      shape: ci-result
+      producers: [{ class: externally-verified }]
+expect:
+  - { code: grammar, path: nodrail.yaml.evidence.ci-tests.producers.0 }

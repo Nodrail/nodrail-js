@@ -1,0 +1,9 @@
+description: Patterns name each folder level; ** and duplicate section names are refused.
+nodrail.yaml:
+  files:
+    notes:
+      root: ./memory
+      pattern: "**/*.md"
+      sections: [Summary, summary]
+expect:
+  - { code: grammar, path: nodrail.yaml.files.notes.pattern }

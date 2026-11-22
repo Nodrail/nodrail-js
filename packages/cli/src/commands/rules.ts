@@ -1,4 +1,4 @@
-import type { Preview } from "../api.ts";
+import { ApiError, type NodrailApi, type Preview } from "../api.ts";
 import type { Command } from "../context.ts";
 import { lineDiff } from "../diff.ts";
 import { CliError, confirm, UsageError } from "../io.ts";
@@ -37,6 +37,24 @@ function previewText(preview: Preview) {
   return lines.join("\n");
 }
 
+/**
+ * The live rules as a file, or `yaml: null` when Cloud can't show them as
+ * one (`VERSION_NOT_RENDERABLE`, engine level 5): pushing a new file over
+ * them still works, without the line diff.
+ */
+async function liveRules(api: NodrailApi, environment: string | undefined) {
+  try {
+    return await api.rules();
+  } catch (error) {
+    if (!(error instanceof ApiError) || error.code !== "VERSION_NOT_RENDERABLE")
+      throw error;
+    return {
+      environment: environment ?? "the default environment",
+      yaml: null,
+    };
+  }
+}
+
 const nothingChanges = (preview: Preview) =>
   !preview.added.length && !preview.changed.length && !preview.removed.length;
 
@@ -50,8 +68,15 @@ export async function pushRules(command: Command, file?: string) {
     );
   const yaml = await io.readFile(file);
   const api = await command.api();
-  const [current, preview] = [await api.rules(), await api.previewRules(yaml)];
-  const diff = lineDiff(current.yaml, yaml);
+  const [current, preview] = [
+    await liveRules(api, values.environment),
+    await api.previewRules(yaml),
+  ];
+  if (current.yaml === null)
+    command.say(
+      "The live rules can't be shown as a file (engine level 5), so there is no line diff; the preview below says what changes.",
+    );
+  const diff = current.yaml === null ? [] : lineDiff(current.yaml, yaml);
   if (diff.length) command.say(diff.join("\n"));
   command.say(previewText(preview));
   if (preview.issues.length)

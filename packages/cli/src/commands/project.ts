@@ -22,7 +22,14 @@ import {
   readProject,
   type ProjectPlan,
 } from "../project/project.ts";
-import { reviewBaseline, reviewText } from "../project/review.ts";
+import {
+  contractsReview,
+  reviewBaseline,
+  reviewText,
+} from "../project/review.ts";
+import { changeLines, contractChanges } from "../contracts/changes.ts";
+import { policyItems } from "../contracts/sources.ts";
+import type { Lock } from "../project/lockfile.ts";
 import { writeInProgress, writeProject } from "../project/store.ts";
 import { fileChanges } from "../project/workspace.ts";
 
@@ -122,7 +129,11 @@ export async function add(command: Command) {
         : "Nothing changed.",
       ...waiting(plan),
       ...(Object.keys(files).length > 0
-        ? [reviewText(reviewBaseline(root, project.lock), plan), NOT_ACTIVE]
+        ? [
+            ...contractReview(root, project.lock, plan),
+            reviewText(reviewBaseline(root, project.lock), plan),
+            NOT_ACTIVE,
+          ]
         : []),
       nextStep(plan),
     ];
@@ -157,13 +168,19 @@ export async function lock(args: string[], io: Io) {
         plan.effective && plan.effective.text !== baseline.text
           ? [reviewText(baseline, plan)]
           : [];
-      report = [`${LOCK_FILE} is up to date.`, ...waiting(plan), ...since];
+      report = [
+        `${LOCK_FILE} is up to date.`,
+        ...waiting(plan),
+        ...contractReview(root, project.lock, plan),
+        ...since,
+      ];
       return null;
     }
     report = [
       `Updated ${LOCK_FILE}`,
       ...waiting(plan),
       ...contentReview(project.lock, plan.lock),
+      ...contractReview(root, project.lock, plan),
       reviewText(baseline, plan),
       NOT_ACTIVE,
       nextStep(plan),
@@ -172,6 +189,14 @@ export async function lock(args: string[], io: Io) {
   });
   io.out(report.join("\n"));
   return 0;
+}
+
+/** What changed in the declared contracts (preview): breaking, disclosure, other. */
+function contractReview(root: string, locked: Lock | null, plan: ProjectPlan) {
+  if (plan.contracts === null && locked?.contractsBaseline === undefined)
+    return [];
+  const { baseline, source } = contractsReview(root, locked);
+  return changeLines(contractChanges(baseline, plan.contracts), source);
 }
 
 /** What changed in the agents' instructions and skills, for the reviewer. */
@@ -216,6 +241,8 @@ function drift(locked: ProjectPlan["lock"], now: ProjectPlan["lock"]) {
     return `The lock was made for engine level ${locked.engine}; this nodrail has ${now.engine}`;
   if (JSON.stringify(locked.effective) !== JSON.stringify(now.effective))
     return "The effective policy differs from the lock";
+  if (JSON.stringify(locked.contracts) !== JSON.stringify(now.contracts))
+    return "The declared contracts differ from the lock";
   return null;
 }
 
@@ -244,6 +271,9 @@ export const setupOf = (plan: ProjectPlan) => ({
   inputs: plan.resolution.inputs.flatMap((input) =>
     input.kind === "local" ? [input.path] : [],
   ),
+  contracts: plan.contracts,
+  /** The rule files' items, as the contracts compiler read them. */
+  items: policyItems(plan.resolution).items,
 });
 
 export function frozenPolicy({

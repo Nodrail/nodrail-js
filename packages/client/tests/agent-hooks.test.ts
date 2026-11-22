@@ -124,7 +124,7 @@ describe("the hook as Codex runs it", () => {
     // Codex doesn't say which subagent made a call, so every call is the main agent's.
     expect(
       server.requests.find((request) => request.path === "/actions")?.body.run,
-    ).toEqual({ key: "ENG-9" });
+    ).toEqual({ key: "ENG-9", subject: null });
   });
 
   // Cloud never answering leaves the moment for withdrawing to run out too.

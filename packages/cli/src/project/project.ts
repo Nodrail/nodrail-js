@@ -4,8 +4,15 @@ import {
   resolveProject,
   type Catalog,
   type ProjectHost,
+  type PolicySource,
   type ProjectResolution,
 } from "@nodrail/policy-engine/yaml";
+import {
+  asOnDisk,
+  contractHost,
+  contractsSource,
+  projectContracts,
+} from "../contracts/sources.ts";
 import { CliError } from "../io.ts";
 import { bundledCatalog } from "./catalog.ts";
 import { effectivePolicy } from "./effective.ts";
@@ -52,6 +59,43 @@ function failOn(resolution: ProjectResolution) {
   );
 }
 
+/**
+ * The project with this manifest, resolved, and its declared contracts
+ * (preview) compiled: null when it declares none. Reads only.
+ */
+export function resolveWithContracts(input: {
+  root: string;
+  manifest: string;
+  previous: Lock | null;
+  pins?: Record<string, string>;
+  catalog: Catalog;
+}) {
+  const files = folderHost(input.root);
+  // The manifest under review may not be written yet: read it from here.
+  const host: ProjectHost = {
+    read: (path) =>
+      path === MANIFEST_FILE ? input.manifest : files.read(path),
+    real: (path) => (path === MANIFEST_FILE ? path : files.real(path)),
+    list: (path) => files.list?.(path),
+  };
+  const read = contractHost(host, MANIFEST_FILE);
+  const resolved = resolveProject({
+    host: read.host,
+    catalog: input.catalog,
+    manifest: MANIFEST_FILE,
+    pins: { ...pinsOf(input.previous), ...input.pins },
+  });
+  failOn(resolved);
+  const resolution = asOnDisk(resolved, read.declared);
+  const contracts = projectContracts(resolution, read.declared);
+  return {
+    resolution,
+    contracts,
+    /** The rule-file entry that carries the contracts to the hook, or null. */
+    entry: contractsSource(resolution, read.declared, contracts),
+  };
+}
+
 /** What the project would be with this manifest: resolved, compiled, locked. */
 export function planProject(input: {
   root: string;
@@ -61,29 +105,21 @@ export function planProject(input: {
   catalog?: Catalog;
 }) {
   const catalog = input.catalog ?? bundledCatalog();
-  const files = folderHost(input.root);
-  // The manifest under review may not be written yet: read it from here.
-  const host: ProjectHost = {
-    read: (path) =>
-      path === MANIFEST_FILE ? input.manifest : files.read(path),
-    real: (path) => (path === MANIFEST_FILE ? path : files.real(path)),
-    list: (path) => files.list?.(path),
-  };
-  const resolution = resolveProject({
-    host,
+  const { resolution, contracts, entry } = resolveWithContracts({
+    ...input,
     catalog,
-    manifest: MANIFEST_FILE,
-    pins: { ...pinsOf(input.previous), ...input.pins },
   });
-  failOn(resolution);
+  // The contracts go first, in their own entry: the hook reads them there.
+  const withEntry = (sources: PolicySource[]) =>
+    entry ? [entry, ...sources] : sources;
   const pending = resolution.modules.filter((use) => use.missing.length > 0);
   // What is in effect must compile. While a module waits for values, the
   // whole project is checked with stand-ins, so a file that layers over the
   // module is checked against it already.
-  if (pending.length > 0) effectivePolicy(resolution.checking);
+  if (pending.length > 0) effectivePolicy(withEntry(resolution.checking));
   const compiled =
     pending.length === 0 && resolution.sources.length > 0
-      ? effectivePolicy(resolution.sources)
+      ? effectivePolicy(withEntry(resolution.sources))
       : null;
   if (pending.length === 0 && compiled === null)
     throw new CliError(
@@ -99,8 +135,9 @@ export function planProject(input: {
     content: declaresSetup(resolution.setup)
       ? contentFiles(input.root, resolution.setup, sha256)
       : null,
+    contracts,
   });
-  return { resolution, catalog, effective, pending, lock };
+  return { resolution, catalog, effective, pending, lock, contracts };
 }
 
 export type ProjectPlan = ReturnType<typeof planProject>;
