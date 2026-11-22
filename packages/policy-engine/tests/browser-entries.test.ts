@@ -33,12 +33,15 @@ function nodeImports(
 }
 
 describe("browser entries", () => {
-  test.each(["compile.ts", "simulator.ts", "index.ts"])(
-    "%s reaches no node: module",
-    (entry) => {
-      expect(nodeImports(join(src, entry))).toEqual([]);
-    },
-  );
+  test.each([
+    "compile.ts",
+    "simulator.ts",
+    "index.ts",
+    "shapes/index.ts",
+    "shapes/values.ts",
+  ])("%s reaches no node: module", (entry) => {
+    expect(nodeImports(join(src, entry))).toEqual([]);
+  });
 
   test("the check sees one when it is there", () => {
     expect(nodeImports(join(src, "yaml.ts")).length).toBeGreaterThan(0);

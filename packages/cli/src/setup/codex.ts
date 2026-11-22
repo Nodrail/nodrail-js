@@ -1,9 +1,11 @@
-import { observeCommand } from "./claude-code.ts";
+import { evidenceRead } from "./accountable.ts";
+import { observeCommand, usesLimits } from "./claude-code.ts";
 import { realpathSync } from "node:fs";
 import { codexMarketplace, codexPluginLines } from "./plugins.ts";
 import { join } from "node:path";
 import type { ProjectSetup, SetupAgent } from "@nodrail/policy-engine/yaml";
 import type { Env } from "../config.ts";
+import type { CompiledContracts } from "../contracts/engine.ts";
 import {
   CONNECTIONS_FILE,
   envNames,
@@ -15,7 +17,6 @@ import { askServer } from "./json-lines.ts";
 import {
   byPath,
   EFFECTIVE_FILE,
-  instructionsOf,
   PROTECT_LIST,
   teamFiles,
   type DesiredFile,
@@ -56,6 +57,8 @@ export function codexHookCommand(
     connections: [],
     telemetry: null,
   },
+  /** The effective policy, whose evidence requirements may ask Cloud. */
+  policyText: { effective: string; env?: Env } = { effective: "" },
 ) {
   const real = realpathSync(root);
   const policy = join(real, EFFECTIVE_FILE);
@@ -63,7 +66,10 @@ export function codexHookCommand(
   const reads = hookReads(setup as ProjectSetup, (file) =>
     quoted(join(real, file)),
   );
-  return `nodrail policy hook ${quoted(policy)} --protect-list ${quoted(list)}${reads} --host codex --agent ${entry} || printf '%s' ${quoted(DENY)}`;
+  const evidence = evidenceRead({ root, ...policyText }, (file) =>
+    quoted(join(real, file)),
+  );
+  return `nodrail policy hook ${quoted(policy)} --protect-list ${quoted(list)}${reads}${evidence} --host codex --agent ${entry} || printf '%s' ${quoted(DENY)}`;
 }
 
 /**
@@ -78,6 +84,9 @@ export function codexSetup(input: {
   setup: ProjectSetup;
   effective: string;
   inputs: string[];
+  contracts?: CompiledContracts | null;
+  /** Where the hook asks Cloud about evidence (NODRAIL_URL). */
+  env?: Env;
 }) {
   const { root } = input;
   const parts = teamFiles({
@@ -95,19 +104,21 @@ export function codexSetup(input: {
   const entry = parts.members.find((agent) => agent.name === team.entry)!;
   files.push({
     path: CODEX_CONFIG,
-    content: Buffer.from(configFile(root, entry, team.name, input.setup)),
+    content: Buffer.from(
+      configFile(root, entry, parts.body(entry), input.setup),
+    ),
     why: `start as ${entry.name}; agents on`,
   });
   for (const agent of parts.members)
     if (agent.name !== team.entry)
       files.push({
         path: `.codex/agents/${agent.name}.toml`,
-        content: Buffer.from(agentFile(root, agent, team.name)),
+        content: Buffer.from(agentFile(agent, team.name, parts.body(agent))),
         why: `agent ${agent.name}`,
       });
   files.push({
     path: CODEX_HOOKS,
-    content: Buffer.from(hooksFile(root, team.entry, input.setup)),
+    content: Buffer.from(hooksFile(root, team.entry, input.setup, input)),
     why: "the policy hook",
   });
   return {
@@ -118,13 +129,25 @@ export function codexSetup(input: {
   };
 }
 
-/** `.codex/hooks.json`: the policy hook, and the observation at session start. */
-function hooksFile(root: string, entry: string, setup: ProjectSetup) {
+/**
+ * `.codex/hooks.json`: the policy hook, the observation at session start,
+ * and, with numeric budgets, the same hook on PostToolUse to settle them.
+ * Codex has no PostToolUseFailure: a failed call's reservation stays
+ * unknown, and counted, until the person reconciles it.
+ */
+function hooksFile(
+  root: string,
+  entry: string,
+  setup: ProjectSetup,
+  policy: { effective: string; env?: Env },
+) {
   const command = (line: string) => [{ type: "command", command: line }];
+  const hook = codexHookCommand(root, entry, setup, policy);
   const hooks = {
-    PreToolUse: [
-      { matcher: ".*", hooks: command(codexHookCommand(root, entry, setup)) },
-    ],
+    PreToolUse: [{ matcher: ".*", hooks: command(hook) }],
+    ...(usesLimits(policy.effective)
+      ? { PostToolUse: [{ matcher: ".*", hooks: command(hook) }] }
+      : {}),
     // Codex asks the person to trust it once, in /hooks.
     ...(setup.observe.sessionStart
       ? {
@@ -150,12 +173,12 @@ const header = (from: string) =>
 function configFile(
   root: string,
   entry: SetupAgent,
-  team: string,
+  body: string,
   setup: ProjectSetup,
 ) {
   const lines = [
     header(entry.file).trimEnd(),
-    `developer_instructions = ${tomlString(instructionsOf(root, entry, team))}`,
+    `developer_instructions = ${tomlString(body)}`,
   ];
   if (entry.model) lines.push(`model = ${tomlString(entry.model)}`);
   lines.push("", "[agents]", "enabled = true");
@@ -174,12 +197,12 @@ function configFile(
   return `${lines.join("\n")}\n`;
 }
 
-function agentFile(root: string, agent: SetupAgent, team: string) {
+function agentFile(agent: SetupAgent, team: string, body: string) {
   const lines = [
     header(agent.file).trimEnd(),
     `name = ${tomlString(agent.name)}`,
     `description = ${tomlString(agent.description ?? `The ${agent.name} agent of team ${team}.`)}`,
-    `developer_instructions = ${tomlString(instructionsOf(root, agent, team))}`,
+    `developer_instructions = ${tomlString(body)}`,
   ];
   if (agent.model) lines.push(`model = ${tomlString(agent.model)}`);
   return `${lines.join("\n")}\n`;
@@ -206,8 +229,13 @@ export async function codexActivation(input: {
   entry: string;
   setup: Pick<ProjectSetup, "connections" | "telemetry"> &
     Partial<Pick<ProjectSetup, "plugins">>;
+  /** The effective policy apply wrote, for the hook's `--evidence`. */
+  effective?: string;
 }): Promise<Activation> {
-  const command = codexHookCommand(input.root, input.entry, input.setup);
+  const command = codexHookCommand(input.root, input.entry, input.setup, {
+    effective: input.effective ?? "",
+    env: input.env,
+  });
   const hooks = await codexHooks(input.codex, input.root, input.env);
   return typeof hooks === "string"
     ? { state: "unknown", detail: hooks }

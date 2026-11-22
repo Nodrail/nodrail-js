@@ -1,0 +1,48 @@
+description: >-
+  A connection operation's arguments. The customer's email is pii: never
+  reported, never echoed in an error.
+nodrail.yaml:
+  shapes:
+    refund-args:
+      properties:
+        amount: { type: integer, min: 1, unit: usd_cents, report: true }
+        currency: { values: [usd, eur], report: true }
+        charge: { type: string, max: 64 }
+        customer_email: { type: string, max: 254, classification: pii }
+        reason: { type: string, max: 200, optional: true }
+    refund-result:
+      properties:
+        refund_id: { type: string, max: 64 }
+        status: { values: [succeeded, pending, failed], report: true }
+        amount: { type: integer, min: 0, unit: usd_cents, report: true }
+  connections:
+    stripe:
+      command: npx
+      args: ["-y", "@stripe/mcp"]
+      operations:
+        refund: { input: refund-args, output: refund-result }
+        list_charges: {}
+cases:
+  - name: a refund in cents
+    target: input:stripe.refund
+    value:
+      {
+        amount: 4200,
+        currency: usd,
+        charge: ch_123,
+        customer_email: ana@example.com,
+      }
+    expect: valid
+    projection: { amount: 4200, currency: usd }
+  - name: an amount as text, a currency not declared and an extra argument
+    target: input:stripe.refund
+    value:
+      {
+        amount: "4200",
+        currency: gbp,
+        charge: ch_123,
+        customer_email: a@b.c,
+        metadata: {},
+      }
+    expect: invalid
+    issues: ["amount: type", "currency: enum", "metadata: unknown"]

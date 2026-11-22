@@ -1,0 +1,45 @@
+description: >-
+  A budget that sums a typed argument: the amount is known before the call,
+  so it can be reserved (admission); a sum over the result is only measured
+  afterwards. Units must match, and money is whole minor units.
+nodrail.yaml:
+  shapes:
+    refund-args:
+      properties:
+        amount: { type: integer, min: 1, unit: usd_cents, report: true }
+        currency: { values: [usd, eur], report: true }
+        charge: { type: string, max: 64 }
+        lines:
+          {
+            type: list,
+            of: { properties: { sku: { type: string } } },
+            max: 20,
+            optional: true,
+          }
+    refund-result:
+      properties:
+        status: { values: [succeeded, pending, failed], report: true }
+        amount: { type: integer, min: 0, unit: usd_cents, report: true }
+    deploy-brief:
+      properties:
+        environment: { values: [staging, production] }
+        change: { type: string, max: 200 }
+  connections:
+    stripe:
+      command: npx
+      operations:
+        refund: { input: refund-args, output: refund-result }
+policy:
+  - required_engine_version: 5
+  - budget: Refunds per run
+    sum: { tool: stripe, operation: refund, path: input.amount }
+    unit: usd_cents
+    limit: 20000
+    per: run
+    otherwise: deny
+  - budget: Refunded per run, as measured
+    sum: { tool: stripe, operation: refund, path: result.amount }
+    unit: usd_cents
+    limit: 50000
+    per: run
+    otherwise: require_approval

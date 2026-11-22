@@ -1,0 +1,9 @@
+description: A section named twice is ambiguous, whatever its case.
+nodrail.yaml:
+  files:
+    handoffs:
+      root: ./notes/handovers
+      pattern: "*/HANDOVER.md"
+      sections: [Goal, Status, goal]
+expect:
+  - { code: grammar, path: nodrail.yaml.files.handoffs.sections.2 }

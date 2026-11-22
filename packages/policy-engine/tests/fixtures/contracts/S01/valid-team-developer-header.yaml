@@ -1,0 +1,87 @@
+description: >-
+  A team's developer and QA receipts. The developer keeps its flat header
+  form while it migrates: format header maps the result line to the verdict
+  and categories to findings, then the same strict validator applies. The qa
+  Agent names no receipt, so the same-name rule picks receipt qa and plan
+  shows it as implicit.
+nodrail.yaml:
+  shapes:
+    developer-result:
+      properties:
+        result:
+          {
+            values: [done, partial, blocked, code-defect],
+            role: verdict,
+            for: "done, partial, blocked or code-defect",
+          }
+        categories:
+          role: findings
+          type: list
+          max: 10
+          of: { values: [tests, types, lint, docs, migration] }
+          optional: true
+        branch: { type: string, max: 200 }
+        commits: { type: integer, min: 0, report: true }
+    qa-result:
+      properties:
+        verdict: { values: [pass, fail], role: verdict }
+        checks: { type: integer, min: 0, report: true }
+        usage:
+          role: usage
+          optional: true
+          properties:
+            tokens: { type: integer, min: 0 }
+            usd: { type: number, min: 0 }
+  receipts:
+    developer:
+      shape: developer-result
+      format: header
+      header:
+        {
+          title: "RECEIPT {agent}",
+          aliases: { result: result, categories: categories },
+          mode_prefix: true,
+        }
+    qa: { shape: qa-result }
+resources:
+  - apiVersion: apf.nodrail.com/v1alpha1
+    kind: Agent
+    metadata: { name: developer }
+    spec: { receipt: developer }
+  - apiVersion: apf.nodrail.com/v1alpha1
+    kind: Agent
+    metadata: { name: qa }
+    spec: {}
+cases:
+  - name: done with two commits
+    target: receipt:developer
+    value:
+      { result: done, categories: [tests], branch: feat/receipts, commits: 2 }
+    expect: valid
+    projection: { result: done, commits: 2 }
+  - name: code-defect is a verdict word, not prose
+    target: receipt:developer
+    value: { result: code-defect, branch: fix/parser, commits: 0 }
+    expect: valid
+  - name: a repeated category would count twice, so it is refused
+    target: receipt:developer
+    value:
+      { result: partial, categories: [tests, tests], branch: x, commits: 1 }
+    expect: invalid
+    issues: ["categories: duplicate"]
+  - name: qa pass reports usage, a built-in field, by default
+    target: receipt:qa
+    value: { verdict: pass, checks: 14, usage: { tokens: 5120, usd: 0.42 } }
+    expect: valid
+    projection:
+      { verdict: pass, checks: 14, usage: { tokens: 5120, usd: 0.42 } }
+  - name: a negative count fails
+    target: receipt:qa
+    value: { verdict: fail, checks: -1 }
+    expect: invalid
+    issues: ["checks: below"]
+  - name: the string false is not a boolean, and the string 3 is not a number
+    target: receipt:qa
+    value: { verdict: fail, checks: "3" }
+    expect: invalid
+    issues: ["checks: type"]

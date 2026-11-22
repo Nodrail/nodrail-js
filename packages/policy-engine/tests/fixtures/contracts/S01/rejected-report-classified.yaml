@@ -1,0 +1,15 @@
+description: A secret is never reported, and report true under it is an error, not silently overridden.
+nodrail.yaml:
+  shapes:
+    deploy-result:
+      properties:
+        verdict: { values: [deployed, failed], role: verdict }
+        credentials:
+          classification: secret
+          properties:
+            token: { type: string, report: true }
+expect:
+  - {
+      code: report-classified,
+      path: nodrail.yaml.shapes.deploy-result.properties.credentials.token.report,
+    }

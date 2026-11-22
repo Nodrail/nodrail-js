@@ -1,5 +1,62 @@
 # Changelog
 
+## 0.6.0
+
+Uses `@nodrail/policy-engine` 0.6.0.
+
+### Added
+
+- The hook reads `.nodrail/contracts.json`, which `nodrail apply` writes
+  with the compiled brief and input contracts (R344), from
+  `CLAUDE_PROJECT_DIR` or the nearest folder above the call's `cwd`. A
+  dispatch it covers sends its brief's reported fields as `params.brief`,
+  an operation it covers sends classified inputs as `[classified]`, and
+  an invalid brief or input is denied before Cloud is asked: the SDK's
+  `withContractFields`, loaded from its own file
+  (`dist/nodrail-hook-contracts.mjs`) only for a covered call, so the hook
+  stays under 80 KB with no schema or YAML library. Without the file
+  nothing changes. A file that can't be read, or a checker that can't be
+  loaded for a covered call, blocks.
+
+- The hook sends a flat `RECEIPT <agent>` header block as the receipt when
+  no fenced block ends the message, so Cloud can read it with the agent's
+  declared contract.
+- A `SubagentHandback` (Claude Code `auto` mode) finishes its step with the
+  receipt it carries; when Cloud answers that the receipt is invalid or
+  missing, the hand-back is denied with the reason so the subagent resends.
+  The call is then decided like any other.
+- A call in a run sends the work revision it is about as `run.subject`
+  (the git work tree at `cwd`, or the hook event's `cwd`), and again as the
+  permit's `subject`, read afresh because the work may change while a person
+  decides. Unknown is sent as `null`, never left out or guessed. Options
+  `subject` and `cwd` change how it is read.
+- `report(decision, outcome, { measured })` and `run(action, perform,
+  { measure })` send the amounts a result measured (`result.` paths, whole
+  non-negative numbers); any unusable amount leaves all of them out.
+- `run(..., { timeoutMs })`: a call not waited for to the end, or one that
+  rejects with `AbortError`/`TimeoutError`, is reported `unknown`, not
+  `failure`; so is a Claude Code tool call that was interrupted.
+- Reports are idempotent: the SDK keys each by its permit, and the client
+  retries a network or server error twice with the same key; a key the
+  server already has counts as reported.
+- `contracts` option and `withContractFields`: given the published brief
+  and input contracts, a guarded call is checked against its declared input
+  before Cloud is asked (refused as `CONTRACT_REFUSED`, with paths and codes
+  only), and Cloud receives each classified argument as `[classified]`; a
+  dispatch carries its brief's reported fields as `params.brief`. The Claude
+  Code hook doesn't read contracts yet: the hook stays a small bundle with
+  no schema or YAML library, and has no source for them.
+- Talking to a server from before these fields, the client asks once more
+  without `subject` or `measured` when the server refuses them.
+
+### Fixed
+
+- A header block whose title joins the agent without a space
+  (`RECEIPT-qa`) is sent as the receipt too.
+- An error thrown in a callback no longer ends the hook with exit 1, which
+  Claude Code treats as no objection: a tool call is blocked (2), and any
+  other event ends with 0 so a subagent can still stop.
+
 ## 0.5.2
 
 ### Fixed

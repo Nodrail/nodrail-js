@@ -70,6 +70,23 @@ import { compilePolicies } from "@nodrail/policy-engine/yaml";
 import { receiptBlock, runKey } from "@nodrail/policy-engine/hook-runs";
 import { parseReceipt } from "@nodrail/policy-engine/receipts";
 import { runPolicyCommandLine, type Io } from "@nodrail/policy-engine/command-line";
+import { compileContracts, readContractReceipt } from "@nodrail/policy-engine/contracts";
+import { matchWhere, validateValue } from "@nodrail/policy-engine/contract-values";
+import { readFileContent, type FileReading } from "@nodrail/policy-engine/files";
+import { cleanRevision, workRevision } from "@nodrail/policy-engine/revision";
+import { record, withRunLock, settleMediatedCall, type MediatedSettlement } from "@nodrail/policy-engine/ledger";
+import { ACCOUNTABLE_DOCUMENT_VERSION, type NumericBudget, type EvidenceNeed, type LimitState } from "@nodrail/policy-engine";
+export const ledger: { record: typeof record; withRunLock: typeof withRunLock; settle: typeof settleMediatedCall } = { record, withRunLock, settle: settleMediatedCall };
+export type Accountable = [NumericBudget, EvidenceNeed, LimitState, MediatedSettlement];
+export const v4: 4 = ACCOUNTABLE_DOCUMENT_VERSION;
+export const fileReading: typeof readFileContent = readFileContent;
+export type Reading = FileReading;
+export const clean: string | null = cleanRevision("0".repeat(40));
+export const work: typeof workRevision = workRevision;
+export const contracts = compileContracts({ manifest: {} }).ok;
+export const reading: typeof readContractReceipt = readContractReceipt;
+export const issues = validateValue({ for: null, properties: {} }, {}).length;
+export const matched: boolean = matchWhere([], {});
 export const block: string | null = receiptBlock("x");
 export const key: string | null = runKey(".", null, {});
 export const read = parseReceipt(block ?? "");
@@ -96,6 +113,25 @@ export const commandLine: (argv: string[], io?: Io) => Promise<number> =
     }),
   );
   run("node", [typescript, "-p", "tsconfig.json"], folder);
+  // The subpaths load at runtime too, not only as types.
+  const loaded = run(
+    "node",
+    [
+      "--input-type=module",
+      "-e",
+      `const files = await import("@nodrail/policy-engine/files");
+const revision = await import("@nodrail/policy-engine/revision");
+const ledger = await import("@nodrail/policy-engine/ledger");
+console.log(typeof files.readFileContent, typeof files.checkWrite, revision.cleanRevision("0".repeat(40)), typeof ledger.record, typeof ledger.withRunLock, typeof ledger.settleMediatedCall);`,
+    ],
+    folder,
+  );
+  check(
+    /^function function sha256:[0-9a-f]{64} function function function\n$/.test(
+      loaded,
+    ),
+    `files, revision and ledger subpaths: ${loaded}`,
+  );
 
   const engineCli = "node_modules/@nodrail/policy-engine/dist/cli.js";
   const rules = "node_modules/@nodrail/policy-engine/examples/rules";
@@ -219,7 +255,10 @@ export const commandLine: (argv: string[], io?: Io) => Promise<number> =
     encoding: "utf8",
   });
   // No remote, so the run is the repository folder's name and the branch.
-  check(listed.stdout.startsWith("repo/work  2 steps"), `runs: ${listed.stdout}`);
+  check(
+    listed.stdout.startsWith("repo/work  2 steps"),
+    `runs: ${listed.stdout}`,
+  );
 
   // Hooks bundle these: no schema library, and reading a receipt runs no git.
   const installed = join(folder, "node_modules/@nodrail/policy-engine/dist");

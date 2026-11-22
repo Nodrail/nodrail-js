@@ -26,6 +26,8 @@ import {
   enforced,
   type Activation,
 } from "../setup/status.ts";
+import { budgetText, evidenceText } from "../setup/accountable.ts";
+import { verifierChecks } from "../setup/verifiers.ts";
 
 /** ✓ passed, ! blocks, ? passes but wasn't proven here. */
 const mark = (check: Check) => (!check.ok ? "!" : check.unverified ? "?" : "✓");
@@ -102,6 +104,7 @@ export function planText(
       "Connections (not started: apply starts each once to check it, after you accept)",
       ...plan.connections.map((each) => `  ${connectionLine(each)}`),
     );
+  lines.push(...accountableLines(plan));
   if (plan.problems.length > 0)
     lines.push("", "Problems", ...plan.problems.map((text) => `  ! ${text}`));
   if (plan.notes.length > 0)
@@ -119,6 +122,24 @@ export function planText(
   return lines.join("\n");
 }
 
+/** The numeric budgets and evidence requirements, as this setup enforces them. */
+function accountableLines({ accountable }: SetupPlan) {
+  const lines: string[] = [];
+  if (accountable.budgets.length > 0)
+    lines.push(
+      "",
+      "Budgets (operational limits, not your Nodrail bill)",
+      ...accountable.budgets.map((line) => `  ${budgetText(line)}`),
+    );
+  if (accountable.evidence.length > 0)
+    lines.push(
+      "",
+      "Evidence requirements",
+      ...accountable.evidence.map((line) => `  ${evidenceText(line)}`),
+    );
+  return lines;
+}
+
 /**
  * `nodrail plan`: what `nodrail apply` would set up here, by reading only.
  * Exits 1 when apply couldn't go ahead, so a script can tell.
@@ -128,6 +149,7 @@ export async function plan(command: Command) {
   const { root, runtime, again } = target(command, "plan");
   const result = planSetup({ root, home: io.home, env: io.env, runtime });
   result.checks.push(...secretChecks(result, io.env));
+  result.checks.push(...(await verifierChecks(command, result)));
   const active = await activation(result, root, io);
   command.print(
     {
@@ -144,6 +166,15 @@ export async function plan(command: Command) {
       steps: result.steps,
       problems: result.problems,
       notes: result.notes,
+      ...(result.accountable.budgets.length ||
+      result.accountable.evidence.length
+        ? {
+            accountable: {
+              budgets: result.accountable.budgets,
+              evidence: result.accountable.evidence,
+            },
+          }
+        : {}),
     },
     () =>
       [
@@ -353,6 +384,9 @@ async function activation(
     env: io.env,
     entry: plan.entry,
     setup: plan,
+    effective: plan.files
+      .find((file) => file.path === EFFECTIVE_FILE)
+      ?.content.toString("utf8"),
   });
 }
 

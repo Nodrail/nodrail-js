@@ -772,9 +772,13 @@ ${extra}`;
 describe("the package boundary", () => {
   const source = fileURLToPath(new URL("../src/", import.meta.url));
   // The package's own manifest too, for --version: bundling inlines it.
-  const allowed = /^(\.\/|node:|zod$|yaml$|canonicalize$|\.\.\/package\.json$)/;
+  // A folder such as shapes/ may reach its siblings one level up, no further.
+  const allowed =
+    /^(\.\/|\.\.\/(?:shapes\/)?[a-z-]+\.ts$|node:|zod$|yaml$|canonicalize$|\.\.\/package\.json$)/;
 
-  test.each(readdirSync(source))(
+  // Folders too, such as shapes/: each file is checked on its own.
+  const files = readdirSync(source, { recursive: true, encoding: "utf8" });
+  test.each(files.filter((file) => file.endsWith(".ts")))(
     "%s imports nothing from the product",
     (file) => {
       const text = readFileSync(join(source, file), "utf8");

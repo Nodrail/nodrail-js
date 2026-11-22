@@ -5,6 +5,7 @@ import {
   isNodrailHook,
   MCP_FILE,
   SETTINGS_FILE,
+  SETTLE_EVENTS,
   STEP_EVENTS,
   type DesiredSettings,
 } from "./claude-code.ts";
@@ -80,7 +81,7 @@ function settingsStep(
   return step(path, why, read, value);
 }
 
-/** Settings' hooks with nodrail's set: the policy hook, observation, steps. */
+/** Settings' hooks with nodrail's set: the policy hook, observation, steps, settlement. */
 function ourHooks(
   hooks: Record<string, unknown>,
   preToolUse: unknown[],
@@ -92,6 +93,7 @@ function ourHooks(
   };
   all = withOurs(all, "SessionStart", want.observe);
   for (const event of STEP_EVENTS) all = withOurs(all, event, want.steps);
+  for (const event of SETTLE_EVENTS) all = withOurs(all, event, want.settle);
   return all;
 }
 
@@ -313,7 +315,12 @@ function undoHooks(value: Record<string, unknown>) {
   if (hooks === null || typeof hooks !== "object" || Array.isArray(hooks))
     return;
   const rest = { ...(hooks as Record<string, unknown>) };
-  for (const event of ["PreToolUse", "SessionStart", ...STEP_EVENTS]) {
+  for (const event of [
+    "PreToolUse",
+    "SessionStart",
+    ...STEP_EVENTS,
+    ...SETTLE_EVENTS,
+  ]) {
     const groups = Array.isArray(rest[event])
       ? withoutOurs(rest[event] as unknown[])
       : null;

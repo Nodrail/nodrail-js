@@ -1,0 +1,64 @@
+description: >-
+  CI results as evidence: the producer is a configured verifier or the local
+  runtime, never a provider name the payload claims, and each event is bound
+  to the revision it tested.
+nodrail.yaml:
+  shapes:
+    ci-result:
+      properties:
+        status: { values: [passed, failed], report: true }
+        suite: { values: [unit, e2e], report: true }
+        tests: { type: integer, min: 0, report: true }
+        failures:
+          {
+            role: findings,
+            report: true,
+            properties:
+              {
+                flaky: { type: integer, min: 0 },
+                broken: { type: integer, min: 0 },
+              },
+          }
+        duration_ms: { type: integer, min: 0, unit: ms, report: true }
+        log_url: { type: string, max: 500 }
+  evidence:
+    ci-tests:
+      shape: ci-result
+      producers:
+        - { class: externally-verified, verifier: github-actions }
+        - { class: runtime-observed }
+      subject: revision
+cases:
+  - name: a passing run
+    target: evidence:ci-tests
+    value:
+      {
+        status: passed,
+        suite: unit,
+        tests: 412,
+        failures: { flaky: 0, broken: 0 },
+        duration_ms: 81234,
+        log_url: "https://ci.example/run/1",
+      }
+    expect: valid
+    projection:
+      {
+        status: passed,
+        suite: unit,
+        tests: 412,
+        failures: { flaky: 0, broken: 0 },
+        duration_ms: 81234,
+      }
+  - name: infinity is not a duration
+    target: evidence:ci-tests
+    value:
+      {
+        status: passed,
+        suite: unit,
+        tests: 1,
+        failures: { flaky: 0, broken: 0 },
+        duration_ms: .inf,
+        log_url: x,
+      }
+    expect: invalid
+    issues: ["duration_ms: type"]

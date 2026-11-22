@@ -9,16 +9,27 @@ import { receiptOf } from "../src/runs";
 import { runOpenAiAgents } from "./support/agents";
 import { fakeNodrail } from "./support/fake-nodrail";
 
+const REVISION = `sha256:${"a".repeat(64)}`;
+
 const connect = (
-  options: { run?: string; env?: Record<string, string> } = {},
+  options: {
+    run?: string;
+    env?: Record<string, string>;
+    subject?: (() => string | null) | null;
+    cwd?: string;
+    fetch?: typeof fetch;
+  } = {},
 ) => {
   const server = fakeNodrail();
   const nodrail = createNodrail({
     url: "https://nodrail.test",
     credential: "c",
     waitMs: 0,
-    fetch: server.fetch,
+    fetch: options.fetch ?? server.fetch,
     env: options.env ?? {},
+    // A fixed revision, so what is sent doesn't depend on this checkout.
+    subject: options.subject === undefined ? () => REVISION : options.subject,
+    ...(options.cwd ? { cwd: options.cwd } : {}),
     ...(options.run ? { run: options.run } : {}),
   });
   return { server, nodrail };
@@ -47,11 +58,15 @@ describe("runs in the SDK", () => {
     await fromOptions.nodrail.check(action);
     expect(sent(fromOptions.server, "/actions")[0]?.run).toEqual({
       key: "ENG-1",
+      subject: REVISION,
     });
 
     const fromEnv = connect({ env: { NODRAIL_RUN: "ENG-2" } });
     await fromEnv.nodrail.check(action);
-    expect(sent(fromEnv.server, "/actions")[0]?.run).toEqual({ key: "ENG-2" });
+    expect(sent(fromEnv.server, "/actions")[0]?.run).toEqual({
+      key: "ENG-2",
+      subject: REVISION,
+    });
   });
 
   test("a step is recorded around its work, and its calls belong to it", async () => {
@@ -73,7 +88,11 @@ describe("runs in the SDK", () => {
       event: "finished",
       receipt: { text: "```nodrail-receipt\nverdict: pass\n```\n" },
     });
-    expect(sent(server, "/actions")[0]?.run).toEqual({ key: "ENG-3", step });
+    expect(sent(server, "/actions")[0]?.run).toEqual({
+      key: "ENG-3",
+      step,
+      subject: REVISION,
+    });
   });
 
   test("steps running side by side keep their own calls", async () => {

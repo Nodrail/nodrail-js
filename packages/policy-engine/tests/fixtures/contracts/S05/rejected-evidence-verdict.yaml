@@ -1,0 +1,11 @@
+description: Evidence states its result as a plain enum; the verdict role is for receipts only.
+nodrail.yaml:
+  shapes:
+    ci-result:
+      { properties: { verdict: { values: [pass, fail], role: verdict } } }
+  evidence:
+    ci-tests:
+      shape: ci-result
+      producers: [{ class: runtime-observed }]
+expect:
+  - { code: role-unsupported, path: nodrail.yaml.evidence.ci-tests }

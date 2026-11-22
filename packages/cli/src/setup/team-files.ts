@@ -1,11 +1,17 @@
 import { lstatSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { accountableFiles } from "./accountable.ts";
 import { connectionsFile, telemetrySettings } from "./connections.ts";
+import type { Env } from "../config.ts";
+import type { CompiledContracts } from "../contracts/engine.ts";
+import { briefSection } from "../contracts/brief.ts";
+import { receiptSection, withSection } from "../contracts/render.ts";
 import {
   COPILOT_PLACES,
   SETUP_PLACES,
   type ProjectSetup,
   type SetupAgent,
+  type SetupTeam,
 } from "@nodrail/policy-engine/yaml";
 
 /** Where the effective policy goes, for the hook to read. */
@@ -32,7 +38,10 @@ export function teamFiles(input: {
   /** Every local file the policy was read from. */
   inputs: string[];
   skillsFolder: string;
-  /** The host's own folders, where its agent files and hooks live. */
+  /** The declared contracts (preview), whose receipts agent files describe. */
+  contracts?: CompiledContracts | null;
+  /** Where the hook asks Cloud about evidence (NODRAIL_URL). */
+  env?: Env;
 }) {
   const { root, setup, effective, skillsFolder } = input;
   const team = setup.team!;
@@ -85,20 +94,44 @@ export function teamFiles(input: {
       why: "the setup's files, which the hook keeps from agents",
     },
   );
-  const connections = connectionsFile(input.setup);
+  const connections = connectionsFile(input.setup, input.contracts ?? null);
   if (connections) files.push(connections);
   const telemetry = telemetrySettings(root, input.setup);
   if (telemetry) files.push(telemetry);
+  files.push(...accountableFiles(input));
   return {
     team,
     members,
     skills,
     files,
     problems,
+    body: (agent: SetupAgent) =>
+      agentBody(root, team, input.contracts ?? null, agent),
     skipped: setup.agents
       .filter((agent) => !team.members.includes(agent.name))
       .map((agent) => agent.name),
   };
+}
+
+/**
+ * An agent file's body: its instructions, then the briefs of the agents it
+ * starts and its own receipt, each section only when there is one.
+ */
+function agentBody(
+  root: string,
+  team: SetupTeam,
+  contracts: CompiledContracts | null,
+  agent: SetupAgent,
+) {
+  return withSection(
+    instructionsOf(root, agent, team.name),
+    [
+      briefSection(contracts, team, agent.name),
+      receiptSection(contracts, agent.name),
+    ]
+      .filter((section) => section !== "")
+      .join("\n"),
+  );
 }
 
 /**

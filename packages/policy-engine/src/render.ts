@@ -4,7 +4,13 @@ import type {
   PolicyDocument,
   PolicyGate,
   PolicyRule,
+  Requirement,
 } from "./policies.ts";
+import {
+  renderContracts,
+  renderRequirementContract,
+  renderWhere,
+} from "./render-contracts.ts";
 
 /** Names must be unique in a file, so a repeated one is kept as its title. */
 function namer(kind: string) {
@@ -22,6 +28,8 @@ const matchFields = (rule: PolicyRule | PolicyGate) => ({
   operation: rule.operationKey,
   resource: rule.resource,
   ...(rule.conditions.length ? { condition: rule.conditions } : {}),
+  // A version 3 rule's or gate's typed conditions on input or brief (C02).
+  ...renderWhere("where" in rule ? rule.where : undefined),
 });
 
 const identity = (rule: PolicyRule | PolicyGate) => ({
@@ -33,10 +41,11 @@ const identity = (rule: PolicyRule | PolicyGate) => ({
 const renderGate = (gate: PolicyGate) => ({
   ...matchFields(gate),
   ...identity(gate),
-  requires: gate.requires.map(({ agent, verdicts, since }) => ({
-    agent,
-    verdict: verdicts,
-    ...(since.length ? { since } : {}),
+  requires: gate.requires.map((requirement: Requirement) => ({
+    agent: requirement.agent,
+    verdict: requirement.verdicts,
+    ...(requirement.since.length ? { since: requirement.since } : {}),
+    ...renderRequirementContract(requirement),
   })),
   otherwise: gate.effect,
 });
@@ -55,6 +64,11 @@ const renderBudget = (budget: PolicyBudget) => ({
  * gates and budgets included, so exporting never quietly drops a restriction.
  */
 export function renderPolicies(document: PolicyDocument) {
+  // Rendering would drop its evidence contracts and numeric budgets.
+  if (document.version === 4)
+    throw new Error(
+      "A version 4 policy (evidence requirements or numeric budgets) can't be rendered back to rule files yet; keep its rule files instead.",
+    );
   const rule = namer("rule");
   const items: object[] = document.rules.map((entry) => ({
     ...rule(entry),
@@ -62,10 +76,19 @@ export function renderPolicies(document: PolicyDocument) {
     effect: entry.effect,
     ...identity(entry),
   }));
-  if (document.version === 2) {
+  if (document.version === 3)
+    items.unshift(
+      { required_engine_version: 4 },
+      renderContracts({
+        receipts: document.receipts,
+        briefs: document.briefs,
+        inputs: document.inputs,
+      }),
+    );
+  if (document.version !== 1) {
     const gate = namer("gate");
     const budget = namer("budget");
-    items.unshift({ required_engine_version: 3 });
+    if (document.version === 2) items.unshift({ required_engine_version: 3 });
     items.push(
       ...document.gates.map((entry) => ({
         ...gate(entry),

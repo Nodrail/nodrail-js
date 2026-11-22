@@ -1,6 +1,6 @@
 {
   "name": "@nodrail/policy-engine",
-  "version": "0.5.2",
+  "version": "0.6.0",
   "description": "Compile, test and evaluate Agent Policy Format (APF) rules locally. Includes the CLI, TypeScript evaluator and local Claude Code hook.",
   "keywords": [
     "ai",
@@ -39,7 +39,13 @@
     "./actions": "./src/actions.ts",
     "./receipts": "./src/receipts.ts",
     "./hook-runs": "./src/hook-runs.ts",
-    "./command-line": "./src/command-line.ts"
+    "./command-line": "./src/command-line.ts",
+    "./contracts": "./src/shapes/index.ts",
+    "./contract-values": "./src/shapes/values.ts",
+    "./shapes": "./src/shapes/index.ts",
+    "./files": "./src/files/index.ts",
+    "./revision": "./src/revision.ts",
+    "./ledger": "./src/run-ledger.ts"
   },
   "scripts": {
     "check": "tsc --noEmit",
@@ -116,6 +122,30 @@
       "./command-line": {
         "types": "./dist/command-line.d.ts",
         "default": "./dist/command-line.js"
+      },
+      "./contracts": {
+        "types": "./dist/shapes/index.d.ts",
+        "default": "./dist/shapes/index.js"
+      },
+      "./contract-values": {
+        "types": "./dist/shapes/values.d.ts",
+        "default": "./dist/shapes/values.js"
+      },
+      "./shapes": {
+        "types": "./dist/shapes/index.d.ts",
+        "default": "./dist/shapes/index.js"
+      },
+      "./files": {
+        "types": "./dist/files/index.d.ts",
+        "default": "./dist/files/index.js"
+      },
+      "./revision": {
+        "types": "./dist/revision.d.ts",
+        "default": "./dist/revision.js"
+      },
+      "./ledger": {
+        "types": "./dist/run-ledger.d.ts",
+        "default": "./dist/run-ledger.js"
       }
     },
     "bin": {

@@ -23,6 +23,11 @@ await build({
     "src/receipts.ts",
     "src/hook-runs.ts",
     "src/command-line.ts",
+    "src/shapes/index.ts",
+    "src/shapes/values.ts",
+    "src/files/index.ts",
+    "src/revision.ts",
+    "src/run-ledger.ts",
   ],
   outdir: "dist",
 });

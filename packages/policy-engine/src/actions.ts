@@ -69,6 +69,8 @@ function commandAction(
       command_sha256: commandSha,
       // A hidden part can't be judged by what is visible, so never split one.
       ...(shape.parts && !hidden ? { parts: shape.parts } : {}),
+      // Reviewers see what ran it; rules judge the command itself.
+      ...(shape.via ? { via: shape.via } : {}),
       ...extra,
     },
   };

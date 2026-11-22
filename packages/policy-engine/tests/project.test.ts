@@ -236,6 +236,11 @@ describe("refusing a project", () => {
       { "nodrail.yaml": manifest("./a.yaml"), "a.yaml": "name: x\n" },
       "./a.yaml: Expected rules or a nodrail.project/v1 manifest",
     ],
+    [
+      "an unknown top-level key, named",
+      { "nodrail.yaml": `${manifest("./a.yaml")}evidense: {}\n`, "a.yaml": "" },
+      "nodrail.yaml: The manifest's fields are not valid: evidense: unknown key",
+    ],
   ])("%s", (_name, files: Record<string, string>, expected) => {
     expect(messages(resolve(files))).toContain(expected);
   });

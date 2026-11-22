@@ -8,6 +8,7 @@ import { z } from "zod";
 import { describeArguments, describeToolCall } from "./actions.ts";
 import { toDescriptor, type Identity } from "./local-hook.ts";
 import { hookCommand } from "./hook-command.ts";
+import { guardHook, hookFailure } from "./hook-guard.ts";
 import { sendSpool } from "./telemetry.ts";
 
 // Node-only helpers the nodrail command uses for a setup.
@@ -47,9 +48,12 @@ Commands:
     --protect-list <file>  Also keep the files it lists from being changed
     --connections <file>   Read calls to the setup's tool connections as declared
     --telemetry <file>     Send each decision as an OpenTelemetry span
+    --evidence <file>      Ask Cloud about externally verified evidence ({ url,
+                           workspace_revision }; the token is NODRAIL_TOKEN)
     --host codex|copilot   Codex and Copilot can't ask a person: reviews become denies;
                            Copilot's calls are read as the Claude Code calls they are
-    With gates or budgets, also SubagentStart and SubagentStop, and the run
+    With gates or budgets, also SubagentStart, SubagentStop, PostToolUse and
+    PostToolUseFailure (they settle numeric budgets), and the run
     is recorded in the repository's git folder.
   runs [list | show <run> | report]   What the run ledger recorded
 
@@ -186,6 +190,7 @@ const options = {
   "protect-list": { type: "string" },
   connections: { type: "string" },
   telemetry: { type: "string" },
+  evidence: { type: "string" },
   host: { type: "string" },
   help: { type: "boolean", short: "h" },
   version: { type: "boolean", short: "v" },
@@ -302,7 +307,7 @@ const counted = (count: number, word: string) =>
  */
 function summary(count: number, document: PolicyDocument) {
   const parts = [counted(count, "rule")];
-  if (document.version === 2)
+  if (document.version !== 1)
     parts.push(
       counted(document.gates.length, "gate"),
       counted(document.budgets.length, "budget"),
@@ -387,9 +392,15 @@ export async function runPolicyCommandLine(
     // The hook's sender, run detached: not a command for people.
     if (argv[0] === "telemetry-send" && argv[1] && argv[2])
       return (await sendSpool(argv[1], argv[2], process.env), 0);
+    // The hook never fails open: see hook-guard.ts.
+    if (argv[0] === "hook")
+      return await guardHook(
+        () => runCli(argv, output),
+        (text) => output.writeError(text),
+      );
     return await runCli(argv, output);
   } catch (error) {
     output.error(error instanceof Error ? error.message : String(error));
-    return 2;
+    return argv[0] === "hook" ? hookFailure() : 2;
   }
 }

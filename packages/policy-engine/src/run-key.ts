@@ -35,25 +35,26 @@ export function git(cwd: string, args: string[]) {
 /**
  * Where Nodrail keeps local files for this folder: `nodrail` in the shared git
  * directory, so worktrees share it and it is never committed, or ~/.nodrail
- * outside git.
+ * outside git, the home folder read from `env` (HOME) like everything else
+ * the hook is given.
  */
-export function nodrailDirectory(cwd: string) {
+export function nodrailDirectory(cwd: string, env: Environment = process.env) {
   const common = git(cwd, ["rev-parse", "--git-common-dir"]);
-  if (!common) return join(homedir(), ".nodrail");
+  if (!common) return join(env.HOME || homedir(), ".nodrail");
   return join(isAbsolute(common) ? common : resolve(cwd, common), "nodrail");
 }
 
 /** The run ledger: NODRAIL_LEDGER, else `runs` in the Nodrail directory. */
 export function ledgerDirectory(cwd: string, env: Environment = process.env) {
   if (env.NODRAIL_LEDGER) return resolve(cwd, env.NODRAIL_LEDGER);
-  return join(nodrailDirectory(cwd), "runs");
+  return join(nodrailDirectory(cwd, env), "runs");
 }
 
 /** Session pins: inside a moved ledger, else next to the ledger. */
 function sessionsDirectory(cwd: string, env: Environment) {
   if (env.NODRAIL_LEDGER)
     return join(resolve(cwd, env.NODRAIL_LEDGER), "sessions");
-  return join(nodrailDirectory(cwd), "sessions");
+  return join(nodrailDirectory(cwd, env), "sessions");
 }
 
 /**

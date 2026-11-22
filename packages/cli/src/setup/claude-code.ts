@@ -5,10 +5,12 @@ import {
   type ProjectSetup,
   type SetupAgent,
 } from "@nodrail/policy-engine/yaml";
+import { evidenceRead } from "./accountable.ts";
 import { hookReads, mcpServerEntries } from "./connections.ts";
+import type { Env } from "../config.ts";
+import type { CompiledContracts } from "../contracts/engine.ts";
 import {
   byPath,
-  instructionsOf,
   PROTECT_LIST,
   teamFiles,
   type DesiredFile,
@@ -36,9 +38,16 @@ export type DesiredSettings = {
   observe: HookGroup | null;
   /**
    * The same policy hook on SubagentStart and SubagentStop, which record a
-   * run's steps: only when the policy has gates or budgets, which need them.
+   * run's steps: only when the policy has gates, budgets or receipt
+   * contracts, which need them.
    */
   steps: HookGroup | null;
+  /**
+   * The same policy hook on PostToolUse and PostToolUseFailure, which settle
+   * a call's numeric budget reservations: only when the policy has numeric
+   * budgets, which need them.
+   */
+  settle: HookGroup | null;
 };
 type HookGroup = {
   matcher?: string;
@@ -48,12 +57,34 @@ type HookGroup = {
 /** Hook events nodrail sets in Claude Code's settings, besides PreToolUse. */
 export const STEP_EVENTS = ["SubagentStart", "SubagentStop"] as const;
 
-/** Whether the effective policy has gates or budgets: a version 2 document. */
-const usesRuns = (effective: string) => {
+/** Outcome events: the hook settles budgets on them (never judges a call). */
+export const SETTLE_EVENTS = ["PostToolUse", "PostToolUseFailure"] as const;
+
+/**
+ * Whether the effective policy records runs: every document past version 1.
+ * Version 2 has gates or budgets; version 3 adds declared receipts, read
+ * when a subagent stops. A later one needs them as much.
+ */
+export const usesRuns = (effective: string) => {
   const compiled = compilePolicies([
     { name: "effective.apf.yaml", text: effective },
   ]);
-  return compiled.ok && compiled.document.version === 2;
+  return compiled.ok && compiled.document.version !== 1;
+};
+
+/**
+ * Whether the effective policy has numeric budgets (engine level 5): their
+ * reservations settle on a call's outcome, so the hook must see it too.
+ */
+export const usesLimits = (effective: string) => {
+  const compiled = compilePolicies([
+    { name: "effective.apf.yaml", text: effective },
+  ]);
+  return (
+    compiled.ok &&
+    compiled.document.version === 4 &&
+    compiled.document.limits.length > 0
+  );
 };
 
 /** How nodrail's own hook command starts, to find it among others. */
@@ -94,6 +125,9 @@ export function claudeCodeSetup(input: {
   setup: ProjectSetup;
   effective: string;
   inputs: string[];
+  contracts?: CompiledContracts | null;
+  /** Where the hook asks Cloud about evidence (NODRAIL_URL). */
+  env?: Env;
 }): ClaudeSetup {
   const { root } = input;
   const parts = teamFiles({
@@ -106,7 +140,12 @@ export function claudeCodeSetup(input: {
     files.push({
       path: `.claude/agents/${agent.name}.md`,
       content: Buffer.from(
-        agentFile(root, agent, team.name, parts.skills.get(agent.name)!),
+        agentFile(
+          agent,
+          team.name,
+          parts.skills.get(agent.name)!,
+          parts.body(agent),
+        ),
       ),
       why: `agent ${agent.name}`,
     });
@@ -115,7 +154,11 @@ export function claudeCodeSetup(input: {
     input.setup,
     (file) => `"$CLAUDE_PROJECT_DIR/${file}"`,
   );
-  const command = `${HOOK_PREFIX}effective.apf.yaml" --protect-list "$CLAUDE_PROJECT_DIR/${PROTECT_LIST}"${reads} --agent ${team.entry}`;
+  const evidence = evidenceRead(
+    input,
+    (file) => `"$CLAUDE_PROJECT_DIR/${file}"`,
+  );
+  const command = `${HOOK_PREFIX}effective.apf.yaml" --protect-list "$CLAUDE_PROJECT_DIR/${PROTECT_LIST}"${reads}${evidence} --agent ${team.entry}`;
   // Claude Code starts a project server in the project folder; the runner
   // finds the file by its full path anyway.
   const mcpServers = mcpServerEntries(root, connections, { type: "stdio" });
@@ -131,6 +174,10 @@ export function claudeCodeSetup(input: {
       },
       steps: usesRuns(input.effective)
         ? { hooks: [{ type: "command", command }] }
+        : null,
+      // An outcome is recorded, never judged: a failure here mustn't block.
+      settle: usesLimits(input.effective)
+        ? { matcher: "*", hooks: [{ type: "command", command }] }
         : null,
       // Records what is set up at each session start; never blocks one.
       observe: input.setup.observe.sessionStart
@@ -150,10 +197,10 @@ export function claudeCodeSetup(input: {
 }
 
 function agentFile(
-  root: string,
   agent: SetupAgent,
   team: string,
   skills: string[],
+  body: string,
 ) {
   const front: Record<string, unknown> = {
     name: agent.name,
@@ -166,5 +213,5 @@ function agentFile(
   return `---
 # Written by nodrail apply from ${agent.file}. Change that file, not this one.
 ${stringify(front, { lineWidth: 0 })}---
-${instructionsOf(root, agent, team)}`;
+${body}`;
 }

@@ -1,0 +1,248 @@
+# Written by `nodrail add` and `nodrail policy lock`. Commit it with
+# nodrail.yaml. `nodrail policy export --frozen` checks every file below
+# against it and refuses to export anything that differs.
+lock: 2
+engine: 5
+manifest:
+  path: nodrail.yaml
+  sha256: "db3ee8870211bc61b9e5199834e5495733356bb788b852b86965af6d1ce7d5d6"
+modules: []
+files:
+  - path: resources/agents.yaml
+    sha256: "97506d577889106a047ac326c396e9011a12ef2f89a9c7f47ddc7acbdfd943ab"
+  - path: resources/team.yaml
+    sha256: "e726986e74a8fae4501d3527a51216a05293b1b21c9056223b83bddda601593a"
+  - path: policies/base.yaml
+    sha256: "b2c5eaf8333d79074e145c316b750cf0765be61e6e01b4db13ecdddee9a30b23"
+edges:
+  - from: nodrail.yaml
+    to: policies/base.yaml
+order:
+  - policies/base.yaml
+  - team/release.apf.yaml
+effective:
+  sha256: "0dec7bbe65724c85b250e4096eae058e2bfc31ac6083e47c973b32d3903d73a1"
+workspace:
+  sha256: "07a2a675e92a473774ac02ddd39a5cb5d2737372af2309c739ddc269c04ed982"
+  files:
+    - path: resources/lead.md
+      sha256: "6b6f480fd21a1601e4d3959a68f6928cd141db442308953345f9e5965f39cc33"
+    - path: skills/release-notes/SKILL.md
+      sha256: "6a350dc42a37f5d5a2577ddbfdacdaa019efb5d0eee5685bf88131d2535068bb"
+    - path: skills/release-notes/template.md
+      sha256: "a89e94f0568888e89a70d9e1d6ddc2aa99081fc2e28ca8ed81730cd8a2618b51"
+baseline: |
+  # The effective policy of this project, exported by nodrail from
+  # nodrail.yaml and nodrail.lock.yaml. Regenerate it; don't edit it.
+
+  # ── policies/base.yaml
+  - rule: Read anything
+    tool: files
+    operation: file.read
+    resource: { kind: file, match: any }
+    effect: allow
+
+  # ── team/release.apf.yaml
+  # What Team release means: who may start whom, which connections
+  # each agent may use, and the setup kept out of every agent's reach. Written by nodrail from resources/team.yaml.
+  - required_engine_version: 1
+  - list: release-setup-places
+    items:
+      - .claude
+      - .claude-plugin
+      - .codex
+      - .agents
+      - .nodrail
+      - nodrail.yaml
+      - nodrail.lock.yaml
+  - rule: "Team release: never write the setup"
+    tool: files
+    operation: file.write
+    resource:
+      kind: file
+      match: any
+    condition:
+      - field: path_parts
+        op: contains
+        list: release-setup-places
+    effect: deny
+  - rule: "Team release: never edit the setup"
+    tool: files
+    operation: file.edit
+    resource:
+      kind: file
+      match: any
+    condition:
+      - field: path_parts
+        op: contains
+        list: release-setup-places
+    effect: deny
+  - rule: "Team release: never patch the setup"
+    tool: files
+    operation: file.patch
+    resource:
+      kind: file
+      match: any
+    condition:
+      - field: path_parts
+        op: contains
+        list: release-setup-places
+    effect: deny
+  - rule: "Team release: never delete the setup"
+    tool: files
+    operation: file.delete
+    resource:
+      kind: file
+      match: any
+    condition:
+      - field: path_parts
+        op: contains
+        list: release-setup-places
+    effect: deny
+  - rule: "Team release: lead never start lead"
+    agent: lead
+    tool: claude-code
+    operation: agent
+    resource:
+      kind: agent
+      match: exact
+      value: lead
+    effect: deny
+  - rule: "Team release: lead never start lead on Codex"
+    agent: lead
+    tool: codex
+    operation: agent
+    resource:
+      kind: agent
+      match: exact
+      value: lead
+    effect: deny
+  - rule: "Team release: lead may start publisher"
+    agent: lead
+    tool: claude-code
+    operation: agent
+    resource:
+      kind: agent
+      match: exact
+      value: publisher
+    effect: allow
+  - rule: "Team release: lead may start publisher on Codex"
+    agent: lead
+    tool: codex
+    operation: agent
+    resource:
+      kind: agent
+      match: exact
+      value: publisher
+    effect: allow
+  - rule: "Team release: publisher never start lead"
+    agent: publisher
+    tool: claude-code
+    operation: agent
+    resource:
+      kind: agent
+      match: exact
+      value: lead
+    effect: deny
+  - rule: "Team release: publisher never start lead on Codex"
+    agent: publisher
+    tool: codex
+    operation: agent
+    resource:
+      kind: agent
+      match: exact
+      value: lead
+    effect: deny
+  - rule: "Team release: publisher never start publisher"
+    agent: publisher
+    tool: claude-code
+    operation: agent
+    resource:
+      kind: agent
+      match: exact
+      value: publisher
+    effect: deny
+  - rule: "Team release: publisher never start publisher on Codex"
+    agent: publisher
+    tool: codex
+    operation: agent
+    resource:
+      kind: agent
+      match: exact
+      value: publisher
+    effect: deny
+  - list: release-nodrail-commands
+    items:
+      - nodrail
+      - nodrail-policy
+      - nodrail-claude-hook
+  - rule: "Team release: agents never run Nodrail itself"
+    command:
+      list: release-nodrail-commands
+      match: prefix
+    effect: deny
+  - rule: "Team release: lead may load skill release-notes"
+    agent: lead
+    tool: claude-code
+    operation: skill
+    resource:
+      kind: skill
+      match: exact
+      value: release-notes
+    effect: allow
+  - rule: "Team release: agents may wait agent on Codex"
+    tool: codex
+    operation: wait_agent
+    resource:
+      kind: tool
+      match: any
+    effect: allow
+  - rule: "Team release: agents may send input on Codex"
+    tool: codex
+    operation: send_input
+    resource:
+      kind: tool
+      match: any
+    effect: allow
+  - rule: "Team release: agents may send message on Codex"
+    tool: codex
+    operation: send_message
+    resource:
+      kind: tool
+      match: any
+    effect: allow
+  - rule: "Team release: agents may followup task on Codex"
+    tool: codex
+    operation: followup_task
+    resource:
+      kind: tool
+      match: any
+    effect: allow
+  - rule: "Team release: agents may resume agent on Codex"
+    tool: codex
+    operation: resume_agent
+    resource:
+      kind: tool
+      match: any
+    effect: allow
+  - rule: "Team release: agents may interrupt agent on Codex"
+    tool: codex
+    operation: interrupt_agent
+    resource:
+      kind: tool
+      match: any
+    effect: allow
+  - rule: "Team release: agents may close agent on Codex"
+    tool: codex
+    operation: close_agent
+    resource:
+      kind: tool
+      match: any
+    effect: allow
+  - rule: "Team release: agents may list agents on Codex"
+    tool: codex
+    operation: list_agents
+    resource:
+      kind: tool
+      match: any
+    effect: allow

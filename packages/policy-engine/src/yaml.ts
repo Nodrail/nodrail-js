@@ -88,3 +88,17 @@ export {
   type TelemetryFile,
 } from "./telemetry-schema.ts";
 export { joinPath } from "./project-paths.ts";
+// Named here so packages whose declarations carry a policy document can name them.
+export type {
+  Classification,
+  ResolvedProperty,
+  ResolvedShape,
+  Role,
+} from "./shapes/types.ts";
+export type {
+  BudgetMeasure,
+  EvidenceContract,
+  EvidenceNeed,
+  NumericBudget,
+  PolicyDocument,
+} from "./policies.ts";

@@ -1,0 +1,16 @@
+description: >-
+  At most 4 levels, and a list adds one: d sits in a list item inside two
+  objects, at level 5.
+nodrail.yaml:
+  shapes:
+    deep:
+      properties:
+        a:
+          properties:
+            b:
+              properties:
+                c:
+                  type: list
+                  of: { properties: { d: { type: string } } }
+expect:
+  - { code: depth, path: nodrail.yaml.shapes.deep.properties.a.b.c.d }

@@ -6,17 +6,19 @@ import {
   waitMsFrom,
   type Environment,
 } from "./connection.ts";
-import {
-  authorize,
-  NodrailClient,
-  type ActionDescriptor,
-  type Decision,
-} from "./index.ts";
+import { authorize } from "./authorize.ts";
+import { NodrailClient, type Decision } from "./client.ts";
+import type { ActionDescriptor } from "./protocol.ts";
+import type { ReportOutcome } from "./protocol.ts";
+import { checkMeasured, revisionAt } from "./subject.ts";
+import { isTimeout, readMeasured, withinTime } from "./outcomes.ts";
+import { contractRefused, withContractFields } from "./contract-fields.ts";
 import { Runs, type StepOptions } from "./runs.ts";
 import {
   adapterFor,
   canRun,
-  isAsyncGenerator,
+  guardFunction,
+  isCollection,
   isGuarded,
   isToolWithoutCode,
   uncovered,
@@ -24,7 +26,7 @@ import {
   type ToolHooks,
 } from "./tool-shapes.ts";
 
-export const SDK_VERSION = "0.5.2";
+export const SDK_VERSION = "0.6.0";
 
 type Blocked = Extract<Decision, { allowed: false }>;
 
@@ -48,8 +50,10 @@ export type {
   GuardOptions,
   NodrailOptions,
   OnBlocked,
+  RunOptions,
 } from "./sdk-types.ts";
 import type {
+  RunOptions,
   ActionInput,
   Describe,
   Guarded,
@@ -153,7 +157,15 @@ export class Nodrail {
       waitMs,
       sleep: this.sleep,
       run: this.runs.current(),
+      subject: this.subject(),
     });
+  }
+
+  /** How the work revision is read: the caller's way, or the git work tree. */
+  private subject() {
+    const { subject, cwd } = this.options;
+    if (subject !== undefined) return subject;
+    return revisionAt(cwd ?? process.cwd());
   }
 
   /** Asks without running anything. Run the action only on `allowed: true`. */
@@ -171,17 +183,31 @@ export class Nodrail {
     }
   }
 
-  /** Reports what happened. A lost report never disturbs the action. */
+  /**
+   * Reports what happened: `unknown` when it can't be told whether the call
+   * took effect (a timeout), which keeps any budget reservation held. The
+   * key is the permit's, so a retry or a second report changes nothing.
+   * Measured amounts that aren't usable are left out whole: the budget
+   * then has no reading, which it treats as unknown, never as zero. A lost
+   * report never disturbs the action.
+   */
   async report(
     decision: Extract<Decision, { allowed: true }>,
-    outcome: "success" | "failure",
+    outcome: ReportOutcome,
+    options: { measured?: readonly unknown[] } = {},
   ) {
+    const measured = options.measured && checkMeasured(options.measured);
     const sent = this.client
-      ?.report(decision.actionId, {
-        key: randomUUID(),
-        outcome,
-        permitId: decision.permitId,
-      })
+      ?.report(
+        decision.actionId,
+        {
+          key: `sdk:${decision.permitId}`,
+          outcome,
+          permitId: decision.permitId,
+          ...(measured ? { measured } : {}),
+        },
+        { sleep: this.sleep },
+      )
       .catch(() => undefined);
     let timer: ReturnType<typeof setTimeout> | undefined;
     await Promise.race([
@@ -196,22 +222,35 @@ export class Nodrail {
   private async execute<T>(
     decision: Extract<Decision, { allowed: true }>,
     action: () => T | Promise<T>,
+    options: RunOptions<T> = {},
   ): Promise<T> {
+    let result: T;
     try {
-      const result = await action();
-      await this.report(decision, "success");
-      return result;
+      result = await withinTime(action, options.timeoutMs);
     } catch (error) {
-      await this.report(decision, "failure");
+      // A timeout leaves the call's effect unknown; a thrown error says it failed.
+      await this.report(decision, isTimeout(error) ? "unknown" : "failure");
       throw error;
     }
+    const measured = readMeasured(options.measure, result);
+    await this.report(decision, "success", { measured });
+    return result;
   }
 
-  /** Runs `action` only if allowed, and throws NodrailBlockedError if not. */
-  async run<T>(action: ActionInput, perform: () => T | Promise<T>): Promise<T> {
+  /**
+   * Runs `action` only if allowed, and throws NodrailBlockedError if not.
+   * With `timeoutMs`, a call that takes longer is reported as `unknown` and
+   * rejects with a TimeoutError; `measure` reads the amounts its result
+   * measured, for budgets that sum them.
+   */
+  async run<T>(
+    action: ActionInput,
+    perform: () => T | Promise<T>,
+    options: RunOptions<T> = {},
+  ): Promise<T> {
     const decision = await this.check(action);
     if (!decision.allowed) throw new NodrailBlockedError(decision);
-    return this.execute(decision, perform);
+    return this.execute(decision, perform, options);
   }
 
   private hooksFor(name: string, options: GuardOptions): ToolHooks {
@@ -220,12 +259,11 @@ export class Nodrail {
 
     const decideFor = (input: unknown): Promise<Decision> => {
       let descriptor: ActionDescriptor | null;
+      let called: Record<string, unknown> = {};
       try {
         const args = asJson(input);
-        descriptor = describeNamedTool(
-          name,
-          isRecord(args) ? args : { value: args },
-        );
+        called = isRecord(args) ? args : { value: args };
+        descriptor = describeNamedTool(name, called);
         const override = describe?.(args, name);
         if (descriptor && override)
           descriptor = {
@@ -241,9 +279,16 @@ export class Nodrail {
       } catch {
         return Promise.resolve(invalidAction);
       }
-      return descriptor
-        ? this.decide(descriptor, options.waitMs)
-        : Promise.resolve(invalidAction);
+      if (!descriptor) return Promise.resolve(invalidAction);
+      // A declared input is checked here; Cloud sees classified fields as [classified].
+      const fields = withContractFields(
+        descriptor,
+        called,
+        this.options.contracts,
+      );
+      return "refusal" in fields
+        ? Promise.resolve(contractRefused(fields.refusal))
+        : this.decide(fields.action, options.waitMs);
     };
 
     const refuse = (decision: Blocked, asResult: (text: string) => unknown) => {
@@ -271,7 +316,7 @@ export class Nodrail {
         try {
           yield* perform();
         } catch (error) {
-          await report(decision, "failure");
+          await report(decision, isTimeout(error) ? "unknown" : "failure");
           throw error;
         }
         await report(decision, "success");
@@ -420,28 +465,6 @@ const invalidAction: Decision = {
   reason: null,
   reference: null,
 };
-
-const isCollection = (value: Record<string, unknown>) =>
-  Object.keys(value).length > 0 &&
-  Object.values(value).every(
-    (item) => typeof item === "function" || isRecord(item),
-  );
-
-const argsAsInput = (args: unknown[]) =>
-  args.length <= 1 ? (args[0] ?? {}) : { args };
-
-function guardFunction(fn: (...args: unknown[]) => unknown, hooks: ToolHooks) {
-  if (isAsyncGenerator(fn))
-    return function (this: unknown, ...args: unknown[]) {
-      return hooks.stream(
-        argsAsInput(args),
-        () => fn.apply(this, args) as AsyncIterable<unknown>,
-      );
-    };
-  return function (this: unknown, ...args: unknown[]) {
-    return hooks.around(argsAsInput(args), () => fn.apply(this, args));
-  };
-}
 
 /** The part of an MCP SDK server that guardMcpServer needs. */
 export type McpServerLike = { registerTool: (...args: never[]) => unknown };

@@ -1,0 +1,48 @@
+description: >-
+  Verdict rates read receipts; a sum needs a reported number with a unit;
+  groups are bounded enums or booleans.
+nodrail.yaml:
+  shapes:
+    reviewer-result:
+      properties:
+        verdict:
+          {
+            values: [ship, ship-with-debt, fix-first, unassessable],
+            role: verdict,
+          }
+        issue: { type: string, max: 100 }
+        findings:
+          role: findings
+          report: true
+          properties:
+            blocker: { type: integer, min: 0 }
+            major: { type: integer, min: 0 }
+        lesson: { type: string, max: 300, optional: true }
+    qa-result:
+      properties:
+        verdict: { values: [pass, fail], role: verdict }
+        checks: { type: integer, min: 0, report: true }
+        flaky: { type: integer, min: 0, optional: true, report: true }
+    ci-result:
+      properties:
+        status: { values: [passed, failed], report: true }
+        tests: { type: integer, min: 0, report: true }
+        duration_ms: { type: integer, min: 0, unit: ms, report: true }
+        log_url: { type: string, max: 500 }
+  receipts:
+    reviewer: { shape: reviewer-result }
+    qa: { shape: qa-result }
+  evidence:
+    ci-tests:
+      shape: ci-result
+      producers:
+        - { class: externally-verified, verifier: github-actions }
+      subject: revision
+  insights:
+    ci-verdicts: { source: { evidence: ci-tests }, measure: verdicts }
+    qa-checks: { source: { receipt: qa }, measure: sum, path: checks }
+    by-issue: { source: { receipt: reviewer }, measure: count, group: [issue] }
+expect:
+  - { code: path-type, path: nodrail.yaml.insights.ci-verdicts.measure }
+  - { code: unit, path: nodrail.yaml.insights.qa-checks.path }
+  - { code: not-reported, path: nodrail.yaml.insights.by-issue.group.0 }

@@ -19,7 +19,9 @@ import {
 } from "./positions.ts";
 import {
   budgetItem,
+  contractsItem,
   gateItem,
+  type ContractsEntry,
   type BudgetFields,
   type GateFields,
 } from "./run-entries.ts";
@@ -32,8 +34,14 @@ export {
 } from "./file-fields.ts";
 
 /** Rule files declare the highest format they need, as Falco files do. */
-/** 2 adds `op: contains` with a list; 3 adds gates and budgets (document version 2). */
-export const ENGINE_VERSION = 3;
+/**
+ * 2 adds `op: contains` with a list; 3 adds gates and budgets (document
+ * version 2); 4 adds declared contracts: a `contracts` entry and gate
+ * requirements with `where`, `authority` and `subject` (document version 3).
+ * Engines up to 3 refuse a file that asks for 4, so a contract is never
+ * read with its checks ignored.
+ */
+export const ENGINE_VERSION = 5;
 
 const MAX_FILE_BYTES = 1024 * 1024;
 
@@ -74,7 +82,7 @@ const ruleItem = z.strictObject({
 });
 
 /** An entry as read, with where it is and where each of its fields is. */
-export type Located<T> = T & Place & { where: Where };
+export type Located<T> = T & Place & { locate: Where };
 
 // Only the place is kept, so an entry passed as `at` adds none of its fields.
 const toIssue = ({ file, line, column }: Place, message: string) => ({
@@ -104,6 +112,7 @@ function kindOf(item: unknown) {
     "rule",
     "gate",
     "budget",
+    "contracts",
   ])
     if (key in item) return key;
   return null;
@@ -115,6 +124,10 @@ export type State = {
   rules: Map<string, Located<RuleFields & { rule: string }>>;
   gates: Map<string, Located<GateFields & { gate: string }>>;
   budgets: Map<string, Located<BudgetFields & { budget: string }>>;
+  /** The one `contracts` entry, engine version 4. */
+  contracts?: Located<{ contracts: ContractsEntry }>;
+  /** The engine version each file asks for, by file name. */
+  levels?: Map<string, number>;
 };
 
 /** Where a named entry goes, and where its problems are reported. */
@@ -150,7 +163,7 @@ function mergeNamed<T extends object>(
   }
   const merged: Record<string, unknown> = {
     ...existing,
-    where: layered(existing, incoming.where, override),
+    locate: layered(existing, incoming.locate, override),
   };
   const record = fresh as Record<string, unknown>;
   for (const [field, how] of Object.entries(override)) {
@@ -177,7 +190,7 @@ function mergeNamed<T extends object>(
   }
   for (const field of Object.keys(record))
     if (
-      !["file", "line", "column", "where", kind].includes(field) &&
+      !["file", "line", "column", "locate", kind].includes(field) &&
       record[field] !== undefined &&
       !(field in override)
     )
@@ -195,6 +208,7 @@ const schemas = {
   rule: ruleItem,
   gate: gateItem,
   budget: budgetItem,
+  contracts: contractsItem,
 };
 
 /** The file as YAML entries, or null with every problem reported. */
@@ -228,8 +242,8 @@ function parseEntries(source: PolicySource, collector: Collector) {
     const items = doc.toJS({ maxAliasCount: 50 }) as unknown[];
     // Each entry with where it starts and a way to find its fields.
     const entry = (index: number) => {
-      const where = entryWhere(doc, counter, source.name, index);
-      return { ...(where([]) ?? start), where };
+      const locate = entryWhere(doc, counter, source.name, index);
+      return { ...(locate([]) ?? start), locate };
     };
     return { doc, items, entry };
   } catch {
@@ -253,7 +267,7 @@ function checkEntry(
   if (!schema || !isMap(doc.getIn([index], true))) {
     collector.error(
       here,
-      "Expected a list, macro, rule, gate, budget or required_engine_version entry.",
+      "Expected a list, macro, rule, gate, budget, contracts or required_engine_version entry.",
     );
     return null;
   }
@@ -268,6 +282,35 @@ function checkEntry(
   return null;
 }
 
+/** The engine version a file asks for, and the one contracts entry. */
+function addFileEntry(
+  { kind, value }: { kind: string; value: Record<string, unknown> },
+  here: Located<object>,
+  state: State,
+  collector: Collector,
+) {
+  if (kind === "contracts") {
+    if (state.contracts)
+      collector.error(
+        pick(here, [["contracts"]], "key"),
+        `contracts is already declared at ${state.contracts.file}:${state.contracts.line}; declare them once.`,
+      );
+    else state.contracts = { ...value, ...here } as never;
+    return;
+  }
+  const level = value.required_engine_version as number;
+  state.levels ??= new Map();
+  state.levels.set(
+    here.file,
+    Math.max(level, state.levels.get(here.file) ?? 0),
+  );
+  if (level > ENGINE_VERSION)
+    collector.error(
+      pick(here, [["required_engine_version"]]),
+      `This file needs engine version ${String(level)}; this is ${ENGINE_VERSION}.`,
+    );
+}
+
 /** Adds a checked entry to what has been read so far. */
 function addEntry(
   { kind, value }: { kind: string | null; value: Record<string, unknown> },
@@ -275,14 +318,8 @@ function addEntry(
   state: State,
   collector: Collector,
 ) {
-  if (kind === "required_engine_version") {
-    if ((value.required_engine_version as number) > ENGINE_VERSION)
-      collector.error(
-        pick(here, [["required_engine_version"]]),
-        `This file needs engine version ${String(value.required_engine_version)}; this is ${ENGINE_VERSION}.`,
-      );
-    return;
-  }
+  if (kind === "required_engine_version" || kind === "contracts")
+    return addFileEntry({ kind, value }, here, state, collector);
   const located = { ...value, ...here } as never;
   if (kind === "list")
     return mergeNamed(

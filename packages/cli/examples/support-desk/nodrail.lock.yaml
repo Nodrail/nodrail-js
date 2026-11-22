@@ -2,7 +2,7 @@
 # nodrail.yaml. `nodrail policy export --frozen` checks every file below
 # against it and refuses to export anything that differs.
 lock: 2
-engine: 3
+engine: 5
 manifest:
   path: nodrail.yaml
   sha256: "e72c6d558cf83d3fe37d273edd0352242181c49b97ad5c3492c096e0a366d7b9"

@@ -1,0 +1,17 @@
+description: Findings are what an agent or check reports; a tool result can't declare them.
+nodrail.yaml:
+  shapes:
+    scan-result:
+      properties:
+        findings:
+          { role: findings, type: list, of: { values: [secret, license] } }
+  connections:
+    scanner:
+      command: ./scan
+      operations:
+        scan: { output: scan-result }
+expect:
+  - {
+      code: role-unsupported,
+      path: nodrail.yaml.connections.scanner.operations.scan.output,
+    }

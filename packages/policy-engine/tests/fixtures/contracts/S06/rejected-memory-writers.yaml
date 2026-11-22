@@ -1,0 +1,40 @@
+description: Writers are keyed by values of the kind, and name declared agents and operations.
+nodrail.yaml:
+  shapes:
+    memory-note:
+      properties:
+        kind: { values: [lesson, decision, rule], role: kind, report: true }
+        name: { type: string, max: 80, report: true }
+        summary: { type: string, max: 300 }
+        why: { type: string, max: 500 }
+        applies: { type: list, of: { type: string, max: 100 }, max: 10 }
+        review: { type: date, optional: true, report: true }
+        links:
+          { type: list, of: { type: string, max: 300 }, max: 5, optional: true }
+  connections:
+    memory:
+      command: npx
+      args: ["-y", "@modelcontextprotocol/server-memory"]
+      operations:
+        create_entities: { input: memory-note }
+        add_observations: {}
+        delete_entities: {}
+      data: [./memory]
+  memory:
+    notes:
+      shape: memory-note
+      connection: memory
+      operations: { create: create_entities, delete: remove_everything }
+      writers: { lessons: [developer], rule: [ghost] }
+resources:
+  - apiVersion: apf.nodrail.com/v1alpha1
+    kind: Agent
+    metadata: { name: developer }
+    spec: {}
+expect:
+  - { code: kind-value, path: nodrail.yaml.memory.notes.writers.lessons }
+  - { code: unknown-reference, path: nodrail.yaml.memory.notes.writers.rule.0 }
+  - {
+      code: unknown-reference,
+      path: nodrail.yaml.memory.notes.operations.delete,
+    }

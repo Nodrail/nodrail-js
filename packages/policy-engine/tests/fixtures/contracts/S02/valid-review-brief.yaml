@@ -1,0 +1,37 @@
+description: >-
+  A structured dispatch brief for the reviewer: which issue, which revisions,
+  how risky. Validated before a covered dispatch once Wave 2 enforces it.
+nodrail.yaml:
+  shapes:
+    review-brief:
+      for: What the reviewer needs before it starts
+      properties:
+        issue: { type: string, max: 100, report: true }
+        base: { type: string, max: 64, for: "Base commit SHA" }
+        head: { type: string, max: 64, for: "Head commit SHA" }
+        risk: { values: [low, medium, high], report: true }
+        focus:
+          { type: list, of: { type: string, max: 200 }, max: 5, optional: true }
+resources:
+  - apiVersion: apf.nodrail.com/v1alpha1
+    kind: Agent
+    metadata: { name: reviewer }
+    spec: { brief: review-brief }
+cases:
+  - name: a complete brief
+    target: brief:reviewer
+    value:
+      {
+        issue: ENG-123,
+        base: 6641bcd,
+        head: 1f52bc4,
+        risk: high,
+        focus: [migrations],
+      }
+    expect: valid
+    projection: { issue: ENG-123, risk: high }
+  - name: a prose prompt is not a brief
+    target: brief:reviewer
+    value: { issue: ENG-123, risk: urgent }
+    expect: invalid
+    issues: ["base: required", "head: required", "risk: enum"]

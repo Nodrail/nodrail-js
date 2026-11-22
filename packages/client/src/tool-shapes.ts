@@ -69,6 +69,35 @@ const parsedJson = (value: unknown) => {
 export const isAsyncGenerator = (fn: unknown) =>
   Object.prototype.toString.call(fn) === "[object AsyncGeneratorFunction]";
 
+/** A record of tools: every entry a function or an object. */
+export const isCollection = (value: Record<string, unknown>) =>
+  Object.keys(value).length > 0 &&
+  Object.values(value).every(
+    (item) =>
+      typeof item === "function" ||
+      (typeof item === "object" && item !== null && !Array.isArray(item)),
+  );
+
+const argsAsInput = (args: unknown[]) =>
+  args.length <= 1 ? (args[0] ?? {}) : { args };
+
+/** A plain function behind the hooks; an async generator stays one. */
+export function guardFunction(
+  fn: (...args: unknown[]) => unknown,
+  hooks: ToolHooks,
+) {
+  if (isAsyncGenerator(fn))
+    return function (this: unknown, ...args: unknown[]) {
+      return hooks.stream(
+        argsAsInput(args),
+        () => fn.apply(this, args) as AsyncIterable<unknown>,
+      );
+    };
+  return function (this: unknown, ...args: unknown[]) {
+    return hooks.around(argsAsInput(args), () => fn.apply(this, args));
+  };
+}
+
 const firstArgument = (args: unknown[]) => args[0];
 
 /**

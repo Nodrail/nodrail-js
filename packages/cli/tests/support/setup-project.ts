@@ -13,6 +13,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect } from "vitest";
 import { spoolFolder } from "@nodrail/policy-engine/command-line";
+import { compilePolicies } from "@nodrail/policy-engine/yaml";
 import { TELEMETRY_FILE } from "../../src/setup/connections.ts";
 import { planSetup } from "../../src/setup/plan.ts";
 import { projectFolder } from "./project-folder.ts";
@@ -162,4 +163,25 @@ export function copilotTools(version = "1.0.114") {
   writeFileSync(file, `#!/bin/sh\necho "GitHub Copilot CLI ${version}."\n`);
   chmodSync(file, 0o755);
   return bin;
+}
+
+/** What `nodrail plan` would set up for the project on this host. */
+export const planFor = (p: ReturnType<typeof project>, runtime: string) =>
+  planSetup({ root: p.cwd, home: p.home, env: p.env, runtime });
+
+/** One planned file's text. */
+export const fileOf = (plan: ReturnType<typeof planSetup>, path: string) =>
+  plan.files.find((file) => file.path === path)!.content.toString();
+
+/** The lead agent's generated file on Claude Code and on Copilot. */
+export const leadFiles = (p: ReturnType<typeof project>) => ({
+  claude: fileOf(planFor(p, "claude-code"), ".claude/agents/lead.md"),
+  copilot: fileOf(planFor(p, "copilot"), ".github/agents/lead.agent.md"),
+});
+
+/** The document the hook compiles an effective policy into; it must compile. */
+export function hookDocument(text: string): Record<string, any> {
+  const compiled = compilePolicies([{ name: "effective.apf.yaml", text }]);
+  if (!compiled.ok) throw new Error(JSON.stringify(compiled.issues));
+  return compiled.document as Record<string, any>;
 }

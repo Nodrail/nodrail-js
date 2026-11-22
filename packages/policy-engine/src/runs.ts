@@ -2,6 +2,7 @@
 // integration records the history and passes it in with every decision.
 import { z } from "zod";
 import {
+  declaredGateId,
   effects,
   runName,
   verdict,
@@ -14,6 +15,13 @@ const stepId = z.string().min(1).max(200);
 const at = z.iso.datetime({ offset: true });
 
 export { agentName } from "./names.ts";
+import {
+  describeRequirement,
+  lastFinished,
+  shortfall,
+  type Subject,
+} from "./run-receipts.ts";
+export type { Subject } from "./run-receipts.ts";
 
 /** The name actions outside any step are recorded under. */
 export const MAIN_AGENT = "main";
@@ -24,6 +32,110 @@ const usage = z
     usd: z.number().nonnegative().finite().optional(),
   })
   .strict();
+
+/**
+ * A receipt read against the agent's declared contract (engine version 4).
+ * The full value stays in the local ledger; what leaves the machine is the
+ * state, the contract digest and the findings count. Issues name a path and
+ * a code, never a value.
+ */
+/** Issues name a path and a code, never a value. */
+export const issueList = z
+  .array(
+    z.object({ path: z.string().max(400), code: z.string().max(40) }).strict(),
+  )
+  .max(20);
+
+const receiptRecord = z
+  .object({
+    name: z.string().min(1).max(63),
+    contract: z.string().regex(/^sha256:[0-9a-f]{64}$/),
+    state: z.enum(["valid", "invalid", "missing"]),
+    /** Where it was captured: the stop event, or the hand-back tool call. */
+    via: z.enum(["stop", "handback"]),
+    value: z.record(z.string(), z.unknown()).nullable(),
+    findings: z.number().int().min(0).nullable(),
+    issues: issueList,
+    reason: z.string().max(1000).nullable(),
+  })
+  .strict();
+export type ReceiptRecord = z.infer<typeof receiptRecord>;
+
+const digest = z.string().regex(/^sha256:[0-9a-f]{64}$/);
+/** `host:<the host's id for the call>`, stable across a host's re-deliveries. */
+const budgetKey = z.string().regex(/^[a-z][a-z0-9-]{0,31}:[\x21-\x7e]{1,200}$/);
+/** Whole minor units; a total that could overflow is never trusted. */
+const amount = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
+
+/**
+ * A mediated connection call's input (S03, S06) or result (S04) checked
+ * against its declared contract where the call ran. `values` is the
+ * reporting projection of a valid value, never the full one; issues name a
+ * path and a code. `unsupported`: the result couldn't be read as a value at
+ * all (`reason` says how), which is never valid.
+ */
+export const contractCheck = z
+  .object({
+    surface: z.enum(["S03", "S04", "S06"]),
+    name: z
+      .string()
+      .regex(/^(?:input|output):[a-z0-9_-]{1,64}\.[a-z0-9_-]{1,128}$/),
+    shape: z.string().min(1).max(63),
+    contract: digest,
+    projection: digest,
+    state: z.enum(["valid", "invalid", "unsupported"]),
+    at: z.literal("local"),
+    issues: issueList,
+    reason: z.enum(["not-json", "content-form"]).nullable(),
+    values: z.record(z.string(), z.unknown()).nullable(),
+  })
+  .strict()
+  .refine((check) => check.state === "valid" || check.values === null, {
+    path: ["values"],
+    message: "Only a valid value has values",
+  });
+export type ContractCheck = z.infer<typeof contractCheck>;
+
+/**
+ * A call a connector mediated (runtime-observed): what its input and result
+ * checks said, and what happened at the provider. Execution and result
+ * validity stay apart: a provider can succeed and return an invalid result.
+ * `delivered`: whether the result reached the agent as usable.
+ */
+export const mediatedCall = z
+  .object({
+    type: z.literal("connection.call"),
+    /** Stable across retries: the connector's id for this call. */
+    event: z.uuid(),
+    connection: z.string().regex(/^[a-z0-9_-]{1,64}$/),
+    operation: z.string().regex(/^[a-z0-9_-]{1,128}$/),
+    occurred_at: at,
+    producer: z
+      .object({
+        class: z.literal("runtime-observed"),
+        id: z.string().regex(/^connector:[a-z0-9_-]{1,64}$/),
+      })
+      .strict(),
+    input: contractCheck.nullable(),
+    /**
+     * `fingerprint` of the call's arguments: the `input_sha256` the host
+     * hook gave the same call, which joins it to the call's reservation.
+     */
+    input_sha256: digest.optional(),
+    execution: z.enum(["succeeded", "failed", "not-called", "unknown"]),
+    result: contractCheck.nullable(),
+    delivered: z.boolean(),
+  })
+  .strict()
+  .refine(
+    (call) =>
+      call.input?.state !== "invalid" || call.execution === "not-called",
+    {
+      path: ["execution"],
+      message: "An invalid input never reaches the provider",
+    },
+  );
+export type MediatedCall = z.infer<typeof mediatedCall>;
 
 export const runEvent = z.discriminatedUnion("type", [
   z
@@ -43,6 +155,9 @@ export const runEvent = z.discriminatedUnion("type", [
       verdict: verdict.nullable(),
       findings: z.array(verdict).max(50),
       usage,
+      receipt: receiptRecord.optional(),
+      /** The revision the work was at when the step finished, when a gate needs it. */
+      subject: z.string().max(200).nullable().optional(),
     })
     .strict(),
   z
@@ -56,6 +171,79 @@ export const runEvent = z.discriminatedUnion("type", [
       outcome: z.enum([...effects, "none"]),
       /** It changed things and went ahead: see `isChange`. Missing means no. */
       change: z.boolean().optional(),
+      /** The host's id for the call (`host:tool_use_id`), when it gave one. */
+      key: budgetKey.optional(),
+    })
+    .strict(),
+  /**
+   * A call a connector mediated, as it recorded it, placed in the run like
+   * an action: at the call's time, under the step and agent that made it
+   * when the connector knows them, else the main agent with no step.
+   */
+  z
+    .object({
+      type: z.literal("connection.call"),
+      step: stepId.nullable(),
+      agent: runName,
+      at,
+      call: mediatedCall,
+    })
+    .strict(),
+  /**
+   * An amount a numeric budget set aside for a call that went ahead
+   * (admission): counted until it is settled released.
+   */
+  z
+    .object({
+      type: z.literal("budget.reserved"),
+      step: stepId.nullable(),
+      agent: runName,
+      at,
+      key: budgetKey,
+      budget: z.string().min(1).max(63),
+      amount: amount,
+      unit: z.string().max(32),
+      tool: z.string().min(1).max(64),
+      operation: z.string().min(1).max(128),
+      input_sha256: digest.nullable(),
+    })
+    .strict(),
+  /**
+   * What became of a call's reservations: `consumed` (it ran), `released`
+   * (it never reached the provider, or the provider said it failed) or
+   * `unknown` (counted until a person reconciles it). The runtime's first
+   * word stands; a person's later one replaces it.
+   */
+  z
+    .object({
+      type: z.literal("budget.settled"),
+      step: stepId.nullable(),
+      agent: runName,
+      at,
+      key: budgetKey,
+      state: z.enum(["consumed", "released", "unknown"]),
+      by: z.enum(["runtime", "person"]),
+      note: z.string().max(500).optional(),
+    })
+    .strict(),
+  /**
+   * An amount the runtime measured after a call: a result's integer path
+   * (`result.<path>`) or a subagent's tokens (`tokens`). Null when there was
+   * no reading, which is unknown, never zero.
+   */
+  z
+    .object({
+      type: z.literal("budget.measured"),
+      step: stepId.nullable(),
+      agent: runName,
+      at,
+      key: budgetKey,
+      tool: z.string().min(1).max(64),
+      operation: z.string().min(1).max(128),
+      path: z
+        .string()
+        .regex(/^(?:tokens|result(?:\.[a-z][a-z0-9_]{0,62}){1,4})$/),
+      amount: amount.nullable(),
     })
     .strict(),
 ]);
@@ -100,7 +288,8 @@ function lastWorkBefore(
   const named = new Set(requirement.since);
   for (let index = events.length - 1; index >= 0; index -= 1) {
     const event = events[index];
-    if (!event) continue;
+    // A budget's bookkeeping is about a call already in the run, not new work.
+    if (!event || event.type.startsWith("budget.")) continue;
     if (named.has(event.agent)) return index;
     if (changedWork(event, requirement, checkers)) return index;
   }
@@ -117,29 +306,47 @@ export function requirementMet(
   requirement: Requirement,
   events: RunEvent[],
   checkers: ReadonlySet<string> = new Set([requirement.agent]),
+  subject: Subject | null = null,
 ) {
   const after = lastWorkBefore(requirement, events, checkers);
   const startedAfter = new Set<string>();
+  // R375: only the agent's latest finished step counts, per revision when
+  // the requirement is about one: a later receipt that fails closes the
+  // gate an earlier one opened.
+  let now: string | null | undefined;
+  const sameRevision = (said: string | null | undefined) => {
+    if (requirement.subject !== "revision" || !said) return true;
+    if (now === undefined) now = subject?.() ?? null;
+    return now === null || said === now;
+  };
+  let latest: Extract<RunEvent, { type: "step.finished" }> | null = null;
   for (let index = after + 1; index < events.length; index += 1) {
     const event = events[index];
     if (event?.agent !== requirement.agent) continue;
     if (event.type === "step.started") startedAfter.add(event.step);
-    if (
-      event.type === "step.finished" &&
-      startedAfter.has(event.step) &&
-      event.verdict !== null &&
-      requirement.verdicts.includes(event.verdict)
-    )
-      return true;
+    if (event.type === "step.finished" && sameRevision(event.subject))
+      latest = event;
   }
-  return false;
+  return (
+    latest !== null &&
+    startedAfter.has(latest.step) &&
+    shortfall(latest, requirement, subject) === null
+  );
 }
 
-/** The requirements of a gate that the run has not met. No run meets none. */
-export function unmetRequirements(gate: PolicyGate, run: RunContext | null) {
+/**
+ * The requirements of a gate that the run has not met. No run meets none.
+ * `subject` reads the current revision, for requirements that need it.
+ */
+export function unmetRequirements(
+  gate: PolicyGate,
+  run: RunContext | null,
+  subject: Subject | null = null,
+) {
   const checkers = new Set(gate.requires.map(({ agent }) => agent));
   return gate.requires.filter(
-    (requirement) => !run || !requirementMet(requirement, run.events, checkers),
+    (requirement) =>
+      !run || !requirementMet(requirement, run.events, checkers, subject),
   );
 }
 
@@ -219,11 +426,23 @@ function budgetWithoutRun(budget: PolicyBudget): BudgetState | null {
   };
 }
 
-const describeRequirement = ({ agent, verdicts, since }: Requirement) =>
-  `${agent} with ${verdicts.join(" or ")}${since.length ? ` after the last change or ${since.join(" or ")} work` : ""}`;
-
-export function explainGate(gate: PolicyGate, missing: Requirement[]) {
-  return `Gate ${gate.id} needs ${missing.map(describeRequirement).join("; ")}.`;
+/**
+ * Why a gate holds: each unmet requirement in words and, from the run, why
+ * the agent's last finished step falls short of it. Paths and codes only,
+ * never a receipt's values.
+ */
+export function explainGate(
+  gate: PolicyGate,
+  missing: Requirement[],
+  run: RunContext | null = null,
+  subject: Subject | null = null,
+) {
+  const said = missing.map((requirement) => {
+    const last = run ? lastFinished(requirement, run.events) : null;
+    const why = last ? shortfall(last, requirement, subject) : null;
+    return `${describeRequirement(requirement)}${why ? ` (${why})` : ""}`;
+  });
+  return `Gate ${declaredGateId(gate)} needs ${said.join("; ")}.`;
 }
 
 export function explainBudget(budget: BudgetState) {

@@ -1,5 +1,159 @@
 # Changelog
 
+## 0.6.0
+
+### Added
+
+- Engine level 4: receipts read against their declared contract, and gates
+  on them. A rule file that asks for level 4 can hold one `contracts` entry
+  (`shapes`, `receipts`, `agents`) and gate requirements with `where`,
+  `authority` and `subject: revision`; it compiles to a version 3 policy
+  document. Engines up to level 3 refuse such a file. A receipt is valid,
+  invalid or missing, and only a valid one gives a step its verdict; the
+  explicit header bridge reads `RECEIPT <agent>` blocks such as a team's existing reviewer receipts.
+  Receipts are captured on the stop event and on Claude Code's
+  `SubagentHandback`, where an invalid receipt is denied so the subagent
+  resends, and on Copilot's `subagentStop`; a step finishes once. Rule
+  files without contracts behave exactly as before. See "How a receipt is
+  read" in `docs/contracts.md`.
+- `@nodrail/policy-engine/contracts` (also `/shapes`): the contracts
+  compiler, digests, projections and `readContractReceipt`, for the CLI and
+  Cloud. `@nodrail/policy-engine/contract-values`: the strict validator and
+  `where` matcher with no dependencies, for browsers.
+- `receiptText` and `HANDBACK_TOOL` in `@nodrail/policy-engine/hook-runs`,
+  for hooks that send a receipt on.
+- `@nodrail/policy-engine/files`: the file-content contracts parser and
+  write reconstruction (DC-04.2, preview). `@nodrail/policy-engine/revision`:
+  `workRevision`, and `cleanRevision(commit)`, the revision a clean checkout
+  of that commit reads, so CI evidence for a commit ties to the local work.
+
+- Engine level 5 and policy document version 4 (Wave 3, DC-03.2, DC-03.3).
+  - **Evidence requirements on gates.** `{ evidence, authority, subject: revision, where }`, with `evidence` contracts in the rule file's `contracts` entry. A `where` on a secret path is refused. Local runtime-observed events are read from the ledger folder; externally verified ones are asked of Cloud with `hook --evidence <file>` (token in `NODRAIL_TOKEN`). Old subjects never satisfy new work. Explanations follow a fixed order.
+  - **Numeric budgets.** `count: { tool, operation }`; `sum` of an `input.` (reserved) or `result.` (measured) integer path with its `unit`; `tokens` with `source: measured`; `per: step | run | day` with an IANA `timezone` for a day; `across: run | environment`. Labels are derived from the source: enforced allowance, measured usage, agent-reported usage.
+  - **Reserve and settle in the local hook.** Reservations are made under the run lock and keyed `host:tool_use_id`, and a repeated PreToolUse is idempotent. PostToolUse consumes a reservation. Only a mediated `failed`/`not-called` releases one; anything else is unknown and still counted. Measured usage with no reading is unknown and holds.
+  - Engines up to level 4 refuse level 5 files, and readers of version 3 refuse version 4. Files that use no level 5 feature compile exactly as before.
+  - `@nodrail/policy-engine/ledger`: the run ledger (`record`, `withRunLock`), budget settlement for connectors (`settleMediatedCall`) and local evidence.
+- `connection.call` events may carry `input_sha256`.
+- `walk` is exported from `/contracts`.
+
+### Changed
+
+- Gates now use only each agent's latest finished step, per revision with
+  `subject: revision` (R375). This changes existing gates too, including
+  level-3 gates without contracts: a QA `pass` followed by a QA `fail` now
+  closes a gate that 0.5.2 left open, and a later invalid receipt closes a
+  gate an earlier valid one opened.
+- A chain that makes a link (`ln`, `link`, `cp -s`) and runs anything after
+  it is judged whole, as `command.compound` (R376).
+
+### Fixed
+
+- Agents could forge local evidence: the run ledger (`.git/nodrail`, or
+  `NODRAIL_LEDGER`) wasn't protected, so a rule allowing `Write` let an
+  agent append a `passed` event and open a gate. With a protect list, the
+  hook now always denies file tools that change the ledger and shell
+  commands that name it (R364).
+- All of `.git` is protected the same way (R374), and a shell word counts
+  as the shell joins it (`".git/nod""rail/…"`) and when a wildcard could
+  reach `.git`, the ledger or a setup dot folder (`.gi?/…`, `sub/alt*`).
+  Wildcards that can't reach them (`cp src/*.ts dist/`) are left to the
+  rules. `shellWords` reads a line's words as the shell hands them over.
+- With a protect list, the hook also denies a link pointing at, inside or
+  above `.git`, the ledger or a setup dot folder, a recursive copy, move
+  or sync into one, or into a folder holding one when it would create or
+  overwrite it, or after another part of the same line (R377), and an
+  extraction into either (R376).
+  Shell analysis stays best effort: a control, not a sandbox.
+- A gate on a command prefix was named by its internal `<id>-args` twin in
+  deny reasons. `declaredGateId` and `declaredGates` give the declared id,
+  each gate once.
+- One invalid shape no longer brings false errors on every `where` that
+  reads it: shape errors are reported alone.
+- Four wrappers in a row (`nohup nohup nohup nohup gh …`) are read, as
+  documented; a fifth is judged whole. It was three.
+- An unknown key in nodrail.yaml is named with its path.
+- The work revision was unknown whenever the tree had an untracked file
+  (Node refused the string input git's `hash-object` was given), so a
+  `subject: revision` requirement stayed unmet there. Untracked files are now
+  hashed by content as documented.
+
+- Briefs and tool inputs on declared contracts (engine level 4, DC-02.1,
+  DC-02.2). A rule file's `contracts` entry takes `agents.<a>.brief` and
+  `connections.<c>.operations.<op>.input`; rules and gates take `where` on
+  `input.` and `brief.` paths. The hook checks the brief of the agent a
+  dispatch starts (a fenced `nodrail-brief` block, or opted-in flat
+  `key: value` lines) and a connection operation's arguments (strict:
+  unknown arguments refused, 16 KiB) on the exact call, before any rule:
+  invalid, missing or unobservable (Codex) is denied with a reason that
+  names paths and codes, never values, so the agent never starts and the
+  provider is never called. Classified arguments are shown to reviewers as
+  `[classified]`. The compiled document (still version 3) carries
+  `briefs`, `inputs` and each rule's `where` only when declared, so
+  documents without them are unchanged; engines from before refuse them.
+  `readBrief`, `briefContracts`, `inputContracts`, `checkContracts` in
+  `/contracts`; `checkInput`, `checkValue`, `briefLines`,
+  `withoutClassified` in `/contract-values`. New value issue code `size`.
+  See "Briefs and tool inputs" in `docs/contracts.md`.
+- The run ledger records a connector's mediated call as a
+  `connection.call` event (`contractCheck`, `mediatedCall` schemas):
+  input and result checks, and the provider execution, kept apart.
+
+- The header bridge reads findings as an object of integer counts
+  (`findings: 0 blocker / 1 major / 0 minor / 0 debt`), so a gate can ask
+  `where: { findings.blocker: 0 }` of a flat receipt such as a team's existing one
+  reviewer's.
+
+### Fixed
+
+- A header findings line read into a list keeps only the categories
+  counted above 0: `0 blocker / 1 major / 0 minor / 0 debt` was four
+  findings, now one.
+- Rules with gates or budgets but no contracts: a `SubagentHandback`
+  finishes its step with the receipt it carries (read by the fixed
+  parser), and the stop after it, which carries no message, adds nothing.
+  A gate waiting for a subagent in `auto` mode stayed closed.
+- The hook keeps run files where the environment it is given says
+  (`HOME` outside git), not the process's own. `ledgerDirectory` and
+  `nodrailDirectory` are in `@nodrail/policy-engine/hook-runs`.
+- Copilot's dispatch in Claude Code's hook format (`Agent` with
+  `agent_type`) is read as Copilot's `task`, so the agent started is the
+  one named, not `general-purpose`.
+- Claude Code's `SubagentHandback` (a subagent in `auto` permission mode
+  delivering its report) goes ahead when no rule covers it. It was judged
+  like any tool, so rules that block what they don't cover, such as the
+  starter packs, stranded every background subagent ending this way. A
+  rule on `claude-code subagenthandback` still decides it, and a receipt
+  contract still refuses an invalid receipt. `HANDBACK_ACTION` in
+  `@nodrail/policy-engine/hook-runs` names it for other evaluators.
+- `receiptText` finds a header block under any title the grammar allows,
+  `RECEIPT-{agent}` included; it only found titles with a space before the
+  agent. `headerNaming(agent)` is the matcher, in `/contracts` and
+  `/contract-values`.
+- The policy hook never fails open: an error nothing caught, or the hook
+  running past 15 s, ends a tool call with exit 2 (blocked); a step event
+  ends with 0, so a subagent can still stop.
+
+### Added (preview, not enforced)
+
+- The declared-contracts grammar, dialect 1: the `shapes` registry and
+  where contracts attach (receipts, briefs, tool input and results,
+  evidence, memory, files, approval forms, inventory labels) and how gates,
+  rules, budgets, routes, views, insights, notifications, tests, locks and
+  playbooks refer to them. Its compiler, digests and reporting projection
+  are in `src/shapes/`, not yet exported or used by the hook or the CLI;
+  published engines and CLIs refuse these declarations rather than ignore
+  them. See `docs/contracts.md`.
+
+### Fixed
+
+- A rule on a command didn't decide it when a wrapper ran it: a deny on
+  `gh pr merge` missed `rtk gh pr merge`, and an allow on `rtk` covered
+  everything rtk runs. The engine now judges the command that `rtk`,
+  `nohup`, `time`, `caffeinate`, `nice` and `timeout` run, in shapes it
+  knows; any other shape is judged as a whole. A rule on bare `rtk` no
+  longer compiles: name rtk's own commands, such as `rtk gain`. See
+  "Wrappers" in `docs/commands-and-tools.md`.
+
 ## 0.5.2
 
 ### Fixed

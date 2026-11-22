@@ -7,6 +7,11 @@ import {
 import { Document, isScalar, parse, Scalar, visit } from "yaml";
 import { z } from "zod";
 import { workspaceDigest, type Hashed } from "./workspace.ts";
+import { lockedContracts } from "../contracts/changes.ts";
+import type { CompiledContracts, ResolvedShape } from "../contracts/engine.ts";
+
+const isRecord = (value: unknown) =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
 
 export const MANIFEST_FILE = "nodrail.yaml";
 export const LOCK_FILE = "nodrail.lock.yaml";
@@ -49,12 +54,58 @@ const lockShape = z
       .object({ sha256: z.string(), files: z.array(hashed) })
       .strict()
       .optional(),
+    /**
+     * Declared contracts (preview), only when the project declares any: the
+     * engine's digests of every shape, projection and the whole closure.
+     */
+    contracts: z
+      .object({
+        dialect: z.literal(1),
+        digest: z.string(),
+        shapes: z.record(
+          z.string(),
+          z.object({ contract: z.string(), projection: z.string() }).strict(),
+        ),
+      })
+      .strict()
+      .optional(),
+    /** The contracts last reviewed, resolved, to classify the next change. */
+    contractsBaseline: z
+      .object({
+        bindings: z.record(
+          z.string(),
+          z
+            .object({
+              surface: z.string(),
+              shape: z.string().nullable(),
+              digest: z.string(),
+            })
+            .strict(),
+        ),
+        agents: z.record(
+          z.string(),
+          z
+            .object({
+              receipt: z.string().nullable(),
+              implicit: z.boolean(),
+              brief: z.string().nullable(),
+            })
+            .strict(),
+        ),
+        shapes: z.record(z.string(), z.custom<ResolvedShape>(isRecord)),
+      })
+      .strict()
+      .optional(),
     /** The effective policy last reviewed, to show what the next change does. */
     baseline: z.string(),
   })
   .strict()
   .refine(
     (lock) => (lock.lock === LOCK_WORKSPACE) === (lock.workspace !== undefined),
+  )
+  .refine(
+    (lock) =>
+      (lock.contracts === undefined) === (lock.contractsBaseline === undefined),
   );
 
 export type Lock = z.infer<typeof lockShape>;
@@ -73,6 +124,8 @@ export function lockFor(input: {
   previous: Lock | null;
   /** A setup's instructions and skill files; null for a policy alone. */
   content: Hashed[] | null;
+  /** The declared contracts (preview), or null: the lock then has none. */
+  contracts?: CompiledContracts | null;
 }): Lock {
   const { resolution, manifest, catalog, effective, content } = input;
   const lock: Lock = {
@@ -105,15 +158,19 @@ export function lockFor(input: {
     effective: effective === null ? null : { sha256: sha256(effective) },
     baseline: effective ?? input.previous?.baseline ?? "",
   };
-  if (content === null) return lock;
-  // The workspace section goes before the baseline, which is long.
+  // Contracts and the workspace go before the baseline, which is long.
   const { baseline, ...rest } = lock;
+  const declared = input.contracts ? lockedContracts(input.contracts) : {};
+  const withContracts: Lock = { ...rest, ...declared, baseline };
+  if (content === null) return withContracts;
+  const { contracts, contractsBaseline } = withContracts;
   return {
     ...rest,
     workspace: {
-      sha256: workspaceDigest(sourcesOf(lock, content), sha256),
+      sha256: workspaceDigest(sourcesOf(withContracts, content), sha256),
       files: content,
     },
+    ...(contracts ? { contracts, contractsBaseline } : {}),
     baseline,
   };
 }
@@ -137,6 +194,16 @@ export function sourcesOf(lock: Lock, content: Hashed[]): Hashed[] {
       })),
     ),
     ...content,
+    // The contracts' closure, by the engine's digest: the same files read by
+    // another engine are another revision.
+    ...(lock.contracts
+      ? [
+          {
+            path: "<contracts>",
+            sha256: lock.contracts.digest.replace(/^sha256:/, ""),
+          },
+        ]
+      : []),
   ];
 }
 

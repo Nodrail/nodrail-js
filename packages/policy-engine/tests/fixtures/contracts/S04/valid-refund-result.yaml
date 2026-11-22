@@ -1,0 +1,36 @@
+description: >-
+  What the provider returns. An invalid result is unusable downstream, but
+  the refund it describes may still have happened: execution and conformance
+  are recorded separately.
+nodrail.yaml:
+  shapes:
+    refund-args:
+      properties:
+        amount: { type: integer, min: 1, unit: usd_cents, report: true }
+        currency: { values: [usd, eur], report: true }
+        charge: { type: string, max: 64 }
+        customer_email: { type: string, max: 254, classification: pii }
+        reason: { type: string, max: 200, optional: true }
+    refund-result:
+      properties:
+        refund_id: { type: string, max: 64 }
+        status: { values: [succeeded, pending, failed], report: true }
+        amount: { type: integer, min: 0, unit: usd_cents, report: true }
+  connections:
+    stripe:
+      command: npx
+      args: ["-y", "@stripe/mcp"]
+      operations:
+        refund: { input: refund-args, output: refund-result }
+        list_charges: {}
+cases:
+  - name: a succeeded refund
+    target: output:stripe.refund
+    value: { refund_id: re_1, status: succeeded, amount: 4200 }
+    expect: valid
+    projection: { status: succeeded, amount: 4200 }
+  - name: a provider status outside the contract
+    target: output:stripe.refund
+    value: { refund_id: re_1, status: requires_action, amount: 4200 }
+    expect: invalid
+    issues: ["status: enum"]

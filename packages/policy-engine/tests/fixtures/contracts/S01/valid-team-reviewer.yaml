@@ -1,0 +1,99 @@
+description: >-
+  A team's reviewer receipt as a declared contract: a shared base, a child
+  that replaces the verdict vocabulary and adds category counts, and an Agent
+  that picks it. The anchor is the reviewer's own claim; runtime checks
+  freshness separately.
+nodrail.yaml:
+  shapes:
+    result-base:
+      properties:
+        verdict: { values: [done, partial, blocked], role: verdict }
+        issue:
+          { type: string, max: 100, for: "Issue id from the brief, or none" }
+        lesson:
+          { type: string, max: 300, optional: true, for: "A useful lesson" }
+    reviewer-result:
+      extends: result-base
+      properties:
+        verdict:
+          {
+            values: [ship, ship-with-debt, fix-first, unassessable],
+            role: verdict,
+          }
+        findings:
+          role: findings
+          report: true
+          properties:
+            blocker: { type: integer, min: 0 }
+            major: { type: integer, min: 0 }
+            minor: { type: integer, min: 0 }
+        anchor:
+          {
+            values: [fresh, stale],
+            for: "Your assessment; runtime verifies freshness independently",
+          }
+  receipts:
+    reviewer: { shape: reviewer-result, format: fenced }
+resources:
+  - apiVersion: apf.nodrail.com/v1alpha1
+    kind: Agent
+    metadata: { name: reviewer }
+    spec: { instructions: ./agents/reviewer.md, receipt: reviewer }
+cases:
+  - name: ship with one major finding
+    target: receipt:reviewer
+    value:
+      {
+        verdict: ship,
+        issue: ENG-123,
+        findings: { blocker: 0, major: 1, minor: 2 },
+        anchor: fresh,
+      }
+    expect: valid
+    projection: { verdict: ship, findings: { blocker: 0, major: 1, minor: 2 } }
+  - name: ship-with-debt keeps the optional lesson local
+    target: receipt:reviewer
+    value:
+      {
+        verdict: ship-with-debt,
+        issue: none,
+        lesson: "Pin the fixture clock",
+        findings: { blocker: 0, major: 0, minor: 4 },
+        anchor: stale,
+      }
+    expect: valid
+    projection:
+      { verdict: ship-with-debt, findings: { blocker: 0, major: 0, minor: 4 } }
+  - name: a quoted zero is not a count
+    target: receipt:reviewer
+    value:
+      {
+        verdict: fix-first,
+        issue: ENG-9,
+        findings: { blocker: "0", major: 1, minor: 0 },
+        anchor: fresh,
+      }
+    expect: invalid
+    issues: ["findings.blocker: type"]
+  - name: the parent's vocabulary was replaced, not merged
+    target: receipt:reviewer
+    value:
+      {
+        verdict: done,
+        issue: ENG-1,
+        findings: { blocker: 0, major: 0, minor: 0 },
+        anchor: fresh,
+      }
+    expect: invalid
+    issues: ["verdict: enum"]
+  - name: inherited required fields stay required, unknown fields fail
+    target: receipt:reviewer
+    value:
+      {
+        verdict: ship,
+        findings: { blocker: 0, major: 0, minor: 0 },
+        anchor: fresh,
+        tests_passed: true,
+      }
+    expect: invalid
+    issues: ["issue: required", "tests_passed: unknown"]

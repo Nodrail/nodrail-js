@@ -6,12 +6,23 @@ import {
   copilotEvents,
   copilotFromClaude,
   copilotRefusal,
+  copilotSettleEvent,
+  copilotStepEvent,
 } from "./copilot-hook.ts";
+import { hookEvidence } from "./hook-evidence.ts";
 import { readConnections } from "./hook-files.ts";
+import { hookIsStep } from "./hook-guard.ts";
 import { telemetryObserver } from "./hook-telemetry.ts";
-import { decideToolCall } from "./local-hook.ts";
+import { nonEmptyText } from "./actions.ts";
+import { decideToolCall, parseEvent } from "./local-hook.ts";
 import type { PolicyDocument } from "./policies.ts";
-import { dataGuard, protectedPaths, setupGuard } from "./rules-guard.ts";
+import type { Environment } from "./run-key.ts";
+import {
+  dataGuard,
+  protectedPaths,
+  setupGuard,
+  withLedger,
+} from "./rules-guard.ts";
 import { runHook } from "./run-hook.ts";
 
 /**
@@ -29,6 +40,8 @@ export type HookRun = {
     connections?: string;
     telemetry?: string;
     host?: string;
+    /** `{ url, workspace_revision }` for externally verified evidence; token from NODRAIL_TOKEN. */
+    evidence?: string;
   };
   document: PolicyDocument;
   now: Date;
@@ -128,33 +141,85 @@ function hookOptions(run: HookRun, guards: Guards, io: HookIo) {
   };
 }
 
+/** PostToolUse and PostToolUseFailure: a call's outcome, never judged. */
+function isOutcome(stdin: string) {
+  try {
+    const name = (JSON.parse(stdin) as { hook_event_name?: unknown })
+      .hook_event_name;
+    return name === "PostToolUse" || name === "PostToolUseFailure";
+  } catch {
+    return false;
+  }
+}
+
+/** Copilot also runs Claude Code's hooks: the call is Copilot's then. */
+function copilotMode(host: string | undefined, env: Record<string, unknown>) {
+  if (host === "copilot") return "own" as const;
+  return env.COPILOT_HOOK_DEPTH !== undefined &&
+    hostName(host) === "claude-code"
+    ? ("as-claude" as const)
+    : null;
+}
+
+/**
+ * The guards with the run ledger protected (R364), as the run hook finds it
+ * from the call's folder and from the project's; a reason when it can't be
+ * found, for the hook must block then, not run unprotected.
+ */
+function guardLedger(guards: Guards, stdin: string, env: Environment) {
+  if (!guards.setup) return guards;
+  const cwd = nonEmptyText(parseEvent(stdin)?.cwd) ?? process.cwd();
+  try {
+    return {
+      ...guards,
+      setup: withLedger(guards.setup, [cwd, guards.setup.root], env),
+    };
+  } catch (error) {
+    return `Nodrail: can't find the run ledger to protect: ${(error as Error).message}\n`;
+  }
+}
+
 export async function hookCommand(run: HookRun, io: HookIo) {
-  const guards = readGuards(run.values);
+  const read = readGuards(run.values);
   // Unprotected would be worse than stopped: 2 is what blocks.
+  if (typeof read === "string") {
+    io.writeError(read);
+    return 2;
+  }
+  // The run's files go where the given environment says, never another's.
+  const env = io.env ?? process.env;
+  const stdin = await io.readStdin();
+  const guards = guardLedger(read, stdin, env);
   if (typeof guards === "string") {
     io.writeError(guards);
     return 2;
   }
-  // Copilot also runs Claude Code's hooks: the call is Copilot's then.
-  const copilot =
-    run.values.host === "copilot"
-      ? "own"
-      : (io.env ?? process.env).COPILOT_HOOK_DEPTH !== undefined &&
-          hostName(run.values.host) === "claude-code"
-        ? "as-claude"
-        : null;
-  const options = {
+  const copilot = copilotMode(run.values.host, env);
+  const base = {
     ...hookOptions(run, guards, io),
-    ...(copilot ? { canAsk: false } : {}),
+    ...(copilot ? { canAsk: false, keyHost: "copilot" } : {}),
   };
-  const stdin = await io.readStdin();
   // Rules without gates or budgets never read or write the ledger.
+  const runs = run.document.version !== 1;
+  // Read before the decision, which stays synchronous under the run lock.
+  const evidence = await hookEvidence(stdin, base, {
+    env,
+    file: run.values.evidence,
+  });
+  const options = { ...base, evidence };
   const decide = (event: string) =>
-    run.document.version === 2
-      ? runHook(event, options)
-      : decideToolCall(event, options);
-  const result =
-    copilot === "own"
+    runs ? runHook(event, options, env) : decideToolCall(event, options);
+  // A subagent starting or stopping is a step, and a call's outcome settles
+  // its budgets: recorded, never judged, and a failure from here on must
+  // not keep the subagent from stopping or block what already ran.
+  const stepEvent = copilotStepEvent(stdin) ?? copilotSettleEvent(stdin);
+  if (stepEvent) hookIsStep();
+  const step = copilot ? stepEvent : isOutcome(stdin) ? stdin : null;
+  const result = step
+    ? runs
+      ? runHook(step, options, env)
+      : { stdout: "", stderr: "", exitCode: 0 }
+    : copilot === "own"
       ? copilotHook(stdin, guards.connections, decide)
       : copilot === "as-claude"
         ? claudeAnswerFor(

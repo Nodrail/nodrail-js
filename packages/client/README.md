@@ -207,6 +207,29 @@ A plain string `resource` is resource type `resource`. With no `resource`, it is
 type `tool` with the id `<tool>.<operation>`, such as `github.issues.delete`. `run()` and `check()` send
 `params` exactly as you pass them, with no redaction: keep secrets out of them.
 
+`run()` takes two more options. `timeoutMs` stops waiting for the call and
+reports it as `unknown`, since it may still take effect; an `AbortError` or
+`TimeoutError` from the call is reported the same way, any other error as
+`failure`. `measure` reads the amounts the result measured, for budgets that
+sum a `result.` path; the same list goes to `report(decision, "success", { measured })`.
+Amounts are whole, non-negative numbers, each path once; if any isn't, none
+is sent, and the budget treats the missing reading as unknown, never zero.
+A report is keyed by its permit and retried a few times on a network or
+server error, so it never counts twice.
+
+```ts
+await nodrail.run(refundAction, () => stripe.refunds.create(args), {
+  timeoutMs: 10_000,
+  measure: (refund) => [{ path: "result.amount", value: refund.amount }],
+});
+```
+
+In a run, each call also sends the work revision it is about (`run.subject`,
+the git work tree at `cwd`, read again when the permit is issued), so a gate
+that needs evidence for this exact commit can be checked. Outside a git work
+tree it is sent as unknown, which keeps such a gate closed. Pass
+`subject: () => revision` to read it your own way, or `subject: null`.
+
 ### Runs and steps, for any framework
 
 **SDK walkthrough preview.** The examples below require client 0.2.0 or later, which provides `inRun` and `step`.

@@ -1,0 +1,74 @@
+description: >-
+  Typed memory behind an existing memory server. The kind decides who may
+  write: a lesson by developer or reviewer, a decision by reviewer, a rule by
+  nobody (promotion to a rule is a separate approved policy change).
+nodrail.yaml:
+  shapes:
+    memory-note:
+      properties:
+        kind: { values: [lesson, decision, rule], role: kind, report: true }
+        name: { type: string, max: 80, report: true }
+        summary: { type: string, max: 300 }
+        why: { type: string, max: 500 }
+        applies: { type: list, of: { type: string, max: 100 }, max: 10 }
+        review: { type: date, optional: true, report: true }
+        links:
+          { type: list, of: { type: string, max: 300 }, max: 5, optional: true }
+  connections:
+    memory:
+      command: npx
+      args: ["-y", "@modelcontextprotocol/server-memory"]
+      operations:
+        create_entities: { input: memory-note }
+        add_observations: {}
+        delete_entities: {}
+      data: [./memory]
+  memory:
+    notes:
+      shape: memory-note
+      connection: memory
+      operations:
+        {
+          create: create_entities,
+          update: add_observations,
+          delete: delete_entities,
+        }
+      writers: { lesson: [developer, reviewer], decision: [reviewer], rule: [] }
+      deleters: [reviewer]
+      max_records: 500
+resources:
+  - apiVersion: apf.nodrail.com/v1alpha1
+    kind: Agent
+    metadata: { name: developer }
+    spec: {}
+  - apiVersion: apf.nodrail.com/v1alpha1
+    kind: Agent
+    metadata: { name: reviewer }
+    spec: {}
+cases:
+  - name: a lesson with a review date
+    target: memory:notes
+    value:
+      {
+        kind: lesson,
+        name: fixture-clock,
+        summary: "Pin the clock",
+        why: "Flaky dates",
+        applies: [tests],
+        review: "2027-02-28",
+      }
+    expect: valid
+    projection: { kind: lesson, name: fixture-clock, review: "2027-02-28" }
+  - name: a day that doesn't exist
+    target: memory:notes
+    value:
+      {
+        kind: lesson,
+        name: x,
+        summary: y,
+        why: z,
+        applies: [],
+        review: "2027-02-30",
+      }
+    expect: invalid
+    issues: ["review: type"]

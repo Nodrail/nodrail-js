@@ -10,6 +10,8 @@ The project and policy commands need no account and send nothing anywhere.
 
 `plan` and `apply` (preview) set up a workspace on Claude Code or Codex. For the versions they have been tested with, what each host proves, migration notes and limits, see [Compatibility](compatibility.md).
 
+Receipt contracts are enforced by the hook on Claude Code and Copilot; briefs and `nodrail contracts render`, `validate` and `explain` are a preview: see [Declared contracts](contracts.md).
+
 ## Install
 
 Use Node.js 22 or later.
@@ -248,6 +250,18 @@ nodrail plugin fetch --check
 ```
 
 For each plugin `nodrail.yaml` says comes from git (`from: { git, commit, path }`), or the one named, `plugin fetch` reads the plugin's files at that commit and shows what it would add, change and remove in its folder. After you agree, the folder holds exactly those files. Then run `nodrail policy lock` to review them. `--check` writes nothing and exits 1 when a folder differs from its commit. It needs `git`. See [A plugin from git](playbooks.md#a-plugin-from-git).
+
+### `evidence` and `budgets` (engine level 5)
+
+```sh
+nodrail evidence run ci-tests -- npm test
+nodrail evidence show ci-tests
+nodrail evidence submit ci-tests --result result.json --workspace <id> -e production   # in GitHub Actions
+nodrail budgets status
+nodrail budgets reconcile claude-code:toolu_01… --released --note "the outbox has no such message"
+```
+
+Offline except `submit`, and run by a person, never an agent: the setup guard refuses `nodrail` to agents. `evidence run` records what a check wrote to `$NODRAIL_EVIDENCE_OUT` about the current revision; `submit` sends a CI result to Cloud with the job's OIDC token. `budgets status` reads the local run ledger; `reconcile` settles a reservation whose outcome is unknown. See [evidence.md](evidence.md) and [budgets.md](budgets.md).
 
 ## Policy commands
 

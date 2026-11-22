@@ -1,0 +1,8 @@
+description: A shape without a verdict can be a brief, never a receipt.
+nodrail.yaml:
+  shapes:
+    notes: { properties: { summary: { type: string, max: 300 } } }
+  receipts:
+    writer: { shape: notes }
+expect:
+  - { code: role-required, path: nodrail.yaml.receipts.writer }

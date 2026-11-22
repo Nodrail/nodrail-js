@@ -1,0 +1,76 @@
+description: >-
+  At most 64 named properties across the resolved shape, nested ones
+  included: 63 top-level ones plus an object with two children is 66.
+nodrail.yaml:
+  shapes:
+    wide:
+      properties:
+        p01: { type: boolean }
+        p02: { type: boolean }
+        p03: { type: boolean }
+        p04: { type: boolean }
+        p05: { type: boolean }
+        p06: { type: boolean }
+        p07: { type: boolean }
+        p08: { type: boolean }
+        p09: { type: boolean }
+        p10: { type: boolean }
+        p11: { type: boolean }
+        p12: { type: boolean }
+        p13: { type: boolean }
+        p14: { type: boolean }
+        p15: { type: boolean }
+        p16: { type: boolean }
+        p17: { type: boolean }
+        p18: { type: boolean }
+        p19: { type: boolean }
+        p20: { type: boolean }
+        p21: { type: boolean }
+        p22: { type: boolean }
+        p23: { type: boolean }
+        p24: { type: boolean }
+        p25: { type: boolean }
+        p26: { type: boolean }
+        p27: { type: boolean }
+        p28: { type: boolean }
+        p29: { type: boolean }
+        p30: { type: boolean }
+        p31: { type: boolean }
+        p32: { type: boolean }
+        p33: { type: boolean }
+        p34: { type: boolean }
+        p35: { type: boolean }
+        p36: { type: boolean }
+        p37: { type: boolean }
+        p38: { type: boolean }
+        p39: { type: boolean }
+        p40: { type: boolean }
+        p41: { type: boolean }
+        p42: { type: boolean }
+        p43: { type: boolean }
+        p44: { type: boolean }
+        p45: { type: boolean }
+        p46: { type: boolean }
+        p47: { type: boolean }
+        p48: { type: boolean }
+        p49: { type: boolean }
+        p50: { type: boolean }
+        p51: { type: boolean }
+        p52: { type: boolean }
+        p53: { type: boolean }
+        p54: { type: boolean }
+        p55: { type: boolean }
+        p56: { type: boolean }
+        p57: { type: boolean }
+        p58: { type: boolean }
+        p59: { type: boolean }
+        p60: { type: boolean }
+        p61: { type: boolean }
+        p62: { type: boolean }
+        p63: { type: boolean }
+        nested:
+          properties:
+            one: { type: boolean }
+            two: { type: boolean }
+expect:
+  - { code: property-count, path: nodrail.yaml.shapes.wide.properties }

@@ -8,11 +8,15 @@ import {
   type ToolInput,
 } from "./actions.ts";
 import { connectionCall, type ConnectionCalls } from "./connections.ts";
+import { checkContracts, type ContractCall } from "./contract-calls.ts";
 import type { Observed } from "./hook-telemetry.ts";
+import type { BudgetAuthority } from "./budget-ledger.ts";
 import type { Descriptor } from "./evaluator.ts";
+import type { EvidenceReader } from "./run-evidence.ts";
 import type { PolicyDocument } from "./policies.ts";
 import type { ActionDescriptor } from "./protocol.ts";
-import type { RunContext, RunEvent } from "./runs.ts";
+import type { RunContext, RunEvent, Subject } from "./runs.ts";
+import { HANDBACK_ACTION } from "./hook-runs.ts";
 import { agentName } from "./names.ts";
 import {
   touchedData,
@@ -46,6 +50,17 @@ export type LocalHookOptions = Identity & {
   unmatched: "deny" | "ask";
   /** The run this call belongs to, when the rules have gates or budgets. */
   run?: RunContext | null;
+  /** Reads the revision the work is at, for requirements with `subject: revision`. */
+  subject?: Subject | null;
+  /** Reads evidence for evidence requirements (version 4). */
+  evidence?: EvidenceReader | null;
+  /** Who counts numeric budgets (version 4): `local` is the run ledger. */
+  budgets?: BudgetAuthority;
+  /**
+   * The host prefix of a call's key (`host:tool_use_id`): Copilot's calls
+   * are judged as Claude Code's but keyed as Copilot's.
+   */
+  keyHost?: string;
   /** Rule files and folders no file tool may change, whatever the rules say. */
   protect?: readonly string[];
   /** A setup no shell command may name, whatever the rules say. */
@@ -212,6 +227,27 @@ function stricter(call: View, read: View | null): View {
   return rank(read) > rank(call) ? read : call;
 }
 
+/**
+ * A hand-back no rule covers goes ahead (see HANDBACK_ACTION); a rule that
+ * covers it, a gate or a budget decides it as written.
+ */
+function handbackDefault(
+  view: ActionDescriptor,
+  decision: SimulationResult,
+): SimulationResult {
+  const handback =
+    view.tool === HANDBACK_ACTION.tool &&
+    view.operation === HANDBACK_ACTION.operation;
+  return handback && decision.outcome === "none"
+    ? {
+        ...decision,
+        outcome: "allow",
+        explanation:
+          "No rule covers this hand-back, and a subagent may hand its report back to its caller unless a rule says otherwise.",
+      }
+    : decision;
+}
+
 /** On a host that can't ask, a review is refused and says why. */
 const cannotAsk = (reason: string) =>
   deny(`${reason} This host can't ask a person, so it is denied.`);
@@ -250,8 +286,9 @@ function judgeCall(stdin: string, options: LocalHookOptions): Judged {
     return refused(
       "Nodrail: this call could not be identified, so it is blocked.",
     );
-  const action = describedCall(name, input as ToolInput, event, options);
-  if (typeof action === "string") return refused(action);
+  const contracted = contractedCall(name, input as ToolInput, event, options);
+  if ("refusal" in contracted) return refused(contracted.refusal);
+  const { action, values } = contracted;
   const guarded =
     guardRefusal(action, input as ToolInput, event, options) ??
     dataRefusal(action, input as ToolInput, event, options);
@@ -261,7 +298,20 @@ function judgeCall(stdin: string, options: LocalHookOptions): Judged {
   const ask = options.canAsk === false ? cannotAsk : askPerson;
   const caller = callerOf(event, options);
   const judge = (view: ActionDescriptor) =>
-    simulate({ document, descriptor: toDescriptor(view, caller), now, run });
+    handbackDefault(
+      view,
+      simulate({
+        document,
+        descriptor: toDescriptor(view, caller),
+        now,
+        run,
+        subject: options.subject,
+        evidence: options.evidence,
+        budgets: options.budgets,
+        // A read a shell call also is has no declared input.
+        values: view === action ? values : null,
+      }),
+    );
   // A shell command that only reads a file is also judged as that read, so
   // the file rules apply to it, secrets included. The stricter decision wins.
   const reads = readView(action, input as ToolInput, event) ?? [];
@@ -310,6 +360,21 @@ function describedCall(
     describeToolCall(name, input, nonEmptyText(event.cwd)) ??
     "Nodrail: this call could not be described, so it is blocked."
   );
+}
+
+/**
+ * The call as an action, with its declared brief or input checked on the
+ * exact call before any rule; or why it is refused.
+ */
+function contractedCall(
+  name: string,
+  input: ToolInput,
+  event: { cwd?: unknown },
+  options: LocalHookOptions,
+): ContractCall {
+  const described = describedCall(name, input, event, options);
+  if (typeof described === "string") return { refusal: described };
+  return checkContracts(options.document, described, input);
 }
 
 export function decideToolCall(

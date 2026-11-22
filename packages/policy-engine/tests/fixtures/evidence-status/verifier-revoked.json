@@ -1,0 +1,10 @@
+{
+  "met": false,
+  "reason_code": "verifier_revoked",
+  "event_id": "7d3f1c2a-9b4e-4f6a-8c1d-2e5b6a7c8d9e",
+  "verifier": {
+    "name": "github-actions",
+    "revoked_at": "2026-11-21T11:00:00.000Z"
+  },
+  "received_at": "2026-11-21T10:15:00.000Z"
+}

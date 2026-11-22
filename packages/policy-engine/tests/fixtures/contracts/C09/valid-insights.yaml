@@ -1,0 +1,52 @@
+description: >-
+  Selected insights: the reviewer's verdict distribution (missing and
+  invalid receipts stay in the denominator), rework, validity, and the
+  measured CI duration by status, all over reported fields.
+nodrail.yaml:
+  shapes:
+    reviewer-result:
+      properties:
+        verdict:
+          {
+            values: [ship, ship-with-debt, fix-first, unassessable],
+            role: verdict,
+          }
+        issue: { type: string, max: 100 }
+        findings:
+          role: findings
+          report: true
+          properties:
+            blocker: { type: integer, min: 0 }
+            major: { type: integer, min: 0 }
+        lesson: { type: string, max: 300, optional: true }
+    qa-result:
+      properties:
+        verdict: { values: [pass, fail], role: verdict }
+        checks: { type: integer, min: 0, report: true }
+        flaky: { type: integer, min: 0, optional: true, report: true }
+    ci-result:
+      properties:
+        status: { values: [passed, failed], report: true }
+        tests: { type: integer, min: 0, report: true }
+        duration_ms: { type: integer, min: 0, unit: ms, report: true }
+        log_url: { type: string, max: 500 }
+  receipts:
+    reviewer: { shape: reviewer-result }
+    qa: { shape: qa-result }
+  evidence:
+    ci-tests:
+      shape: ci-result
+      producers:
+        - { class: externally-verified, verifier: github-actions }
+      subject: revision
+  insights:
+    review-verdicts: { source: { receipt: reviewer }, measure: verdicts }
+    review-rework: { source: { receipt: reviewer }, measure: rework }
+    qa-validity: { source: { receipt: qa }, measure: validity }
+    ci-time:
+      {
+        source: { evidence: ci-tests },
+        measure: sum,
+        path: duration_ms,
+        group: [status],
+      }

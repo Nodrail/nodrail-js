@@ -19,6 +19,20 @@ function describe(event: RunEvent) {
       : "";
     return `${event.agent} finished: ${event.verdict ?? "no receipt"}${findings}`;
   }
+  if (event.type === "connection.call") {
+    const { connection, operation, execution, input, result } = event.call;
+    const checks = [
+      input ? `input ${input.state}` : null,
+      result ? `result ${result.state}` : null,
+    ].filter(Boolean);
+    return `${event.agent} ${connection} ${operation} through its connector: ${execution}${checks.length ? ` (${checks.join(", ")})` : ""}`;
+  }
+  if (event.type === "budget.reserved")
+    return `${event.agent} ${event.tool} ${event.operation}: budget ${event.budget} reserved ${event.amount} ${event.unit}`;
+  if (event.type === "budget.settled")
+    return `budget reservation ${event.key} ${event.state} (by ${event.by}${event.note ? `: ${event.note}` : ""})`;
+  if (event.type === "budget.measured")
+    return `${event.agent} ${event.tool} ${event.operation}: measured ${event.path} ${event.amount ?? "unknown"}`;
   return `${event.agent} ${event.tool} ${event.operation}: ${event.outcome}`;
 }
 

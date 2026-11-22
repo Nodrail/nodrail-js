@@ -22,3 +22,21 @@ await build({
   bundle: true,
   banner: { js: "#!/usr/bin/env node" },
 });
+
+// The SDK's brief and input checker, which the hook loads only for a call a
+// declared contract covers (.nodrail/contracts.json): one file with the
+// engine, yaml and zod inside, so the hook itself stays small. yaml is
+// CommonJS and requires Node's modules, which an ES module can only do
+// through createRequire.
+await build({
+  ...shared,
+  entryPoints: ["src/contract-fields.ts"],
+  outfile: "dist/nodrail-hook-contracts.mjs",
+  bundle: true,
+  banner: {
+    js: [
+      'import { createRequire as __nodrailRequire } from "node:module";',
+      "const require = __nodrailRequire(import.meta.url);",
+    ].join("\n"),
+  },
+});

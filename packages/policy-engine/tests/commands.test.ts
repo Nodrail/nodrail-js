@@ -11,6 +11,7 @@ import { describe, expect, test } from "vitest";
 import { describeArguments, describeToolCall } from "../src/actions";
 import { classifyArguments, classifyCommand } from "../src/commands";
 import { decideToolCall } from "../src/local-hook";
+import { declaredGateId, declaredGates } from "../src/policies";
 import { simulate } from "../src/simulator";
 import { toDescriptor } from "../src/local-hook";
 import { compilePolicies, starterPacks, type CompileResult } from "../src/yaml";
@@ -624,6 +625,171 @@ test.each(["__proto__", "constructor", "toString", "hasOwnProperty"])(
   },
 );
 
+describe("wrappers that run a command unchanged", () => {
+  test.each([
+    ["rtk git status", "git status", "rtk"],
+    ["rtk -v --skip-env gh pr view 1", "gh pr view 1", "rtk -v --skip-env"],
+    ["rtk proxy gh pr merge 1", "gh pr merge 1", "rtk proxy"],
+    ["rtk bypass --skip-env git push", "git push", "rtk bypass --skip-env"],
+    ["rtk err rtk git push", "git push", "rtk err rtk"],
+    ["nohup git push", "git push", "nohup"],
+    ["time -p git push", "git push", "time -p"],
+    ["caffeinate -di git push", "git push", "caffeinate -di"],
+    ["nice -n 10 git push", "git push", "nice -n 10"],
+    [
+      "timeout --foreground 30s git push",
+      "git push",
+      "timeout --foreground 30s",
+    ],
+    // Four in a row are read (#96); a fifth is judged whole, below.
+    [
+      "nohup nohup nohup nohup gh pr view 1",
+      "gh pr view 1",
+      "nohup nohup nohup nohup",
+    ],
+    [
+      "rtk proxy nohup time -p nice gh pr view 1",
+      "gh pr view 1",
+      "rtk proxy nohup time -p nice",
+    ],
+  ])("%s is judged as %s", (input, text, via) => {
+    expect(classifyCommand(input)).toEqual({
+      operation: "command.run",
+      text,
+      via,
+    });
+  });
+
+  test.each(["rtk gain", "rtk --version", "rtk env"])(
+    "rtk's own %s stays rtk",
+    (input) => {
+      expect(classifyCommand(input)).toEqual({
+        operation: "command.run",
+        text: input,
+      });
+    },
+  );
+
+  test.each([
+    "rtk npm run deploy",
+    "rtk lint",
+    "rtk run -c 'kubectl delete pod x'",
+    "rtk err --shell sh 'git push'",
+    "rtk proxy",
+    "rtk --unknown git push",
+    "rtk proxy sudo kubectl delete pod x",
+    "rtk proxy bash -c id",
+    "rtk proxy FOO=1 git push",
+    "rtk read .env",
+    "caffeinate -t 10 git push",
+    "timeout git push",
+    "nice -n x git push",
+    "nohup nohup nohup nohup nohup git push",
+    "sudo rtk git push",
+  ])("%s is judged as a whole", (input) => {
+    expect(classifyCommand(input).operation).toBe("command.compound");
+  });
+
+  test("a deny on the command holds through any wrapper", () => {
+    const denied = documentOf(
+      compile(`
+- rule: Never merge
+  command: { prefix: gh pr merge }
+  effect: deny
+- rule: Looking
+  command: { prefix: gh pr view }
+  effect: allow
+- rule: Savings
+  command: rtk gain
+  effect: allow
+`),
+    );
+    const outcome = (command: string) =>
+      simulate({
+        document: denied,
+        descriptor: toDescriptor(describeToolCall("Bash", { command })!),
+        now,
+      }).outcome;
+    expect(outcome("rtk proxy gh pr merge 1")).toBe("deny");
+    expect(outcome("rtk gh pr merge 1 && rtk gain")).toBe("deny");
+    expect(outcome("nohup gh pr merge 1")).toBe("deny");
+    expect(outcome("rtk gh pr view 1")).toBe("allow");
+    expect(outcome("rtk gain")).toBe("allow");
+    expect(outcome("rtk git push")).toBe("none");
+  });
+
+  test("a reviewer sees what ran the command", () => {
+    const action = describeToolCall("Bash", {
+      command: "rtk proxy gh pr view 1",
+    });
+    expect(action?.resource.id).toBe("gh pr view 1");
+    expect(action?.params).toMatchObject({ via: "rtk proxy" });
+  });
+
+  test("arguments run directly are unwrapped too", () => {
+    expect(classifyArguments(["rtk", "git", "push"])).toEqual({
+      operation: "command.run",
+      text: "git push",
+      via: "rtk",
+    });
+    expect(classifyArguments(["rtk", "npm", "x"]).operation).toBe(
+      "command.compound",
+    );
+  });
+
+  test("a rule written with the wrapper means the command", () => {
+    const written = documentOf(
+      compile(`
+- rule: Status
+  command: rtk git status
+  effect: allow
+`),
+    );
+    expect(JSON.stringify(written)).toContain('"git status"');
+  });
+});
+
+describe("a gate on a command prefix", () => {
+  const document = documentOf(
+    compile(`
+- rule: Push
+  command: { prefix: git push }
+  effect: allow
+- gate: Reviewed before a push
+  id: reviewed
+  command: { prefix: git push }
+  requires:
+    - { agent: reviewer, verdict: ship }
+  otherwise: deny
+`),
+  );
+
+  test.each(["git push", "git push origin main"])(
+    "%s is held under the declared id only",
+    (command) => {
+      const result = simulate({
+        document,
+        descriptor: toDescriptor(describeToolCall("Bash", { command })!),
+        now,
+      });
+      expect(result.outcome).toBe("deny");
+      expect(result.explanation).toContain("Gate reviewed needs");
+      expect(result.explanation).not.toContain("reviewed-args");
+    },
+  );
+
+  test("is listed once, by its declared id", () => {
+    if (document.version === 1) throw new Error("expected gates");
+    expect(document.gates.map((gate) => gate.id)).toEqual([
+      "reviewed",
+      "reviewed-args",
+    ]);
+    expect(declaredGates(document.gates).map(declaredGateId)).toEqual([
+      "reviewed",
+    ]);
+  });
+});
+
 // Each of these ran code from its arguments while passing as a simple command.
 describe("commands that run other code are never simple", () => {
   test.each([
@@ -1131,5 +1297,29 @@ describe("the local hook", () => {
     expect(
       decide(event("Bash", { command: "git push --force" })).stdout,
     ).toContain("force");
+  });
+});
+
+describe("a line that makes a link and goes on (R376)", () => {
+  test.each([
+    "ln -s ../x sub/g5 && cp f sub/g5/y",
+    "ln -s ../x sub/g5; cp f sub/g5/y",
+    "mkdir sub/m && ln -s ../../x sub/m/l && cp f sub/m/l/y",
+    "cp -s a b && cp f b/y",
+    "link a b && cat b",
+    "nohup ln -s a b && cp f b/y",
+  ])("%s is judged whole", (line) => {
+    expect(classifyCommand(line)).toEqual({
+      operation: "command.compound",
+      text: line,
+    });
+  });
+
+  test("without a link, a chain is still judged part by part", () => {
+    expect(classifyCommand("mkdir out && cp a out/").parts).toEqual([
+      "mkdir out",
+      "cp a out/",
+    ]);
+    expect(classifyCommand("ln -s a b").operation).toBe("command.run");
   });
 });

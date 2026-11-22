@@ -1,0 +1,8 @@
+description: extends is one level deep; a parent can't extend another shape.
+nodrail.yaml:
+  shapes:
+    base: { properties: { verdict: { values: [pass, fail], role: verdict } } }
+    middle: { extends: base, properties: { note: { type: string } } }
+    leaf: { extends: middle, properties: { more: { type: boolean } } }
+expect:
+  - { code: extends-chain, path: nodrail.yaml.shapes.leaf.extends }

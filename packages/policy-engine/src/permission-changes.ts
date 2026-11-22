@@ -9,7 +9,14 @@ import {
   type Aspect,
   type PermissionImpact,
 } from "./permission-aspects.ts";
-import { budgetAspects, describeBudget } from "./permission-budgets.ts";
+import {
+  budgetAspects,
+  describeBudget,
+  describeEvidenceNeed,
+  evidenceAspects,
+  type AnyBudget,
+} from "./permission-budgets.ts";
+import { evidenceOf, limitsOf } from "./policies.ts";
 import {
   canonical,
   describeCondition,
@@ -19,12 +26,7 @@ import {
   nameRelation,
   scopeRelation,
 } from "./permission-scope.ts";
-import type {
-  PolicyBudget,
-  PolicyDocument,
-  PolicyGate,
-  PolicyRule,
-} from "./policies.ts";
+import type { PolicyDocument, PolicyGate, PolicyRule } from "./policies.ts";
 
 export type { PermissionImpact } from "./permission-aspects.ts";
 
@@ -52,18 +54,20 @@ export type PermissionChange = {
 type Item =
   | { entry: "rule"; value: PolicyRule }
   | { entry: "gate"; value: PolicyGate }
-  | { entry: "budget"; value: PolicyBudget };
+  | { entry: "budget"; value: AnyBudget };
 
 function itemsOf(document: PolicyDocument | null): Item[] {
   if (!document) return [];
   const rules = document.rules.map(
     (value) => ({ entry: "rule", value }) as const,
   );
-  if (document.version !== 2) return rules;
+  if (document.version === 1) return rules;
   return [
     ...rules,
     ...document.gates.map((value) => ({ entry: "gate", value }) as const),
-    ...document.budgets.map((value) => ({ entry: "budget", value }) as const),
+    ...[...document.budgets, ...limitsOf(document)].map(
+      (value) => ({ entry: "budget", value }) as const,
+    ),
   ];
 }
 
@@ -80,7 +84,10 @@ function place(item: Item) {
       agent: item.value.agent,
       installation: null,
       operation: null,
-      resource: `${item.value.metric} per ${item.value.per}`,
+      resource:
+        "metric" in item.value
+          ? `${item.value.metric} per ${item.value.per}`
+          : describeBudget(item.value),
     };
   const { agentKey, installationName, toolKey, operationKey, resource } =
     item.value;
@@ -147,7 +154,10 @@ function added(item: Item, before: Item[], how = "added"): PermissionChange {
     ]);
   const details = ruleDetails(item.value);
   if (item.entry === "gate") {
-    const needs = item.value.requires.map(describeRequirement).join("; ");
+    const needs = [
+      ...item.value.requires.map(describeRequirement),
+      ...evidenceOf(item.value).map(describeEvidenceNeed),
+    ].join("; ");
     const text = `${how}: ${item.value.effect.replace("_", " ")} until ${needs}`;
     return change(item, [{ impact: "tightened", text, details }]);
   }
@@ -227,6 +237,7 @@ function aspectsOf(before: Item, after: Item): Aspect[] | null {
   if (before.entry === "gate" && after.entry === "gate")
     aspects.push(
       ...requirementAspects(before.value.requires, after.value.requires),
+      ...evidenceAspects(evidenceOf(before.value), evidenceOf(after.value)),
     );
   return aspects;
 }

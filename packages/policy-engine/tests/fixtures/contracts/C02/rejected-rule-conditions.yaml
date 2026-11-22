@@ -1,0 +1,44 @@
+description: >-
+  A text where a number is declared, a path through a list, a root the rule
+  doesn't have, and contract fields in a file that doesn't ask for engine
+  level 4, so an older engine would refuse it rather than ignore them.
+nodrail.yaml:
+  shapes:
+    refund-args:
+      properties:
+        amount: { type: integer, min: 1, unit: usd_cents, report: true }
+        currency: { values: [usd, eur], report: true }
+        charge: { type: string, max: 64 }
+        lines:
+          {
+            type: list,
+            of: { properties: { sku: { type: string } } },
+            max: 20,
+            optional: true,
+          }
+    refund-result:
+      properties:
+        status: { values: [succeeded, pending, failed], report: true }
+        amount: { type: integer, min: 0, unit: usd_cents, report: true }
+    deploy-brief:
+      properties:
+        environment: { values: [staging, production] }
+        change: { type: string, max: 200 }
+  connections:
+    stripe:
+      command: npx
+      operations:
+        refund: { input: refund-args, output: refund-result }
+policy:
+  - rule: Refund rules
+    tool: stripe
+    operation: refund
+    resource: { kind: charge, match: any }
+    where:
+      { input.amount: "500", input.lines.sku: abc, brief.environment: staging }
+    effect: allow
+expect:
+  - { code: engine-level, path: policy.0 }
+  - { code: path-type, path: policy.0.where.input.amount }
+  - { code: path-through-list, path: policy.0.where.input.lines.sku }
+  - { code: path, path: policy.0.where.brief.environment }

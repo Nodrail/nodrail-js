@@ -1,0 +1,14 @@
+description: An operation's input names a shape that doesn't exist.
+nodrail.yaml:
+  shapes:
+    refund-args: { properties: { amount: { type: integer } } }
+  connections:
+    stripe:
+      command: npx
+      operations:
+        refund: { input: refunds-args }
+expect:
+  - {
+      code: unknown-shape,
+      path: nodrail.yaml.connections.stripe.operations.refund.input,
+    }

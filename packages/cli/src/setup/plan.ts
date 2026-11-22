@@ -9,7 +9,13 @@ import { frozenPolicy, setupOf } from "../commands/project.ts";
 import type { Env } from "../config.ts";
 import { CliError } from "../io.ts";
 import { folderHost } from "../project/host.ts";
-import { MANIFEST_FILE, sha256 } from "../project/lockfile.ts";
+import { LOCK_FILE, MANIFEST_FILE, sha256 } from "../project/lockfile.ts";
+import {
+  bindingNotes,
+  changeLines,
+  contractChanges,
+} from "../contracts/changes.ts";
+import type { CompiledContracts } from "../contracts/engine.ts";
 import { planProject, readProject } from "../project/project.ts";
 import { codexSetup, MIN_CODEX } from "./codex.ts";
 import { copilotHookChecks, copilotSetup, MIN_COPILOT } from "./copilot.ts";
@@ -32,6 +38,7 @@ import {
   codexInstallChecks,
   originChecks,
 } from "./plugins.ts";
+import { accountableHere, type Accountable } from "./accountable.ts";
 import {
   lockedRevision,
   missingStateNote,
@@ -88,6 +95,8 @@ export type SetupPlan = {
   claudePlugins: { marketplaces: string[]; enabled: string[] };
   /** The setup's plugins, for the hook command and the checks. */
   plugins: ProjectSetup["plugins"];
+  /** Numeric budgets and evidence requirements (engine level 5), as enforced here. */
+  accountable: Accountable;
 };
 
 /** Whether apply could go ahead: every check passes, nothing conflicts. */
@@ -129,13 +138,7 @@ export function planSetup(input: {
     revision: lockedRevision(root),
   };
   const effective = policy.text ?? "";
-  const host = hostSetup(runtime, {
-    root,
-    setup,
-    effective,
-    inputs: policy.inputs,
-    env: input.env,
-  });
+  const host = hostSetup(runtime, { ...input, ...policy, effective });
   checks.push(...hostChecks(input, runtime, setup, host.check));
   checks.push(
     ...managedChecks(runtime, {
@@ -150,6 +153,7 @@ export function planSetup(input: {
     policy.text === null
       ? host.files.filter((file) => !file.path.startsWith(".nodrail/"))
       : host.files;
+  const level5 = accountableHere(input, runtime, effective, files);
   const owner = { state: base.state, runtime };
   const steps = files.map((file) => fileStep(root, owner, file));
   for (const [path, hash] of Object.entries(
@@ -170,12 +174,13 @@ export function planSetup(input: {
   return {
     ...base,
     steps,
-    problems: host.problems,
+    problems: [...host.problems, ...level5.problems],
     notes: [
       ...notesFor(input.home, root, setup, host.skipped),
       ...(runtime === "claude-code" ? claudePluginNote(setup) : []),
       ...stateNotes({ ...base, runtime }, steps),
       ...goneDataNotes(hostState(base.state, runtime)?.data, setup),
+      ...policy.contractNotes,
     ],
     files,
     merged,
@@ -183,6 +188,7 @@ export function planSetup(input: {
     telemetry: setup.telemetry,
     claudePlugins: pluginNames(host.settings),
     plugins: setup.plugins,
+    accountable: level5,
   };
 }
 
@@ -194,24 +200,25 @@ function hostSetup(
     setup: ProjectSetup;
     effective: string;
     inputs: string[];
+    contracts: CompiledContracts | null;
     env: Env;
   },
 ) {
-  const { env, ...rest } = input;
+  const { env } = input;
   if (runtime === "copilot")
     return {
-      ...copilotSetup(rest),
+      ...copilotSetup(input),
       settings: null,
       check: versionCheck("copilot", MIN_COPILOT, "install Copilot CLI", env),
     };
   return runtime === "codex"
     ? {
-        ...codexSetup(rest),
+        ...codexSetup(input),
         settings: null,
         check: versionCheck("codex", MIN_CODEX, "install Codex", env),
       }
     : {
-        ...claudeCodeSetup(rest),
+        ...claudeCodeSetup(input),
         check: versionCheck("claude", MIN_CLAUDE, "install Claude Code", env),
       };
 }
@@ -323,7 +330,14 @@ export function chooseRuntime(
 function lockedPolicy(
   input: { root: string; home: string; held?: boolean },
   checks: Check[],
-): { text: string | null; setup: ProjectSetup; inputs: string[] } {
+): {
+  text: string | null;
+  setup: ProjectSetup;
+  inputs: string[];
+  contracts: CompiledContracts | null;
+  /** Each agent's contracts, and how they differ from an out-of-date lock. */
+  contractNotes: string[];
+} {
   try {
     const { workspace, ...frozen } = frozenPolicy(input);
     checks.push({
@@ -332,7 +346,7 @@ function lockedPolicy(
       detail: "matches nodrail.lock.yaml",
     });
     if (workspace) checks.push({ name: "workspace", ...workspace });
-    return frozen;
+    return { ...frozen, contractNotes: bindingNotes(frozen) };
   } catch (error) {
     if (!(error instanceof CliError)) throw error;
     const project = readProject(input.root);
@@ -343,7 +357,17 @@ function lockedPolicy(
       manifest: project.manifest,
       previous: project.lock,
     });
-    return { text: null, ...setupOf(plan) };
+    const contractNotes = [
+      ...bindingNotes(setupOf(plan)),
+      ...changeLines(
+        contractChanges(
+          project.lock?.contractsBaseline ?? null,
+          plan.contracts,
+        ),
+        LOCK_FILE,
+      ),
+    ];
+    return { text: null, ...setupOf(plan), contractNotes };
   }
 }
 

@@ -237,8 +237,12 @@ describe("3. when a requirement is met", () => {
     );
   });
 
-  test("a later failing QA does not erase an earlier pass with no build between", () => {
-    expect(pr([...shipped(), finished("qa", "fail")])).toBe("allow");
+  test("only the latest step counts: a later failing QA closes the gate (R375)", () => {
+    expect(pr([...shipped(), ...ran("qa", "fail")])).toBe("require_approval");
+    expect(pr([...shipped(), finished("qa", "fail")])).toBe("require_approval");
+    expect(pr([...shipped(), ...ran("qa", "fail"), ...ran("qa", "pass")])).toBe(
+      "allow",
+    );
   });
 
   test("without since, any time in the run counts", () => {
@@ -648,8 +652,8 @@ describe("9. versions", () => {
   });
 
   test("a file asking for a newer engine is refused", () => {
-    expect(issues("- required_engine_version: 4\n")).toEqual([
-      "This file needs engine version 4; this is 3.",
+    expect(issues("- required_engine_version: 6\n")).toEqual([
+      "This file needs engine version 6; this is 5.",
     ]);
   });
 });

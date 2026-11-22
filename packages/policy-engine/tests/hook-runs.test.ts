@@ -9,7 +9,7 @@ import {
   receiptBlock,
   runKey,
 } from "../src/hook-runs";
-import { repositoryName } from "../src/run-key";
+import { ledgerDirectory, repositoryName } from "../src/run-key";
 import { runKey as ledgerRunKey } from "../src/ledger";
 import { parseReceipt } from "../src/receipts";
 
@@ -203,10 +203,25 @@ describe("runKey", () => {
 
   test("the hook entry exports only what hooks need", async () => {
     expect(Object.keys(await import("../src/hook-runs")).sort()).toEqual([
+      "HANDBACK_ACTION",
+      "HANDBACK_TOOL",
       "MAX_RECEIPT_TEXT",
       "agentName",
+      "ledgerDirectory",
+      "nodrailDirectory",
       "receiptBlock",
+      "receiptText",
       "runKey",
     ]);
+  });
+});
+
+describe("where the run files go outside git", () => {
+  test("the home folder comes from the environment the hook is given", () => {
+    const folder = mkdtempSync(join(tmpdir(), "nodrail-nogit-"));
+    const home = mkdtempSync(join(tmpdir(), "nodrail-home-"));
+    expect(ledgerDirectory(folder, { HOME: home })).toBe(
+      join(home, ".nodrail", "runs"),
+    );
   });
 });

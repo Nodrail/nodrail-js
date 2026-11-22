@@ -4,7 +4,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { randomUUID } from "node:crypto";
 import { agentName, receiptBlock } from "@nodrail/policy-engine/hook-runs";
-import type { NodrailClient, RunRef, StepReceipt } from "./index.ts";
+import type { NodrailClient, RunRef, StepReceipt } from "./client.ts";
 
 type Scope = { key: string; step?: { id: string; agent: string } };
 

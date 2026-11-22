@@ -1,0 +1,11 @@
+description: An Agent's brief names a shape that doesn't exist.
+nodrail.yaml:
+  shapes:
+    review-brief: { properties: { issue: { type: string } } }
+resources:
+  - apiVersion: apf.nodrail.com/v1alpha1
+    kind: Agent
+    metadata: { name: reviewer }
+    spec: { brief: reveiw-brief }
+expect:
+  - { code: unknown-shape, path: resources.0.spec.brief }

@@ -9,6 +9,7 @@ import {
   OBSERVE_PREFIX,
   SETTINGS_FILE,
 } from "./claude-code.ts";
+import { missingHooks } from "./hook-drift.ts";
 import type { HookInfo } from "./codex.ts";
 import { readBytes } from "./plan.ts";
 import type { HostState, Runtime } from "./state.ts";
@@ -89,6 +90,7 @@ function claudeHooks(settings: Json | null) {
     (Array.isArray(groups) ? groups : []).flatMap((group) =>
       ((object(group)?.hooks as unknown[] | undefined) ?? []).map((hook) => ({
         event,
+        matcher: textOf(object(group)?.matcher),
         command:
           textOf(object(hook)?.command) ?? textOf(object(hook)?.type) ?? "?",
       })),
@@ -106,10 +108,24 @@ export function claudeSettingsDrift(root: string, entry: HostState): Drift[] {
     detail,
   });
   const drift: Drift[] = [];
-  if (
-    !claudeHooks(settings).some((hook) => hook.command.startsWith(HOOK_PREFIX))
-  )
+  const policyHooks = claudeHooks(settings).filter((hook) =>
+    hook.command.startsWith(HOOK_PREFIX),
+  );
+  if (policyHooks.length === 0)
     drift.push(changed(SETTINGS_FILE, "nodrail's policy hook is gone"));
+  else
+    for (const [event, detail] of missingHooks(root, policyHooks))
+      drift.push(
+        changed(SETTINGS_FILE, `the policy hook on ${event} ${detail}`),
+      );
+  if (policyHooks.some((hook) => !hook.command.includes("--protect-list")))
+    drift.push(
+      changed(SETTINGS_FILE, "the policy hook no longer has its protect list"),
+    );
+  if (settings?.disableAllHooks === true)
+    drift.push(
+      changed(SETTINGS_FILE, "disableAllHooks is on, so no hook runs"),
+    );
   if (ours.agent !== undefined && settings?.agent !== ours.agent)
     drift.push(
       changed(

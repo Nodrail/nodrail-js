@@ -9,7 +9,8 @@ import {
 } from "@nodrail/policy-engine/actions";
 import {
   agentName,
-  receiptBlock,
+  HANDBACK_TOOL,
+  receiptText,
   runKey,
 } from "@nodrail/policy-engine/hook-runs";
 import { blockedText } from "./blocked-text.ts";
@@ -19,14 +20,16 @@ import {
   type Environment,
 } from "./connection.ts";
 import { localReadTools } from "./setup.ts";
+import { revisionAt } from "./subject.ts";
+import { hookContractFields } from "./hook-contracts.ts";
+// Not ./index.ts: the hook bundles only the client, never the SDK.
+import { authorize, WITHDRAW_TIMEOUT_MS } from "./authorize.ts";
 import {
-  authorize,
   NodrailClient,
-  WITHDRAW_TIMEOUT_MS,
   type Decision,
   type RunRef,
   type StepEvent,
-} from "./index.ts";
+} from "./client.ts";
 
 export {
   describeToolCall,
@@ -34,7 +37,7 @@ export {
   type HookResult,
 } from "@nodrail/policy-engine/actions";
 
-export const HOOK_VERSION = "0.5.2";
+export const HOOK_VERSION = "0.6.0";
 
 /**
  * Longer than the wait for a person, and short enough that withdrawing the
@@ -204,14 +207,23 @@ async function beforeTool(
       `Nodrail: ${(error as Error).message} So this action is blocked.`,
     );
   }
+  // What Cloud's `where` reads: the brief's reported fields, classified
+  // inputs masked. Checked here, so an invalid brief never reaches Cloud.
+  const fields = await hookContractFields(descriptor, input as Input, {
+    cwd: text(event.cwd) ?? process.cwd(),
+    env,
+  });
+  if ("refusal" in fields) return deny(fields.refusal);
 
   const decision = await decideInTime(
     (signal) =>
-      authorize(client, descriptor, key, {
+      authorize(client, fields.action, key, {
         waitMs: waitMsFrom(env),
         sleep: deps.sleep,
         run,
         signal,
+        // The work the agent's session is in, as the runtime reads it.
+        subject: revisionAt(text(event.cwd) ?? process.cwd()),
       }),
     deps.deadlineMs ?? HOOK_DEADLINE_MS,
   );
@@ -239,11 +251,15 @@ async function afterTool(
   const key = text(event.tool_use_id);
   if (!client || !key) return allowQuietly;
   const failed = toolFailed(event);
+  // Interrupted, the call may or may not have taken effect.
+  const interrupted =
+    event.hook_event_name === "PostToolUseFailure" &&
+    event.is_interrupt === true;
   try {
     const action = await client.findByKey(key);
     await client.report(action.action_id, {
       key,
-      outcome: failed ? "failure" : "success",
+      outcome: interrupted ? "unknown" : failed ? "failure" : "success",
       permitId: action.permit_id,
       details: {
         ...(typeof event.duration_ms === "number"
@@ -282,9 +298,8 @@ async function onStep(
   if (!client || !run || !step) return allowQuietly;
   const body: StepEvent = { run: { key: run.key }, step, event: "started" };
   if (event.hook_event_name === "SubagentStop") {
-    // Read from the end of the message only; a block over 8 KB is no receipt.
-    const block = receiptBlock(text(event.last_assistant_message) ?? "");
     body.event = "finished";
+    const block = receiptOf(text(event.last_assistant_message), step.agent);
     if (block) body.receipt = { text: block };
   }
   try {
@@ -293,6 +308,77 @@ async function onStep(
     // Without a record the step has no verdict; nothing else changes.
   }
   return allowQuietly;
+}
+
+/**
+ * The receipt block that ends a message, fenced or a flat `RECEIPT <agent>`
+ * header block, read from the end only; over 8 KiB is no receipt. Cloud
+ * reads it against the agent's declared contract.
+ */
+const receiptOf = (message: string | null | undefined, agent: string) =>
+  receiptText(message ?? "", agent);
+
+/** What Cloud said of a receipt it read: refused, with a reason it is safe to show. */
+function refusedReceipt(answer: unknown): string | null {
+  if (typeof answer !== "object" || answer === null) return null;
+  const { receipt } = answer as { receipt?: unknown };
+  if (typeof receipt !== "object" || receipt === null) return null;
+  const { state, reason } = receipt as { state?: unknown; reason?: unknown };
+  if (state !== "invalid" && state !== "missing") return null;
+  return typeof reason === "string" && reason ? reason.slice(0, 500) : state;
+}
+
+/**
+ * A subagent handing back its report (Claude Code `auto` permission mode):
+ * its stop event then carries no message, so the step finishes here, with
+ * the receipt the hand-back carries. When Cloud refuses that receipt the
+ * hand-back is denied with the reason, and the subagent resends; otherwise
+ * the call is decided like any other. Cloud keeps a step's first finish, so
+ * the stop that follows can't replace it.
+ */
+async function onHandback(
+  event: HookEvent,
+  env: Environment,
+  deps: HookDeps,
+): Promise<HookResult> {
+  const started = Date.now();
+  const client = clientFrom(env, deps);
+  let run: RunRef | undefined;
+  try {
+    run = runOf(event, env);
+  } catch {
+    run = undefined;
+  }
+  const step = run?.step;
+  if (client && run && step) {
+    const input = event.tool_input as { message?: unknown } | null;
+    const message = typeof input?.message === "string" ? input.message : "";
+    const block = receiptOf(message, step.agent);
+    const body: StepEvent = {
+      run: { key: run.key },
+      step,
+      event: "finished",
+      ...(block ? { receipt: { text: block } } : {}),
+    };
+    let answer: unknown = null;
+    try {
+      answer = await client.step(body);
+    } catch {
+      // Unrecorded, the step has no verdict, and a gate that needs it stays closed.
+    }
+    const refused = refusedReceipt(answer);
+    if (refused)
+      return deny(
+        `Nodrail: your receipt can't be accepted: ${refused}. Hand back again with the same report, ending with a receipt that follows your contract.`,
+      );
+  }
+  // Recording took part of the hook's time: the decision gets what is left.
+  const deadlineMs =
+    (deps.deadlineMs ?? HOOK_DEADLINE_MS) - (Date.now() - started);
+  return beforeTool(event, env, {
+    ...deps,
+    deadlineMs: Math.max(0, deadlineMs),
+  });
 }
 
 const notice = (message: string): HookResult => ({
@@ -335,7 +421,9 @@ export async function runHook(
   }
   switch (event.hook_event_name) {
     case "PreToolUse":
-      return beforeTool(event, env, deps);
+      return event.tool_name === HANDBACK_TOOL && text(event.agent_id)
+        ? onHandback(event, env, deps)
+        : beforeTool(event, env, deps);
     case "PostToolUse":
     case "PostToolUseFailure":
       return afterTool(event, env, deps);

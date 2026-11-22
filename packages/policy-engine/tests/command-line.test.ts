@@ -1,6 +1,7 @@
 // The nodrail-policy command line, run in-process so every path is measured.
 // Separate-process runs are covered by the docs and package tests.
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test } from "vitest";
@@ -412,6 +413,221 @@ describe("hook", () => {
         expect(await shell(command)).toMatchObject({ code: 0, stdout: "" });
       },
     );
+  });
+
+  // R364: the run ledger holds the steps, reservations and evidence gates
+  // read, so an agent never writes it, wherever it is.
+  describe("the run ledger is always protected", () => {
+    const repo = mkdtempSync(join(tmpdir(), "nodrail-ledger-"));
+    spawnSync("git", ["init", "-q"], { cwd: repo });
+    mkdirSync(join(repo, ".nodrail"));
+    const list = join(repo, ".nodrail/protected.txt");
+    writeFileSync(
+      list,
+      "# Not naming the ledger\n.claude\nresources/team.yaml\n",
+    );
+    const evidence = join(repo, ".git/nodrail/runs/evidence/ci-tests.jsonl");
+    const anything = write(
+      "anything.yaml",
+      ["file.write", "file.edit", "file.patch"]
+        .map(
+          (operation) => `- rule: Change files ${operation}
+  tool: files
+  operation: ${operation}
+  resource: { kind: file, match: any }
+  effect: allow
+`,
+        )
+        .join("") +
+        `- rule: Any compound
+  tool: shell
+  operation: command.compound
+  resource: { kind: command, match: any }
+  effect: allow
+- rule: Any command
+  tool: shell
+  operation: command.run
+  resource: { kind: command, match: any }
+  effect: allow
+`,
+    );
+    const hook = (tool_name: string, tool_input: object) =>
+      cli(
+        ["hook", anything, "--protect-list", list],
+        JSON.stringify({
+          hook_event_name: "PreToolUse",
+          tool_name,
+          tool_input,
+          cwd: repo,
+        }),
+      );
+
+    test.each([
+      ["Write", { file_path: evidence, content: "{}\n" }],
+      ["Edit", { file_path: evidence, old_string: "a", new_string: "b" }],
+      [
+        "Bash",
+        { command: "echo '{}' >> .git/nodrail/runs/evidence/ci-tests.jsonl" },
+      ],
+      ["Bash", { command: `cp /tmp/forged ${evidence}` }],
+      ["Bash", { command: "rm -r .git/nodrail" }],
+      // R374: all of git's folder, and no splicing or wildcard around it.
+      [
+        "Write",
+        { file_path: join(repo, ".git/hooks/pre-commit"), content: "x" },
+      ],
+      ["Write", { file_path: join(repo, ".git/config"), content: "x" }],
+      [
+        "Bash",
+        {
+          command:
+            'cp sub/forged.jsonl ".git/nod""rail/runs/evidence/ci-tests.jsonl"',
+        },
+      ],
+      ["Bash", { command: "cp x .gi?/nodrail/runs/evidence/ci-tests.jsonl" }],
+      ["Bash", { command: "cp x .g*/hooks/pre-commit" }],
+      ["Bash", { command: "rm -r .[g]it" }],
+      ["Bash", { command: "cp x '.git'/config" }],
+      ["Bash", { command: "echo x > .git/hooks/post-checkout" }],
+      ["Bash", { command: "cp x .nod*/protected.txt" }],
+    ])("denies %s %j, whatever the rules allow", async (tool, input) => {
+      const { stdout } = await hook(tool, input);
+      expect(stdout).toContain('"deny"');
+      expect(stdout).toMatch(/holds the rules|part of the setup/);
+    });
+
+    test.each([
+      [`*** Add File: ${evidence}\n+{}`],
+      [
+        `*** Add File: ${join(repo, "src/a.ts")}\n+x\n*** Add File: ${evidence}\n+{}`,
+      ],
+    ])("denies a patch that touches it: %s", async (body) => {
+      const patch = `*** Begin Patch\n${body}\n*** End Patch`;
+      const result = await hook("apply_patch", { command: patch });
+      expect(result.stdout).toContain("deny");
+      expect(result.stdout).toContain("holds the rules");
+    });
+
+    test("NODRAIL_LEDGER moves it, and the protection with it", async () => {
+      const moved = join(repo, "ledger-here");
+      process.env.NODRAIL_LEDGER = moved;
+      try {
+        const result = await hook("Write", {
+          file_path: join(moved, "evidence/ci-tests.jsonl"),
+          content: "{}\n",
+        });
+        expect(result.stdout).toContain('"deny"');
+        expect(result.stdout).toContain("holds the rules");
+      } finally {
+        delete process.env.NODRAIL_LEDGER;
+      }
+    });
+
+    test("leaves the rest of the repository to the rules", async () => {
+      expect(
+        await hook("Write", {
+          file_path: join(repo, "src/app.ts"),
+          content: "x",
+        }),
+      ).toMatchObject({ code: 0, stdout: "" });
+      expect(await hook("Bash", { command: "git status" })).toMatchObject({
+        code: 0,
+        stdout: "",
+      });
+    });
+
+    // R376: links pointing at a root, and trees copied onto one.
+    describe("links and tree copies", () => {
+      mkdirSync(join(repo, "sub/deep"), { recursive: true });
+      // Empty now: only an earlier part of the line would fill it (R377).
+      mkdirSync(join(repo, "sub/x"), { recursive: true });
+      mkdirSync(join(repo, "sub/fake/.git"), { recursive: true });
+      mkdirSync(join(repo, "sub/fake/.claude"), { recursive: true });
+      writeFileSync(join(repo, "sub/file.txt"), "x");
+      const forged = "sub/forged.jsonl";
+
+      test.each([
+        `ln -s ../.git sub/g5 && cp ${forged} sub/g5/nodrail/runs/evidence/ci-tests.jsonl`,
+        `ln -s ../.git sub/g5; cp ${forged} sub/g5/nodrail/runs/evidence/ci-tests.jsonl`,
+        `mkdir sub/m && ln -s ../../.git sub/m/l && cp ${forged} sub/m/l/nodrail/x`,
+        "ln -s .. sub/up && cp sub/ok.txt sub/up/.git/nodrail/x",
+        "ln -s ../.git sub/g5",
+        `ln -s ${repo} sub/whole`,
+        "cp -s .git/config sub/c",
+        "cp -r sub/fake/.git .",
+        "cp -r sub/fake/.claude .",
+        "rsync -a sub/fake/ .",
+        "cp -R sub/fake/. ./",
+        "mv sub/fake/.claude .",
+        "tar -xf sub/a.tar",
+        "unzip sub/a.zip -d .",
+        "cp -r sub/missing/. .",
+        "cp -r sub/file.txt .git/",
+        "rsync -a sub/deep/ .nodrail/",
+        // R377: an earlier part can fill the source before the copy runs.
+        "cp -r sub/deep sub/x/.claude && cp -R sub/x/. ./",
+        "mkdir -p sub/x/.claude && cp sub/disable.json sub/x/.claude/settings.local.json && cp -R sub/x/. ./",
+        "mv sub/deep sub/x/.claude && rsync -a sub/x/ ./",
+        "cp -r sub/deep sub/x/.claude & cp -R sub/x/. ./",
+      ])("denies %s", async (command) => {
+        const { stdout } = await hook("Bash", { command });
+        expect(stdout).toContain('"deny"');
+        expect(stdout).toContain("part of the setup");
+      });
+    });
+
+    test("a wildcard through a link to .git counts as .git", async () => {
+      if (process.platform === "win32") return;
+      mkdirSync(join(repo, "links"), { recursive: true });
+      symlinkSync("../.git", join(repo, "links/gl"));
+      const { stdout } = await hook("Bash", {
+        command: "cp x links/g*/nodrail/runs/evidence/ci-tests.jsonl",
+      });
+      expect(stdout).toContain("part of the setup");
+    });
+
+    test("a moved ledger is kept from splicing and wildcards too", async () => {
+      process.env.NODRAIL_LEDGER = join(repo, "sub/altledger");
+      try {
+        for (const command of [
+          'cp x "sub/alt""ledger/evidence/ci-tests.jsonl"',
+          "cp x sub/alt*/evidence/ci-tests.jsonl",
+          "rm -r sub/*",
+        ])
+          expect((await hook("Bash", { command })).stdout).toContain(
+            "part of the setup",
+          );
+      } finally {
+        delete process.env.NODRAIL_LEDGER;
+      }
+    });
+
+    test.each([
+      "cp a.txt b.txt",
+      "cp src/*.ts dist/",
+      "rm -f *.log",
+      "ls *",
+      'cp "src/a""b.ts" dist/',
+      "cp -r sub/deep logs/",
+      "ln -s ../shared/lib.ts src/lib.ts",
+      "mv a.txt b.txt",
+      "mv sub/file.txt .",
+      "rsync -a src/ dist/",
+      "tar -xf sub/a.tar -C vendor",
+      "cp sub/file.txt .",
+      "cp -r sub/deep .",
+      "cp -R sub/deep/. ./",
+      "rsync -a sub/deep/ .",
+      "mv sub/deep .",
+      "unzip sub/a.zip -d vendor",
+      "mkdir -p dist && rsync -a src/ dist/",
+      "mkdir -p dist && cp -R sub/deep/. dist/",
+    ])("leaves %s to the rules", async (command) => {
+      expect(await hook("Bash", { command })).toMatchObject({
+        code: 0,
+        stdout: "",
+      });
+    });
   });
 
   describe("--host codex", () => {

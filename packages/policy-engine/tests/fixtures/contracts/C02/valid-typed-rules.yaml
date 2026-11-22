@@ -1,0 +1,56 @@
+description: >-
+  Permission rules with typed conditions on arguments (before the call), on
+  a dispatch brief (before the agent starts) and on a result (deciding what
+  may use it next, never retroactively).
+nodrail.yaml:
+  shapes:
+    refund-args:
+      properties:
+        amount: { type: integer, min: 1, unit: usd_cents, report: true }
+        currency: { values: [usd, eur], report: true }
+        charge: { type: string, max: 64 }
+        lines:
+          {
+            type: list,
+            of: { properties: { sku: { type: string } } },
+            max: 20,
+            optional: true,
+          }
+    refund-result:
+      properties:
+        status: { values: [succeeded, pending, failed], report: true }
+        amount: { type: integer, min: 0, unit: usd_cents, report: true }
+    deploy-brief:
+      properties:
+        environment: { values: [staging, production] }
+        change: { type: string, max: 200 }
+  connections:
+    stripe:
+      command: npx
+      operations:
+        refund: { input: refund-args, output: refund-result }
+resources:
+  - apiVersion: apf.nodrail.com/v1alpha1
+    kind: Agent
+    metadata: { name: deployer }
+    spec: { brief: deploy-brief }
+policy:
+  - required_engine_version: 4
+  - rule: Small refunds in our currencies
+    tool: stripe
+    operation: refund
+    resource: { kind: charge, match: any }
+    where: { input.amount: { max: 5000 }, input.currency: { in: [usd, eur] } }
+    effect: allow
+  - rule: Never start a production deploy from a brief
+    tool: claude-code
+    operation: agent
+    resource: { kind: agent, match: exact, value: deployer }
+    where: { brief.environment: production }
+    effect: deny
+  - rule: Only a succeeded refund is used afterwards
+    tool: stripe
+    operation: refund
+    resource: { kind: charge, match: any }
+    where: { result.status: succeeded }
+    effect: allow
