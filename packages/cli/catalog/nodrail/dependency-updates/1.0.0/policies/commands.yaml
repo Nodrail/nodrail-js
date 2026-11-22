@@ -11,19 +11,47 @@
   command: { list: lockfile_commands }
   effect: allow
 
-# A commit runs the repository's git hooks, which package.json can set up.
-- rule: Commit with a person
+# A commit runs the repository's git hooks, which package.json can set up;
+# the deps agent can't change package.json (files.yaml), so it may commit.
+- rule: Commit
   id: deps-commit
   agent: deps
   command: { prefix: git commit }
-  effect: require_approval
+  effect: allow
 
-# A push leaves the machine: a person approves it, reading the full command.
-- rule: Push with a person
+# A push that names its branch leaves the machine for review in a pull
+# request. A bare push could push whatever is checked out, so it is denied.
+- rule: Push a named branch
   id: deps-push
   agent: deps
-  command: { prefix: git push }
-  effect: require_approval
+  command: { prefix: git push origin }
+  effect: allow
+
+- list: unnamed_push_commands
+  items:
+    - git push
+    - git push origin
+    - git push origin HEAD
+
+- rule: Never push without naming a branch
+  id: deps-no-unnamed-push
+  agent: deps
+  command: { list: unnamed_push_commands }
+  effect: deny
+
+# Merging to main is for people, never the agent.
+- list: main_push_commands
+  items:
+    - git push origin main
+    - git push origin master
+    - git push origin HEAD:main
+    - git push origin HEAD:master
+
+- rule: Never push to main
+  id: deps-no-main-push
+  agent: deps
+  command: { list: main_push_commands, match: prefix }
+  effect: deny
 
 - list: force_push_commands
   items:

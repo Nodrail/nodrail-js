@@ -1,10 +1,4 @@
-import {
-  visible,
-  type ActivityEvent,
-  type Approval,
-  type Me,
-  type Run,
-} from "./api.ts";
+import { visible, type ActivityEvent, type Me, type Run } from "./api.ts";
 
 /** Columns padded to their widest cell; the last column is never padded. */
 export function table(cells: string[][]): string {
@@ -40,37 +34,6 @@ export function relative(iso: string, now = Date.now()) {
 
 export const operation = (item: { tool_key: string; operation_key: string }) =>
   `${item.tool_key}.${item.operation_key}`;
-
-export function approvalsTable(items: Approval[], now = Date.now()) {
-  if (items.length === 0) return "Nothing is waiting for a person.";
-  return table([
-    ["ID", "REFERENCE", "AGENT", "ACTION", "RESOURCE", "EXPIRES"],
-    ...items.map((item) => [
-      item.id,
-      item.reference,
-      item.agent_key,
-      operation(item),
-      item.resource,
-      relative(item.expires_at, now),
-    ]),
-  ]);
-}
-
-/** Exactly what a decision is about, parameters included, before it is made. */
-export function approvalDetail(raw: Approval) {
-  const item = shown(raw);
-  return [
-    `Request      ${item.reference} (${item.id})`,
-    `State        ${item.state}`,
-    `Agent        ${item.agent_key} on ${item.installation_name}`,
-    `Environment  ${item.environment}`,
-    `Action       ${operation(item)}`,
-    `Resource     ${item.resource_kind} ${item.resource}`,
-    `Parameters   ${JSON.stringify(item.parameters, null, 2).replace(/\n/g, "\n             ")}`,
-    `Asked        ${item.created_at}`,
-    `Expires      ${item.expires_at}`,
-  ].join("\n");
-}
 
 export function actorOf(event: ActivityEvent) {
   const { actor } = event;
@@ -114,16 +77,6 @@ export function runsTable(items: Run[]) {
       run.last_activity_at,
     ]),
   ]);
-}
-
-/** Every text field of a request, made `visible`; parameters stay JSON. */
-function shown(item: Approval): Approval {
-  return Object.fromEntries(
-    Object.entries(item).map(([key, value]) => [
-      key,
-      typeof value === "string" ? visible(value) : value,
-    ]),
-  ) as Approval;
 }
 
 export function whoami(me: Me, url: string) {

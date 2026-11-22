@@ -110,7 +110,7 @@ const GATED = `
   requires:
     - { agent: qa, verdict: pass, since: { list: builders } }
     - { agent: reviewer, verdict: [ship, ship_with_debt], since: [dev, infra] }
-  otherwise: require_approval
+  otherwise: deny
 - gate: Review before a push
   id: review-before-push
   command: { prefix: git push }
@@ -155,7 +155,7 @@ describe("1. a gate never allows", () => {
   test("an unmet gate outranks an allow rule", () => {
     const result = decide(dispatch("github"), run([]));
     expect(result).toMatchObject({
-      outcome: "require_approval",
+      outcome: "deny",
       matchedRuleId: "review-before-pr",
       reason: "gate",
     });
@@ -205,17 +205,15 @@ describe("3. when a requirement is met", () => {
         finished("dev", "done"),
         ...ran("reviewer", "ship"),
       ]),
-    ).toBe("require_approval");
+    ).toBe("deny");
   });
 
   test("a builder still running counts as the latest work", () => {
-    expect(pr([...shipped(), started("dev")])).toBe("require_approval");
+    expect(pr([...shipped(), started("dev")])).toBe("deny");
   });
 
   test("a builder's action after the review counts as work", () => {
-    expect(pr([...shipped(), action("infra", "infra-9")])).toBe(
-      "require_approval",
-    );
+    expect(pr([...shipped(), action("infra", "infra-9")])).toBe("deny");
   });
 
   test("another agent's work does not reset the window", () => {
@@ -228,18 +226,18 @@ describe("3. when a requirement is met", () => {
       finished("qa", "fail"),
       finished("reviewer", "ship"),
     ];
-    expect(pr(failed)).toBe("require_approval");
+    expect(pr(failed)).toBe("deny");
   });
 
   test("a step that reported no verdict meets nothing", () => {
     expect(pr([finished("qa", null), finished("reviewer", "ship")])).toBe(
-      "require_approval",
+      "deny",
     );
   });
 
   test("only the latest step counts: a later failing QA closes the gate (R375)", () => {
-    expect(pr([...shipped(), ...ran("qa", "fail")])).toBe("require_approval");
-    expect(pr([...shipped(), finished("qa", "fail")])).toBe("require_approval");
+    expect(pr([...shipped(), ...ran("qa", "fail")])).toBe("deny");
+    expect(pr([...shipped(), finished("qa", "fail")])).toBe("deny");
     expect(pr([...shipped(), ...ran("qa", "fail"), ...ran("qa", "pass")])).toBe(
       "allow",
     );
@@ -279,7 +277,7 @@ describe("3. when a requirement is met", () => {
 
 describe("4. missing history fails closed", () => {
   test("no run at all leaves every requirement unmet", () => {
-    expect(decide(dispatch("github"), null).outcome).toBe("require_approval");
+    expect(decide(dispatch("github"), null).outcome).toBe("deny");
     expect(decide(shell("git push"), null).outcome).toBe("deny");
   });
 
@@ -306,7 +304,7 @@ const BUDGETS = `
   per: step
   tool_calls: 3
   warn_at: 2
-  otherwise: require_approval
+  otherwise: deny
 - budget: Run spend
   id: run-spend
   per: run
@@ -341,7 +339,7 @@ describe("6. budgets count what the run recorded", () => {
       ),
     );
     expect(fourth).toMatchObject({
-      outcome: "require_approval",
+      outcome: "deny",
       matchedRuleId: "builder-step",
       reason: "budget",
       explanation: "Budget builder-step is at 4 of 3 tool calls.",
@@ -397,7 +395,7 @@ describe("6. budgets count what the run recorded", () => {
     ]);
   });
 
-  test("with no run, a budget asking for review asks", () => {
+  test("with no run, a budget that leaves otherwise out denies", () => {
     const document = compile(`
 - required_engine_version: 3
 - rule: Run ls
@@ -407,11 +405,10 @@ describe("6. budgets count what the run recorded", () => {
   id: calls
   per: step
   tool_calls: 5
-  otherwise: require_approval
 `);
     expect(
       simulate({ document, descriptor: shell("ls"), now, run: null }),
-    ).toMatchObject({ outcome: "require_approval", matchedRuleId: "calls" });
+    ).toMatchObject({ outcome: "deny", matchedRuleId: "calls" });
   });
 });
 
@@ -422,7 +419,7 @@ describe("10. gates and budgets only make the rules stricter", () => {
   id: review-first
   command: { prefix: git push }
   requires: [{ agent: reviewer, verdict: ship }]
-  otherwise: require_approval
+  otherwise: deny
 - budget: Calls
   id: calls
   per: run
@@ -430,24 +427,10 @@ describe("10. gates and budgets only make the rules stricter", () => {
   otherwise: deny
 `;
 
-  test("no rule matched and an unmet gate asking for review stays blocked", () => {
-    const result = simulate({
-      document: compile(UNMATCHED),
-      descriptor: shell("git push"),
-      now,
-      run: run([]),
-    });
-    expect(result).toMatchObject({
-      outcome: "none",
-      reason: "no_matching_rule",
-    });
-    expect(result.gates[0]?.missing).toHaveLength(1);
-  });
-
   test("no rule matched and a used-up budget that denies is denied", () => {
     const result = simulate({
       document: compile(UNMATCHED),
-      descriptor: shell("git push"),
+      descriptor: shell("ls"),
       now,
       run: run([action("main", null)]),
     });
@@ -460,12 +443,14 @@ describe("10. gates and budgets only make the rules stricter", () => {
   });
 
   test("an unmet gate that denies beats no rule, and says why", () => {
-    const document = compile(
-      UNMATCHED.replace("otherwise: require_approval", "otherwise: deny"),
-    );
-    expect(
-      simulate({ document, descriptor: shell("git push"), now, run: run([]) }),
-    ).toMatchObject({
+    const result = simulate({
+      document: compile(UNMATCHED),
+      descriptor: shell("git push"),
+      now,
+      run: run([]),
+    });
+    expect(result.gates[0]?.missing).toHaveLength(1);
+    expect(result).toMatchObject({
       outcome: "deny",
       reason: "gate",
       explanation: "Gate review-first needs reviewer with ship.",
@@ -487,7 +472,7 @@ describe("11. a step must start and finish after the work", () => {
         finished("qa", "pass", {}, "q1"),
         ...ran("reviewer", "ship"),
       ]),
-    ).toBe("require_approval");
+    ).toBe("deny");
   });
 
   test("a finish with no recorded start meets nothing", () => {
@@ -497,7 +482,7 @@ describe("11. a step must start and finish after the work", () => {
         finished("qa", "pass"),
         ...ran("reviewer", "ship"),
       ]),
-    ).toBe("require_approval");
+    ).toBe("deny");
   });
 });
 
@@ -521,7 +506,7 @@ describe("12. a change by any other agent is work", () => {
   test("the main agent writing a file after the review closes the gate", () => {
     expect(
       pr([change("main", null, { tool: "files", operation: "file.write" })]),
-    ).toBe("require_approval");
+    ).toBe("deny");
   });
 
   test("a general-purpose subagent committing after the review closes the gate", () => {
@@ -533,7 +518,7 @@ describe("12. a change by any other agent is work", () => {
           operation: "command.run",
         }),
       ]),
-    ).toBe("require_approval");
+    ).toBe("deny");
   });
 
   test("looking around after the review keeps it", () => {
@@ -609,7 +594,7 @@ describe("8. over a budget, and near it", () => {
     ]);
   });
 
-  test("a deny rule still beats a budget that asks for review", () => {
+  test("a deny rule wins over a used-up budget", () => {
     const document = compile(`${BUDGETS}
 - rule: Never ls secrets
   command: ls secrets

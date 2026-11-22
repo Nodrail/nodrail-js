@@ -322,4 +322,14 @@ describe("a connection's data", () => {
       stderr: "",
     });
   });
+
+  test("a long run of glob characters is cut in linear time", async () => {
+    // CodeQL js/polynomial-redos flagged the old cut; it is linear by construction now.
+    const started = performance.now();
+    const result = await call("Bash", {
+      command: `cat ${"*".repeat(100_000)}`,
+    });
+    expect(performance.now() - started).toBeLessThan(2_000);
+    expect(result.stdout).not.toContain("holds the data of connection");
+  });
 });

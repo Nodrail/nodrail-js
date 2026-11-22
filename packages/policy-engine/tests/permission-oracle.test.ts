@@ -35,7 +35,7 @@ const fixed = { installationName: null, toolKey: "t", expiresAt: null };
 const rule = fc
   .record({
     id: fc.constantFrom("p", "q", "s", "u"),
-    effect: fc.constantFrom("allow", "deny", "require_approval"),
+    effect: fc.constantFrom("allow", "deny"),
     ...scope,
   })
   .map((fields): PolicyRule => ({ ...fixed, name: fields.id, ...fields }));
@@ -53,7 +53,7 @@ const requires = fc.constantFrom<PolicyGate["requires"]>(
 
 const gate = fc
   .record({
-    effect: fc.constantFrom("deny", "require_approval"),
+    effect: fc.constant("deny" as const),
     requires,
     ...scope,
   })
@@ -89,7 +89,7 @@ const calls = ["dev", "ops", "qa"].flatMap((agentId) =>
 );
 
 /** How much a decision lets through. No rule is the default: blocked. */
-const rank = { none: 0, deny: 0, require_approval: 1, allow: 2 } as const;
+const rank = { none: 0, deny: 0, allow: 1 } as const;
 
 /** Runs the calls are made in: none, and checkers' verdicts in some order. */
 const at = now.toISOString();

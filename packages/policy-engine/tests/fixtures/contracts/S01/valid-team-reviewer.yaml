@@ -35,7 +35,7 @@ nodrail.yaml:
   receipts:
     reviewer: { shape: reviewer-result, format: fenced }
 resources:
-  - apiVersion: apf.nodrail.com/v1alpha1
+  - apiVersion: nodrail.com/v1alpha1
     kind: Agent
     metadata: { name: reviewer }
     spec: { instructions: ./agents/reviewer.md, receipt: reviewer }

@@ -10,10 +10,10 @@ export type Values = {
   agent?: string;
   runtime?: string;
   "require-active"?: boolean;
+  "replace-live"?: boolean;
   check?: boolean;
   detach?: boolean;
   names?: boolean;
-  watch?: boolean;
   q?: string;
   outcome?: string;
   kind?: string;

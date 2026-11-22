@@ -35,8 +35,8 @@ A requirement is met only by the latest event about **this** revision: the commi
 
 | Producer              | Command                                                     | Where it is kept                                                               | What it can satisfy                                                   |
 | --------------------- | ----------------------------------------------------------- | ------------------------------------------------------------------------------ | --------------------------------------------------------------------- |
-| `runtime-observed`    | `nodrail evidence run <name> -- <command>`, on this machine | the ledger folder (`.git/nodrail/runs/evidence/<name>.jsonl`), never committed | local gates asking for `runtime-observed` or less; never a Cloud gate |
-| `externally-verified` | `nodrail evidence submit <name>` in a GitHub Actions job    | Cloud, checked against a verifier                                              | every authority, local (the hook asks Cloud) and Cloud                |
+| `runtime-observed`    | `nodrail evidence run <name> -- <command>`, on this machine | the ledger folder (`.git/nodrail/runs/evidence/<name>.jsonl`), never committed | local gates asking for `runtime-observed` or less; never a control-plane gate |
+| `externally-verified` | `nodrail evidence submit <name>` in a GitHub Actions job    | The control plane, checked against a verifier                                              | every authority, local (the hook asks the control plane) and the control plane                |
 
 A URL, a provider name or an exit code in the payload proves nothing: who produced the evidence is the runtime's or the verifier's to say, never the value's.
 
@@ -84,7 +84,7 @@ The events recorded here, newest first (state, subject, exit code, contract), wh
 
 ## `nodrail evidence submit <name> --result <file>`
 
-From a GitHub Actions job, sends a result to Cloud as externally verified evidence:
+From a GitHub Actions job, sends a result to the control plane as externally verified evidence:
 
 ```yaml
 permissions:
@@ -99,10 +99,10 @@ steps:
 ```
 
 - The job asks GitHub for an OIDC token whose audience is `<Nodrail URL>/w/<workspace>` (`ACTIONS_ID_TOKEN_REQUEST_URL` and `ACTIONS_ID_TOKEN_REQUEST_TOKEN`, which `id-token: write` provides), and posts `{ workspace, environment, evidence, event_key, commit, contract, value }` to `POST /api/v1/evidence` with it. No Nodrail token is involved, and personal tokens can't submit evidence.
-- Cloud accepts it only from a **verifier** an admin created (Settings → Verifiers): the repository and the exact `job_workflow_ref`, ideally a reusable workflow on a protected branch. The commit must be the token's `sha`; Cloud computes the subject from it, so the evidence matches a local work tree that is clean at exactly that commit.
-- Use `push` or `workflow_dispatch` runs: a `pull_request` run builds a merge commit, which never matches a local head, and Cloud refuses it.
-- `commit` is `GITHUB_SHA`, else `HEAD`. `contract` is the evidence's digest in the locked policy; Cloud refuses a value validated against another revision of the contract. `--key` tells apart several events of one evidence in one run (default `default`).
-- Retries send the same body, which Cloud answers idempotently. Exit codes: **0** stored (valid or invalid), **3** refused (the code is printed, for example `producer-not-allowed`), **4** Cloud not reached after three attempts.
+- The control plane accepts it only from a **verifier** an admin created (Settings → Verifiers): the repository and the exact `job_workflow_ref`, ideally a reusable workflow on a protected branch. The commit must be the token's `sha`; the control plane computes the subject from it, so the evidence matches a local work tree that is clean at exactly that commit.
+- Use `push` or `workflow_dispatch` runs: a `pull_request` run builds a merge commit, which never matches a local head, and the control plane refuses it.
+- `commit` is `GITHUB_SHA`, else `HEAD`. `contract` is the evidence's digest in the locked policy; the control plane refuses a value validated against another revision of the contract. `--key` tells apart several events of one evidence in one run (default `default`).
+- Retries send the same body, which the control plane answers idempotently. Exit codes: **0** stored (valid or invalid), **3** refused (the code is printed, for example `producer-not-allowed`), **4** the control plane not reached after three attempts.
 
 Without Node, the same with curl:
 
@@ -116,7 +116,7 @@ curl -sS -X POST https://app.nodrail.com/api/v1/evidence \
 
 ## How the local hook reads externally verified evidence
 
-When a gate reads evidence a verifier produces, `apply` writes `.nodrail/evidence.json` (`{ url, workspace_revision }`: the Nodrail URL and the lock's workspace revision) and gives the hook `--evidence` with it. For a call that a gate covers and local evidence doesn't meet, the hook asks Cloud `GET /api/v1/evidence/status` by gate id, requirement index and subject, never with a condition of its own, and waits at most 3 seconds. It sends the person's token from `NODRAIL_TOKEN` (the `read` scope) in the host's environment.
+When a gate reads evidence a verifier produces, `apply` writes `.nodrail/evidence.json` (`{ url, workspace_revision }`: the Nodrail URL and the lock's workspace revision) and gives the hook `--evidence` with it. For a call that a gate covers and local evidence doesn't meet, the hook asks the control plane `GET /api/v1/evidence/status` by gate id, requirement index and subject, never with a condition of its own, and waits at most 3 seconds. It sends the person's token from `NODRAIL_TOKEN` (the `read` scope) in the host's environment.
 
 - The revision asked about must be published: `nodrail workspace publish`.
 - Offline, unpublished, a token without `read`, a timeout or an error leave the requirement unmet, with the reason. A positive answer is cached for 5 minutes per requirement and subject.
@@ -127,6 +127,6 @@ When a gate reads evidence a verifier produces, `apply` writes `.nodrail/evidenc
 `plan` lists each evidence requirement: its gate, authority, producers and where it is read here, and fails activation when:
 
 - a requirement reads runtime-observed evidence and the setup guard isn't on;
-- a verifier it depends on is missing or revoked (`verifier-missing`). `plan` checks verifiers with Cloud when it has a token for it (`NODRAIL_TOKEN` or `nodrail login`); without one it marks the check `?`, and Cloud checks again when the workspace is published.
+- a verifier it depends on is missing or revoked (`verifier-missing`). `plan` checks verifiers with the control plane when it has a token for it (`NODRAIL_TOKEN` or `nodrail login`); without one it marks the check `?`, and the control plane checks again when the workspace is published.
 
 `nodrail contracts explain <gate>` lists the same per requirement, with its `where` conditions; `contracts explain evidence:<name>` lists the evidence's producers.

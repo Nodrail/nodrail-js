@@ -42,7 +42,7 @@ const SEND_FOR = 20_000;
 const SEND_TIMEOUT = 5_000;
 
 /** Where the spans for one project's telemetry wait, in the person's home. */
-export function spoolFolder(home: string, file: string) {
+export function spoolFolder(home: string, file: string, kind = "telemetry") {
   // By its real path: hosts name the project folder differently.
   let path = resolve(file);
   try {
@@ -51,7 +51,7 @@ export function spoolFolder(home: string, file: string) {
     // Not there yet: as written.
   }
   const key = createHash("sha256").update(path).digest("hex");
-  return join(home, ".nodrail", "telemetry", key.slice(0, 16));
+  return join(home, ".nodrail", kind, key.slice(0, 16));
 }
 
 type Event = {
@@ -129,8 +129,8 @@ const DROPPED = "dropped";
 const LOCK = "sending";
 const STATUS = "status.json";
 
-/** Adds the span to the queue, or counts it as dropped when the queue is full. */
-export function enqueue(folder: string, span: SpanRecord) {
+/** Adds a record (a span, a decision) to the queue, or counts it as dropped when the queue is full. */
+export function enqueue(folder: string, span: object) {
   mkdirSync(folder, { recursive: true });
   const line = `${JSON.stringify(span)}\n`;
   let size = 0;
@@ -172,7 +172,7 @@ export function readStatus(folder: string): TelemetryStatus | null {
   }
 }
 
-const droppedCount = (folder: string) => {
+export const droppedCount = (folder: string) => {
   try {
     return statSync(join(folder, DROPPED)).size;
   } catch {
@@ -220,22 +220,25 @@ function takeLock(lock: string, now: number) {
   return false;
 }
 
-/** Runs this command line again as a detached sender for the folder. */
+/**
+ * Runs this command line again as a detached sender for the folder:
+ * `telemetry-send`, or `decisions-send` for the control plane's queue.
+ */
 export function startSender(
   self: readonly string[],
   folder: string,
   file: string,
+  command = "telemetry-send",
 ) {
-  const child = spawn(
-    process.execPath,
-    [...self, "telemetry-send", folder, file],
-    { detached: true, stdio: "ignore" },
-  );
+  const child = spawn(process.execPath, [...self, command, folder, file], {
+    detached: true,
+    stdio: "ignore",
+  });
   child.unref();
 }
 
 /** The batches waiting, oldest first; the newest spans become one more. */
-function batches(folder: string) {
+export function batches(folder: string) {
   try {
     renameSync(
       join(folder, SPOOL),
@@ -320,7 +323,7 @@ export async function sendSpool(
 }
 
 /** Keeps the lock fresh, so no other sender takes over; never fails a send. */
-function stillSending(folder: string) {
+export function stillSending(folder: string) {
   try {
     utimesSync(join(folder, LOCK), new Date(), new Date());
   } catch {
@@ -341,11 +344,11 @@ const resourceOf = (config: TelemetryConfig): Record<string, string> => ({
   ...(config.projectId ? { "nodrail.project.id": config.projectId } : {}),
 });
 
-type Counts = Required<
+export type Counts = Required<
   Pick<TelemetryStatus, "sent" | "rejected" | "unknown">
 > & { lastRejection?: string };
 
-const countsOf = (status: TelemetryStatus | null): Counts => ({
+export const countsOf = (status: TelemetryStatus | null): Counts => ({
   sent: status?.sent ?? 0,
   rejected: status?.rejected ?? 0,
   unknown: status?.unknown ?? 0,
@@ -365,7 +368,7 @@ function exportHeaders(
   return headers;
 }
 
-function writeStatus(
+export function writeStatus(
   folder: string,
   counts: Counts,
   error: string | undefined,

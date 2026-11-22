@@ -48,7 +48,7 @@ const HOSTS = [
 ] as const;
 
 /**
- * The rules a Team means, as an APF file:
+ * The rules a Team means, as a rules file:
  * - each member may start exactly the members it hands off to, and no other
  *   member, itself included, on Claude Code and on Codex. A host's own
  *   agents and others not on the team are left to the rest of the policy,

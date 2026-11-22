@@ -286,14 +286,30 @@ describe("hook", () => {
     });
   });
 
-  test("an unmatched call is denied, or asked with --unmatched ask", async () => {
+  test("an unmatched call is denied, or let through with --unmatched allow", async () => {
     expect((await cli(["hook", rules], event("git push"))).stdout).toContain(
       '"deny"',
     );
     expect(
-      (await cli(["hook", rules, "--unmatched", "ask"], event("git push")))
-        .stdout,
-    ).toContain('"ask"');
+      await cli(["hook", rules, "--unmatched", "allow"], event("git push")),
+    ).toEqual({ code: 0, stdout: "", stderr: "" });
+  });
+
+  test("--unmatched ask was removed: the hook stops with exit 2 and says what to use", async () => {
+    const asked = await cli(
+      ["hook", rules, "--unmatched", "ask"],
+      event("git push"),
+    );
+    expect(asked).toMatchObject({ code: 2, stdout: "" });
+    expect(asked.stderr).toContain(
+      "--unmatched ask was removed: nothing waits for a person. Use --unmatched deny (the default), or allow",
+    );
+    const other = await cli(
+      ["hook", rules, "--unmatched", "maybe"],
+      event("git push"),
+    );
+    expect(other).toMatchObject({ code: 2, stdout: "" });
+    expect(other.stderr).toContain("--unmatched is deny or allow, not maybe");
   });
 
   test("rules that can't load block with exit 2", async () => {
@@ -631,28 +647,25 @@ describe("hook", () => {
   });
 
   describe("--host codex", () => {
-    const review = write(
-      "review.yaml",
-      `- rule: Pushes need a person
+    const pushes = write(
+      "pushes.yaml",
+      `- rule: Never push
   command: { prefix: git push }
-  effect: require_approval
+  effect: deny
 `,
     );
-    test("a review is denied, saying a person must approve it", async () => {
-      const asked = await cli(["hook", review], event("git push"));
-      expect(asked.stdout).toContain('"ask"');
+    test("a deny names its rule, as on Claude Code", async () => {
       const codex = await cli(
-        ["hook", review, "--host", "codex"],
+        ["hook", pushes, "--host", "codex"],
         event("git push"),
       );
       expect(codex.stdout).toContain('"deny"');
-      expect(codex.stdout).toContain("needs a person to review");
-      expect(codex.stdout).toContain("This host can't ask a person");
+      expect(codex.stdout).toContain("rule never-push denies");
       const unmatched = await cli(
-        ["hook", review, "--host", "codex", "--unmatched", "ask"],
+        ["hook", pushes, "--host", "codex"],
         event("ls"),
       );
-      expect(unmatched.stdout).toContain('"deny"');
+      expect(unmatched.stdout).toContain("no rule covers");
     });
   });
 });

@@ -16,33 +16,35 @@ A rules file is a YAML list of `rule`, `list` and `macro` entries, plus `gate` a
   condition:
     - { field: amount, op: gt, value: 1000 }
 
-- rule: Review production writes
-  desc: A person checks anything written to production.
+- rule: Never write production repositories
+  desc: People change production themselves; agents never do.
   tool: github
   operation: issues.update
   resource: { kind: repository, list: production_repositories }
-  effect: require_approval
+  effect: deny
   tags: [write]
 
-- rule: Review large refunds
+- rule: Never refund large amounts
   tool: stripe
   operation: refunds.create
   resource: { kind: invoice, match: any }
   condition:
     - macro: large_amount
-  effect: require_approval
+  effect: deny
 ```
 
 ## How a decision is made
 
-Every matching rule counts, in any order. Deny beats `require_approval`, which beats allow. If no rule matches, the outcome is `none`, and whatever calls the engine must treat that as blocked.
+A rule only allows or denies. Every matching rule counts, in any order, and deny beats allow. If no rule matches, the outcome is `none`, and whatever calls the engine must treat that as blocked. Nothing waits for a person: a denied call comes back to the agent with its reason, so it can change course or, for a [gate or budget](runs.md), meet what is missing and try again. Irreversible actions, such as deploying to production, merging to main or deleting data, are for people to do themselves; write rules that deny them to agents.
+
+`effect: require_approval` was removed. A file that still uses it fails to compile and says what to write instead: `deny`, with a gate, budget or evidence requirement to say when the call is allowed.
 
 ## Rule fields
 
 | Field                   | Meaning                                                                                        |
 | ----------------------- | ---------------------------------------------------------------------------------------------- |
 | `rule`                  | Unique name                                                                                    |
-| `effect`                | `allow`, `require_approval` or `deny`                                                          |
+| `effect`                | `allow` or `deny`                                                                              |
 | `tool`, `operation`     | The action, such as `github` and `issues.update`                                               |
 | `resource`              | `kind` plus one of the forms below                                                             |
 | `command`               | Instead of `tool`, `operation` and `resource`. See [Commands and tools](commands-and-tools.md) |
@@ -101,7 +103,7 @@ An entry can also be `{ macro: name }`, or `{ field: currency, op: in, list: nam
   effect: deny
 ```
 
-Conditions compare what the caller declares. A parameter that is missing or of the wrong type never helps an allow rule, while deny and review rules still apply. So `"5"` can't pass a rule that wants a number under 1000.
+Conditions compare what the caller declares. A parameter that is missing or of the wrong type never helps an allow rule, while deny rules still apply. So `"5"` can't pass a rule that wants a number under 1000.
 
 ### Ids
 
@@ -125,8 +127,8 @@ Files load in the order given, and a folder loads its `.yaml` and `.yml` files b
   items: [acme/billing]
   override: { items: append }
 
-- rule: Review large refunds
-  effect: deny
+- rule: Never refund large amounts
+  effect: allow
   override: { effect: replace }
 
 - rule: Small refunds

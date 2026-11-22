@@ -22,7 +22,7 @@ import {
   windows,
 } from "./support/setup-project.ts";
 
-const api = "apiVersion: apf.nodrail.com/v1alpha1";
+const api = "apiVersion: nodrail.com/v1alpha1";
 
 /** A provider as small as MCP allows: `refund`, logging each call it gets. */
 const PROVIDER = `const { appendFileSync } = require("node:fs");

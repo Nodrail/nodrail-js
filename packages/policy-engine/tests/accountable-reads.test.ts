@@ -524,13 +524,12 @@ describe("what a changed budget or evidence requirement does", () => {
   id: publications
   tokens: 3
   per: run
-  otherwise: require_approval
+  otherwise: deny
   step_agent: dev
 `;
     const all = impacts(tokens, legacy).join("\n");
     expect(all).toContain("Agent-reported usage");
     expect(all).toContain("loosened: agent all → dev");
-    expect(all).toContain("otherwise deny → require approval");
     const [added] = permissionChanges(null, documentOf(BUDGET));
     expect(added).toMatchObject({ entry: "budget", impact: "tightened" });
     expect(added?.summary).toContain(

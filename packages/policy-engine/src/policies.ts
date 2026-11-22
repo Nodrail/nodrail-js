@@ -23,7 +23,8 @@ import {
 export * from "./accountable-document.ts";
 export * from "./document-kinds.ts";
 
-export const effects = ["deny", "require_approval", "allow"] as const;
+/** A rule only allows or denies; nothing waits for a person. */
+export const effects = ["deny", "allow"] as const;
 export type Effect = (typeof effects)[number];
 
 const scalar = z.union([z.string().max(256), z.number(), z.boolean()]);
@@ -163,9 +164,9 @@ type PlainRequirement = z.infer<typeof requirement>;
 export type Requirement = PlainRequirement &
   Partial<Omit<ContractRequirement, keyof PlainRequirement>>;
 
-/** Matches like a rule; its effect applies only while a requirement is unmet. */
+/** Matches like a rule; it denies only while a requirement is unmet. */
 const policyGate = policyRule.safeExtend({
-  effect: z.enum(["deny", "require_approval"]),
+  effect: z.literal("deny"),
   requires: z.array(requirement).min(1).max(20),
 });
 /**
@@ -197,7 +198,7 @@ export const policyBudget = z
     metric: z.enum(budgetMetrics),
     limit: z.number().positive().max(1e12),
     warnAt: z.number().positive().nullable(),
-    effect: z.enum(["deny", "require_approval"]),
+    effect: z.literal("deny"),
   })
   .strict()
   .refine((budget) => budget.warnAt === null || budget.warnAt < budget.limit, {

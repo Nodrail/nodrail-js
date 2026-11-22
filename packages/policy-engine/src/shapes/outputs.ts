@@ -14,7 +14,6 @@ const SOURCE_BINDING = {
   receipt: "receipt",
   evidence: "evidence",
   memory: "memory",
-  approval: "request",
 } as const;
 
 /** A view, insight or notification's source: its binding, read through the projection. */

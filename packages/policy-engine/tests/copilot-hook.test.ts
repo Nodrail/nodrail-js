@@ -158,16 +158,20 @@ describe("nodrail-policy hook --host copilot", () => {
     });
   });
 
-  test("a review can't be asked from Copilot's hook: it is a deny", async () => {
-    const reviewed = await hook(
+  test("--unmatched allow lets an unmatched call through; ask is refused", async () => {
+    const allowed = await hook(
+      call("bash", { command: "git push" }),
+      "--unmatched",
+      "allow",
+    );
+    expect(allowed).toMatchObject({ code: 0, stdout: "" });
+    const asked = await hook(
       call("bash", { command: "git push" }),
       "--unmatched",
       "ask",
     );
-    expect(answer(reviewed.stdout)).toMatchObject({
-      permissionDecision: "deny",
-      permissionDecisionReason: expect.stringContaining("can't ask a person"),
-    });
+    expect(asked.code).toBe(2);
+    expect(asked.stderr).toContain("--unmatched ask was removed");
   });
 
   test("a patch that touches the rules is refused, whatever else it changes", async () => {
@@ -225,13 +229,10 @@ describe("Claude Code's hook, run by Copilot", () => {
     expect(decision(edit.stdout)).toBe("deny");
   });
 
-  test("a review is a deny: Copilot can't ask", async () => {
-    const asked = await underCopilot(
-      claudeEvent("Bash", { command: "git push" }),
-      "--unmatched",
-      "ask",
-    );
-    expect(decision(asked.stdout)).toBe("deny");
+  test("an unmatched call is denied unless --unmatched allow", async () => {
+    const call = claudeEvent("Bash", { command: "git push" });
+    expect(decision((await underCopilot(call)).stdout)).toBe("deny");
+    expect((await underCopilot(call, "--unmatched", "allow")).stdout).toBe("");
   });
 });
 
@@ -283,8 +284,9 @@ describe("Copilot's less common calls and answers", () => {
   test("each kind of hook answer, as Copilot reads it", () => {
     expect(reasonOf(copilotAnswer([result("")]))).toBeNull();
     expect(reasonOf(copilotAnswer([result(claude("allow"))]))).toBeNull();
-    expect(reasonOf(copilotAnswer([result(claude("ask", "review"))]))).toBe(
-      "review",
+    // Any answer but an allow blocks, so nothing waits for a person.
+    expect(reasonOf(copilotAnswer([result(claude("ask", "unknown"))]))).toBe(
+      "unknown",
     );
     expect(reasonOf(copilotAnswer([result(claude("deny"))]))).toBe(
       "Nodrail blocked this call.",

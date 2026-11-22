@@ -6,7 +6,7 @@ nodrail.yaml:
         issue: { type: string, max: 100 }
         verdict: { values: [ship, fix-first], role: verdict }
 resources:
-  - apiVersion: apf.nodrail.com/v1alpha1
+  - apiVersion: nodrail.com/v1alpha1
     kind: Agent
     metadata: { name: reviewer }
     spec: { brief: review-brief }

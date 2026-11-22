@@ -12,8 +12,9 @@
   effect: deny
   tags: [shell, destructive]
 
-- rule: A person reviews CI changes
+- rule: Never change CI
+  desc: Workflows run with CI's secrets, so only people change them.
   tool: files
   operation: file.write
   resource: { kind: file, match: prefix, value: /repo/.github/ }
-  effect: require_approval
+  effect: deny

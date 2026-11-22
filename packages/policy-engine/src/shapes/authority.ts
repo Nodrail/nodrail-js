@@ -1,8 +1,7 @@
 // Authority and privacy around a contract (DC-00.2): who produced a record,
 // the runtime-owned envelope no agent field can fill, the reported record
-// that crosses to Cloud, and the binding an approval is valid for.
+// that crosses to Cloud.
 import { z } from "zod";
-import { contractDigest } from "./digest.ts";
 import { PRODUCER_CLASSES, shapeName, type ProducerClass } from "./grammar.ts";
 import { SURFACES } from "./types.ts";
 
@@ -114,32 +113,3 @@ export const reportedRecord = z.strictObject({
   findings_count: z.number().int().min(0).nullable(),
 });
 export type ReportedRecord = z.infer<typeof reportedRecord>;
-
-/**
- * What an approval is valid for: the exact action, the request contract and
- * values, the decision contract and the policy revision. Any change makes a
- * different binding, so an old decision can't approve a changed action or a
- * form whose schema moved on.
- */
-export type ApprovalSubject = {
-  /** The action descriptor's digest, as protocol.ts computes it. */
-  action: string;
-  request: { contract: string; value: unknown };
-  decision: string | null;
-  policy: string;
-};
-
-export const approvalBinding = (subject: ApprovalSubject) =>
-  contractDigest("approval", {
-    action: subject.action,
-    decision: subject.decision,
-    policy: subject.policy,
-    request_contract: subject.request.contract,
-    request_value: contractDigest("value", subject.request.value ?? null),
-  });
-
-/** Whether a recorded decision still approves this exact subject. */
-export const approvalStillBinds = (
-  recorded: string,
-  subject: ApprovalSubject,
-) => recorded === approvalBinding(subject);

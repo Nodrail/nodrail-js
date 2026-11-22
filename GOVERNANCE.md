@@ -25,7 +25,8 @@ regular contributors becoming maintainers; open an issue to talk about it.
 ## Where the code comes from, and how your change ships
 
 These repositories are generated from Nodrail's private monorepo, which also
-holds the hosted service. Pull requests are welcome all the same, and here is
+holds the control-plane server and console. They are Apache-2.0 too, and are
+being published as their own repository. Pull requests are welcome all the same, and here is
 what happens to one:
 
 1. A maintainer reviews it here, in the open, like any pull request.

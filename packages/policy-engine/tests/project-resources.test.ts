@@ -55,7 +55,7 @@ roles:
   },
 ];
 
-const api = "apiVersion: apf.nodrail.com/v1alpha1";
+const api = "apiVersion: nodrail.com/v1alpha1";
 const agent = (name: string, spec = "{}") =>
   `${api}\nkind: Agent\nmetadata: { name: ${name} }\nspec: ${spec}\n`;
 const team = (name: string, spec: string) =>
@@ -253,7 +253,7 @@ describe("the setup nodrail.yaml declares", () => {
     expect(bound.sources.map((source) => source.name)).toEqual([
       "@nodrail/review/review.yaml",
       "policies/local.yaml",
-      "team/marketing.apf.yaml",
+      "team/marketing.yaml",
     ]);
     expect(bound.sources[1]?.text).toContain("agent: tester");
 
@@ -388,7 +388,7 @@ describe("the setup nodrail.yaml declares", () => {
         agent("editor"),
         agent("Editor"),
         agent("x", "{ prompt: hi }"),
-        `apiVersion: apf.nodrail.com/v1\nkind: Agent\nmetadata: { name: y }\nspec: {}\n`,
+        `apiVersion: nodrail.com/v1\nkind: Agent\nmetadata: { name: y }\nspec: {}\n`,
         `${api}\nkind: Deployment\nmetadata: { name: z }\nspec: {}\n`,
       ),
     });
@@ -398,6 +398,15 @@ describe("the setup nodrail.yaml declares", () => {
       expect.stringMatching(/^r\.yaml: spec: .*prompt/),
       expect.stringMatching(/^r\.yaml: apiVersion: /),
       expect.stringMatching(/^r\.yaml: kind: /),
+    ]);
+  });
+
+  test("the old apiVersion is refused with the one to use", () => {
+    const result = project(`resources: ./r.yaml\n`, {
+      "r.yaml": `apiVersion: apf.nodrail.com/v1alpha1\nkind: Agent\nmetadata: { name: y }\nspec: {}\n`,
+    });
+    expect(result.problems.map((p) => `${p.ref}: ${p.message}`)).toEqual([
+      "r.yaml: apiVersion: apf.nodrail.com/v1alpha1 was renamed: use apiVersion: nodrail.com/v1alpha1",
     ]);
   });
 
@@ -607,7 +616,7 @@ describe("what a team means", () => {
   test("is one more file, last, that compiles", () => {
     expect(messages(result)).toEqual([]);
     expect(result.sources.map((source) => source.name)).toEqual([
-      "team/release.apf.yaml",
+      "team/release.yaml",
     ]);
   });
 
@@ -662,7 +671,7 @@ describe("what a team means", () => {
         new_string: "b",
       },
     ],
-    ["Write", { file_path: "/repo/.nodrail/effective.apf.yaml", content: "x" }],
+    ["Write", { file_path: "/repo/.nodrail/effective.yaml", content: "x" }],
     ["Write", { file_path: "/repo/.agents/skills/s/SKILL.md", content: "x" }],
     ["Write", { file_path: "/repo/nodrail.yaml", content: "x" }],
   ])("no agent may %s %o", (tool, input) => {
@@ -877,5 +886,88 @@ connections:
       expect(decide("marketing", "sources", "mcp_tool")).toBe("deny");
       expect(decide("support", "sources", "mcp_tool")).toBe("allow");
     });
+  });
+});
+
+describe("connect: in nodrail.yaml (R383)", () => {
+  const connected = (block: string) =>
+    project(`runtime: claude-code\nconnect:\n${block}`);
+  // These projects have no Team; only what connect: says matters here.
+  const about = (result: ReturnType<typeof resolveProject>) =>
+    messages(result).filter((message) => !/Team to start/.test(message));
+
+  test("without it, nothing is connected", () => {
+    expect(project("runtime: claude-code\n").setup.connect).toBeNull();
+  });
+
+  test("names the Nodrail, who decides, and the credential by reference", () => {
+    const result = connected(
+      "  url: https://nodrail.example\n  workspace: acme\n  environment: development\n  decide: cloud\n  credential: { fromEnv: NODRAIL_CREDENTIAL }\n",
+    );
+    expect(about(result)).toEqual([]);
+    expect(result.setup.connect).toEqual({
+      url: "https://nodrail.example",
+      workspace: "acme",
+      environment: "development",
+      decide: "cloud",
+      enforce: "on",
+      credential: { fromEnv: "NODRAIL_CREDENTIAL" },
+    });
+  });
+
+  test("local decisions need no credential; Cloud is the default address", () => {
+    const result = connected(
+      "  workspace: acme\n  environment: production\n  decide: local\n  enforce: watch\n",
+    );
+    expect(about(result)).toEqual([]);
+    expect(result.setup.connect).toMatchObject({
+      decide: "local",
+      enforce: "watch",
+    });
+    expect(result.setup.connect?.url).toBeUndefined();
+  });
+
+  test.each([
+    [
+      "decide: cloud without a credential",
+      "  workspace: acme\n  environment: development\n  decide: cloud\n",
+      /needs a credential/,
+    ],
+    [
+      "who decides left out",
+      "  workspace: acme\n  environment: development\n",
+      /decide/,
+    ],
+    [
+      "plain http to another machine",
+      "  url: http://nodrail.example\n  workspace: acme\n  environment: development\n  decide: local\n",
+      /https/,
+    ],
+    [
+      "a credential written out",
+      "  workspace: acme\n  environment: development\n  decide: cloud\n  credential: ndr_000000000000_secret\n",
+      /credential/,
+    ],
+    [
+      "a key it doesn't know",
+      "  workspace: acme\n  environment: development\n  decide: local\n  token: x\n",
+      /token/,
+    ],
+    [
+      "a workspace that isn't a slug",
+      "  workspace: Acme Corp\n  environment: development\n  decide: local\n",
+      /slug/,
+    ],
+  ])("refuses %s", (_, block, message) => {
+    const result = connected(block);
+    expect(about(result).join("\n")).toMatch(message);
+    expect(result.setup.connect).toBeNull();
+  });
+
+  test("http to this machine is fine, for a local self-hosted Nodrail", () => {
+    const result = connected(
+      "  url: http://localhost:3201\n  workspace: acme\n  environment: development\n  decide: cloud\n  credential: { fromEnv: NODRAIL_CREDENTIAL }\n",
+    );
+    expect(about(result)).toEqual([]);
   });
 });

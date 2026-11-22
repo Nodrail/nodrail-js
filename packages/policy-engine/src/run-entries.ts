@@ -3,7 +3,8 @@ import { z } from "zod";
 import { mode, refName, ruleFields } from "./file-fields.ts";
 
 const { effect: _effect, ...matchFields } = ruleFields;
-const holdEffect = z.enum(["deny", "require_approval"]);
+/** Only `deny`, the default; any other word is refused with what to write (removed-syntax.ts). */
+const holdEffect = z.string();
 
 const requirementEntry = z
   .strictObject({

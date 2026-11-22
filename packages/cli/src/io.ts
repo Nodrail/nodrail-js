@@ -42,11 +42,6 @@ const explanations: Record<string, string> = {
     "This token doesn't have the scope this needs. Create a token with it under your account → API tokens.",
   FORBIDDEN: "Your role in this workspace can't do this.",
   NOT_FOUND: "Not found, or you can't see it.",
-  ACTION_CHANGED:
-    "The request is no longer the action you were shown. Nothing was decided.",
-  DECISION_CONFLICT: "Someone already decided this request the other way.",
-  APPROVAL_NOT_PENDING:
-    "This request expired or was closed before you decided.",
   RULE_CHANGED:
     "The rules changed since the preview. Pull them again, merge your edits and push again.",
   INVALID_INPUT: "Nodrail refused the request as invalid.",

@@ -9,9 +9,9 @@ manifest:
 modules: []
 files:
   - path: resources/agents.yaml
-    sha256: "f5d50d178841cfcdcac8ec1e34aa1a998aa8008ebc3ddcb65bce6897c52ddad3"
+    sha256: "18ae53a6caa773e7275ab1a534b73bdf7b99775ff20a6c3fafd2fd867647260b"
   - path: resources/team.yaml
-    sha256: "e726986e74a8fae4501d3527a51216a05293b1b21c9056223b83bddda601593a"
+    sha256: "1ed2bc8dafb0fca277e4e207baaaa207ae6f95f649f11bcd7e1ca5ec73eeebc6"
   - path: policies/base.yaml
     sha256: "35e9372bc85967e07dba481d4abadfa7ce91723d404cb6313e68e876183971db"
 edges:
@@ -19,11 +19,11 @@ edges:
     to: policies/base.yaml
 order:
   - policies/base.yaml
-  - team/release.apf.yaml
+  - team/release.yaml
 effective:
-  sha256: "eb3bd2eeca44e4780437de3a176802c03b2711a8d478e628c90bf0768c325eea"
+  sha256: "5cd07ac9ab05e6a0695508df52c94c792dd4718f85059381e0058c1653be6667"
 workspace:
-  sha256: "716a0f11aeab426e02552b93b42dd604ddb6b46987221700efbe47a8148979f4"
+  sha256: "16566655b64963c146e2cef40135aa11af8a1e3a06dde2f05f72330e9f41375e"
   files:
     - path: resources/lead.md
       sha256: "6b6f480fd21a1601e4d3959a68f6928cd141db442308953345f9e5965f39cc33"
@@ -147,7 +147,7 @@ baseline: |
       - { agent: publisher, verdict: ship }
     otherwise: deny
 
-  # ── team/release.apf.yaml
+  # ── team/release.yaml
   # What Team release means: who may start whom, which connections
   # each agent may use, and the setup kept out of every agent's reach. Written by nodrail from resources/team.yaml.
   - required_engine_version: 1

@@ -103,11 +103,11 @@ describe("a rule on hand-backs decides as written", { timeout: 60_000 }, () => {
     expect(answer.permissionDecisionReason).toContain("rule");
   });
 
-  test("a person reviews it", async () => {
+  test("allow", async () => {
     const answer = await handback(
-      starterPacks["read-only"].text + RULE("require_approval"),
+      starterPacks["read-only"].text + RULE("allow"),
     );
-    expect(answer.permissionDecision).toBe("ask");
+    expect(answer.permissionDecision).toBe("allow");
   });
 });
 

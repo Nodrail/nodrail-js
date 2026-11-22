@@ -247,7 +247,7 @@ function drift(locked: ProjectPlan["lock"], now: ProjectPlan["lock"]) {
 }
 
 /**
- * `nodrail policy export --frozen`: the locked policy as one APF file on
+ * `nodrail policy export --frozen`: the locked policy as one rules file on
  * stdout, offline, only when every file still matches the lock. Anything
  * else exits nonzero with the reason on stderr and nothing on stdout.
  */
@@ -262,7 +262,7 @@ export async function exportFrozen(args: string[], io: Io) {
 }
 
 /**
- * The locked policy as one APF file, offline, only when every file still
+ * The locked policy as one rules file, offline, only when every file still
  * matches the lock; otherwise a CliError that says why and what to run.
  */
 /** What a setup is made from: its resources, and every local file read. */

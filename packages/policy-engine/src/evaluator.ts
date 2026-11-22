@@ -94,7 +94,7 @@ function comparable(actual: unknown, { op, value }: Condition) {
 
 /**
  * A parameter that is missing or the wrong kind never helps an allow rule, and
- * deny or review rules still apply.
+ * deny rules still apply.
  */
 export function conditionsMatch(rule: EvaluatedRule, descriptor: Descriptor) {
   return rule.conditions.every((condition) => {
@@ -109,7 +109,7 @@ export function conditionsMatch(rule: EvaluatedRule, descriptor: Descriptor) {
  * A rule's typed `where` against the validated values: every condition must
  * hold, and a missing value satisfies none. When the call carries no
  * validated value for a root the rule reads (nothing checked it against a
- * contract), an allow never matches and a deny or review still does, as
+ * contract), an allow never matches and a deny still does, as
  * with conditions on parameters.
  */
 function whereMatches(rule: EvaluatedRule, values: ContractValues | null) {
@@ -144,7 +144,7 @@ export function matches(
   );
 }
 
-/** Fixed precedence, independent of rule order: deny, then review, then allow. */
+/** Fixed precedence, independent of rule order: deny, then allow. */
 function evaluateOne(
   descriptor: Descriptor,
   rules: EvaluatedRule[],
@@ -154,7 +154,7 @@ function evaluateOne(
   const matched = rules
     .filter((rule) => matches(rule, descriptor, now, values))
     .sort((a, b) => a.logicalRuleId.localeCompare(b.logicalRuleId));
-  for (const effect of ["deny", "require_approval", "allow"] as const) {
+  for (const effect of ["deny", "allow"] as const) {
     const winner = matched.find((rule) => rule.effect === effect);
     if (winner) return { outcome: effect, matchedRuleId: winner.logicalRuleId };
   }
@@ -173,7 +173,7 @@ function chainOf({ toolKey, operationKey, params }: Descriptor) {
 
 /**
  * A chain of simple commands is as safe as its worst part. A rule on the whole
- * line can vouch for parts nothing covers, but never overrule a part's deny or review.
+ * line can vouch for parts nothing covers, but never overrule a part's deny.
  */
 export function evaluate(
   descriptor: Descriptor,
@@ -201,9 +201,6 @@ export function evaluate(
     each.find((item) => item.outcome === outcome);
   const denied = first("deny");
   if (denied) return denied;
-  if (whole.outcome === "require_approval") return whole;
-  const review = first("require_approval");
-  if (review) return review;
   if (whole.outcome === "allow") return whole;
   return first("none") ?? each[0] ?? whole;
 }

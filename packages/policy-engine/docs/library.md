@@ -24,7 +24,7 @@ const { outcome, matchedRuleId, explanation } = simulate({
 });
 ```
 
-`outcome` is `allow`, `deny`, `require_approval` or `none`. Treat everything except `allow` as blocked unless you have a way to get a person's answer.
+`outcome` is `allow`, `deny` or `none`. Treat everything except `allow` as blocked, and give the agent the `explanation`, so it can change course or meet what a gate or budget is missing and try again.
 
 Read `outcome` for the decision and `matchedRuleId` for the rule that matched. When no rule matches, the outcome is `none` and `matchedRuleId` is `null`.
 
@@ -42,7 +42,7 @@ Read `outcome` for the decision and `matchedRuleId` for the rule that matched. W
 
 ## Connect a custom harness
 
-A harness can read the same APF file as another integration when both map an operation to equivalent facts. In this example the harness exposes two named operations. Each maps to a fixed command. Its tool records a call in memory so you can see whether the integration actually invoked it.
+A harness can read the same rules file as another integration when both map an operation to equivalent facts. In this example the harness exposes two named operations. Each maps to a fixed command. Its tool records a call in memory so you can see whether the integration actually invoked it.
 
 Save this policy as `rules.yaml` in an empty directory.
 
@@ -96,7 +96,7 @@ function invoke(operation) {
 console.log(invoke("inspect"), invoke("clean"), invoked);
 ```
 
-The decisions are `allow` and `deny`. Only `inspect` appears in the invocation list. This example exercises a custom wrapper using an in-memory tool. In a real adapter, derive the descriptor from the exact call you will execute and preserve the arguments and resource through invocation. For arbitrary shell input use the documented action-mapping helpers, which also handle compound commands. Hold `require_approval` until an authorized review completes, and block `none`, invalid input and evaluation errors. Run-dependent gates and budgets also need the appropriate history.
+The decisions are `allow` and `deny`. Only `inspect` appears in the invocation list. This example exercises a custom wrapper using an in-memory tool. In a real adapter, derive the descriptor from the exact call you will execute and preserve the arguments and resource through invocation. For arbitrary shell input use the documented action-mapping helpers, which also handle compound commands. Block `deny`, `none`, invalid input and evaluation errors. Run-dependent gates and budgets also need the appropriate history.
 
 [Compare integrations](https://nodrail.com/integrations) · [Evaluator test cases](https://github.com/Nodrail/nodrail-js/blob/main/packages/policy-engine/tests/fixtures/conformance-v1.json)
 

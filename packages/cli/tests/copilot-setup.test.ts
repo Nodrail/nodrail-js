@@ -50,7 +50,7 @@ describe.skipIf(windows)("Copilot as a runtime", () => {
     const hooks = json(p.read(COPILOT_HOOKS));
     expect(hooks.version).toBe(1);
     expect(hooks.hooks.preToolUse[0].bash).toMatch(
-      /^nodrail policy hook '\/.+\/\.nodrail\/effective\.apf\.yaml' --protect-list '.+' --host copilot --agent lead$/,
+      /^nodrail policy hook '\/.+\/\.nodrail\/effective\.yaml' --protect-list '.+' --host copilot --agent lead$/,
     );
     expect(hooks.hooks.sessionStart[0].bash).toMatch(
       /^nodrail observe '\/.+' --detach$/,

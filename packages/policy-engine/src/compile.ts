@@ -11,6 +11,7 @@ import {
 } from "./compile-runs.ts";
 import { policyDocument, type Condition } from "./policies.ts";
 import { pick, type Path, type Place } from "./positions.ts";
+import { REMOVED_EFFECT, removedRuleEffect } from "./removed-syntax.ts";
 import { legacySubagentRuleProblem } from "./upgrades.ts";
 import {
   Collector,
@@ -295,6 +296,11 @@ function ruleProblem(
     return {
       message: `Rule "${name}" needs ${missing.join(", ")}.`,
       paths: [],
+    };
+  if (rule.effect === REMOVED_EFFECT)
+    return {
+      message: removedRuleEffect(`Rule "${name}"`),
+      paths: [["effect"]],
     };
   if (
     rule.command !== undefined &&

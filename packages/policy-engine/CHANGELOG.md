@@ -1,5 +1,67 @@
 # Changelog
 
+## 0.7.0
+
+Nodrail is the open control plane for AI agent development (R388). A rule
+only allows or denies: approvals are gone (R398). The format has no other
+name than Nodrail (R396): `apiVersion: nodrail.com/v1alpha1`.
+
+### Added
+
+- `connectedGuard` in `@nodrail/policy-engine/command-line`: the local
+  hook's guards alone (protect list, setup, run ledger and git's folders,
+  connections' data), for a hook that asks Nodrail for everything else.
+- `connect:` in nodrail.yaml (R383): the Nodrail, Cloud or self-hosted, a
+  project is connected to (`url`, `workspace`, `environment`), who decides
+  (`decide: cloud | local`, required), `enforce: on | watch` and the agent
+  `credential` by reference. Read into the setup as `connect`; a project
+  without it is unchanged.
+- `hook --report <file>` (R388): records each call the hook decides, and
+  each outcome it sees (PostToolUse, PostToolUseFailure), in Nodrail's runs
+  and Activity through `POST /api/v1/runtime/decisions`, with the
+  credential the file names (`{ url, credential }`, as
+  `.nodrail/connect.json` has them). Nodrail never decides them again. The
+  hook only appends to a bounded queue in `~/.nodrail/decisions` and wakes
+  a detached sender (`decisions-send`), as `--telemetry` does, so its
+  answer never waits on the network and is the same with or without it.
+  Keys are per call (host, session and tool call id), so a retry is the
+  same row. Each decision carries the policy file's SHA-256. Exported for
+  `nodrail` as `decisionSink` and `sendDecisionQueue` from
+  `@nodrail/policy-engine/command-line`.
+
+### Changed
+
+- Gates and budgets only deny while unmet (R398). `otherwise` is optional
+  and defaults to `deny`; the denial says what is missing (the receipt,
+  evidence or budget), so the agent gets it done and tries again. Nothing
+  waits for a person.
+- The `repo-work` starter pack blocks damage instead of asking about it:
+  `git push origin <branch>` is allowed for feature branches; pushes that
+  name `main` or `master`, name no branch, or force (`--force`, `-f`,
+  `--force-with-lease` written first) are denied; writes and edits to build
+  scripts (`package.json`, makefiles…) and to `.github` are denied.
+- A call no rule covers is denied with how to fix it: add a rule that
+  allows it. `hook --unmatched` is `deny` (the default) or `allow`, which
+  leaves the call to the host's own permissions.
+
+### Removed
+
+- `require_approval` (R398): a rule only allows or denies. A rule file with
+  `effect: require_approval` fails to compile and says to use `deny`, with
+  a gate, budget or evidence requirement to say when the call is allowed.
+  The evaluator's outcome is `allow`, `deny` or `none`, and cases files
+  expect one of those.
+- `otherwise: require_approval` on gates and budgets; a file that has it
+  fails to compile and says to write `otherwise: deny` or leave it out.
+- `hook --unmatched ask`, and the local hook asking the person at the
+  keyboard (`askPerson`, the `canAsk` option): the hook stops with exit
+  code 2 and says what to use instead.
+- Approval forms and their routes (contract surfaces S08 and C04):
+  `approvals:` in `nodrail.yaml`, `approval:` on a rule or gate, the
+  `approval` notification source, the `approver` server role in
+  notifications, and `approvalBinding`/`approvalStillBinds`. A file that
+  still has them fails to compile and says they were removed.
+
 ## 0.6.0
 
 ### Added

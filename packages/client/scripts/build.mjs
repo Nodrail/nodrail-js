@@ -8,7 +8,13 @@ const shared = { platform: "node", format: "esm", target: "node22" };
 // The library leaves its dependencies to the installer.
 await build({
   ...shared,
-  entryPoints: ["src/index.ts", "src/protocol.ts", "src/langchain.ts", "src/setup.ts"],
+  entryPoints: [
+    "src/index.ts",
+    "src/protocol.ts",
+    "src/langchain.ts",
+    "src/setup.ts",
+    "src/hooks.ts",
+  ],
   outdir: "dist",
   bundle: true,
   packages: "external",

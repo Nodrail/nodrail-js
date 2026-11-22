@@ -19,12 +19,12 @@
   effect: allow
   tags: [read]
 
-- rule: Review production writes
-  desc: A person checks anything written to a production repository.
+- rule: Never write production repositories
+  desc: People change production repositories themselves; agents never do.
   tool: github
   operation: issues.update
   resource: { kind: repository, list: production_repositories }
-  effect: require_approval
+  effect: deny
   tags: [write]
 
 - rule: Never delete repositories
@@ -43,10 +43,11 @@
     - { field: currency, op: in, list: supported_currencies }
   effect: allow
 
-- rule: Review large refunds
+- rule: Never refund large amounts
+  desc: Money moves can't be undone; a person makes large refunds.
   tool: stripe
   operation: refunds.create
   resource: { kind: invoice, match: any }
   condition:
     - macro: large_amount
-  effect: require_approval
+  effect: deny

@@ -39,18 +39,18 @@ export type Reporter = {
 const now = () => BigInt(Date.now()) * 1_000_000n;
 
 /**
- * What the host was told: a deny, a review, or nothing, which lets the call
- * through. That is the decision, whatever matched: no rule is a deny here,
- * and on Codex a review is a deny.
+ * What the host was told: a deny, or nothing, which lets the call through.
+ * That is the decision, whatever matched: no rule is a deny unless the hook
+ * allows unmatched calls.
  */
-function told(judged: Judged) {
+export function told(judged: Judged) {
   if (!judged.result.stdout) return "allow";
   try {
     const answer = JSON.parse(judged.result.stdout) as {
       hookSpecificOutput?: { permissionDecision?: string };
     };
     const decision = answer.hookSpecificOutput?.permissionDecision;
-    return decision === "ask" ? "require_approval" : (decision ?? "deny");
+    return decision ?? "deny";
   } catch {
     return "deny";
   }

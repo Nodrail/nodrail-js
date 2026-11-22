@@ -2,6 +2,7 @@ import { z } from "zod";
 import type { AgentConnections, ConnectionSpec } from "./connections.ts";
 import type { AgentPlugins, PluginSpec } from "./plugins.ts";
 import type { Runtime, Tested } from "./project-manifest.ts";
+import type { Connect } from "./connect-schema.ts";
 import type { Telemetry } from "./telemetry-schema.ts";
 import { localRef, resourceName } from "./project-manifest.ts";
 
@@ -12,7 +13,16 @@ import { localRef, resourceName } from "./project-manifest.ts";
  * Policy ≈ Role, PolicyBinding ≈ RoleBinding. Modules stay in the manifest's
  * `imports`, with the catalog and the lock.
  */
-export const RESOURCE_API = "apf.nodrail.com/v1alpha1";
+export const RESOURCE_API = "nodrail.com/v1alpha1";
+/** The apiVersion before the format took the product's name. */
+const RENAMED_API = "apf.nodrail.com/v1alpha1";
+
+const apiVersion = z.literal(RESOURCE_API, {
+  error: (issue) =>
+    issue.input === RENAMED_API
+      ? `${RENAMED_API} was renamed: use apiVersion: ${RESOURCE_API}`
+      : undefined,
+});
 
 const metadata = z.object({ name: resourceName }).strict();
 
@@ -62,7 +72,7 @@ const bindingSpec = z
 const typed = <K extends string, S extends z.ZodType>(kind: K, spec: S) =>
   z
     .object({
-      apiVersion: z.literal(RESOURCE_API),
+      apiVersion,
       kind: z.literal(kind),
       metadata,
       spec,
@@ -154,6 +164,8 @@ export type ProjectSetup = {
   tested: Tested | null;
   /** What observation records, and whether it runs at session start. */
   observe: { names: boolean; sessionStart: boolean };
+  /** The Nodrail this project is connected to, or null when none. */
+  connect: Connect | null;
   /** The resource files, in the order they were read. */
   files: string[];
 };
@@ -175,6 +187,7 @@ export const emptySetup = (): ProjectSetup => ({
   telemetry: null,
   tested: null,
   observe: { names: false, sessionStart: true },
+  connect: null,
   files: [],
 });
 

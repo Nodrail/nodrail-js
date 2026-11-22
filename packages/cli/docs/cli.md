@@ -4,11 +4,11 @@
 
 - **Project commands**, offline: `nodrail add`, `nodrail policy lock` and `nodrail policy export --frozen` manage a repository's policy from catalog modules and your own files. See [Playbooks](playbooks.md).
 - **Policy commands**, offline: `nodrail policy init`, `validate`, `compile`, `eval`, `test`, `check`, `exec`, `hook` and `runs` check and apply a rules file on your machine.
-- **Cloud commands**, with a personal token: `login`, `approvals`, `approve`, `reject`, `activity`, `runs`, `run`, `insights` and `rules pull` or `rules push` work with your Nodrail Cloud workspace.
+- **Control plane commands**, with a personal token: `login`, `activity`, `runs`, `run`, `insights` and `rules pull` or `rules push` work with your workspace on the Nodrail control plane, self-hosted or Nodrail Cloud.
 
 The project and policy commands need no account and send nothing anywhere.
 
-`plan` and `apply` (preview) set up a workspace on Claude Code or Codex. For the versions they have been tested with, what each host proves, migration notes and limits, see [Compatibility](compatibility.md).
+`plan` and `apply` (preview) set up the desired state in `nodrail.yaml` on each agent host: Claude Code, Codex or Copilot. For the versions they have been tested with, what each host proves, migration notes and limits, see [Compatibility](compatibility.md).
 
 Receipt contracts are enforced by the hook on Claude Code and Copilot; briefs and `nodrail contracts render`, `validate` and `explain` are a preview: see [Declared contracts](contracts.md).
 
@@ -33,7 +33,7 @@ Run these in the folder that holds `nodrail.yaml`, usually the root of your repo
 | --------------------------------- | -------------------------------------------------------------- | ------------------------------------------- |
 | `add <@nodrail/module \| ./file>` | Adds a catalog module or a local file, and updates the lock    | 0 done, 1 refused                           |
 | `policy lock`                     | Shows the permission changes since the last lock, records them | 0 done or up to date, 1 refused             |
-| `policy export --frozen`          | Prints the locked policy as one APF file                       | 0 printed, 1 anything differs from the lock |
+| `policy export --frozen`          | Prints the locked policy as one rules file                     | 0 printed, 1 anything differs from the lock |
 | `example` (preview)               | Copies an example project out of the package                   | 0 copied, 1 the folder isn't empty          |
 | `plan` (preview)                  | Shows what `nodrail apply` would set up for the team           | 0 could apply, 1 something blocks it (or, with `--require-active`, the policy isn't enforced) |
 | `apply` (preview)                 | Sets the team up on its host, after showing the plan           | 0 done or nothing to do, 1 refused          |
@@ -75,10 +75,10 @@ It refuses when a catalog module's files don't match the hashes in the lock at t
 ### `policy export --frozen`
 
 ```sh
-nodrail policy export --frozen > effective.apf.yaml
+nodrail policy export --frozen > effective.yaml
 ```
 
-`export --frozen` checks every file against the lock, offline, and prints one ordinary APF file on stdout. It refuses, printing nothing on stdout and the reason on stderr, when:
+`export --frozen` checks every file against the lock, offline, and prints one ordinary rules file on stdout. It refuses, printing nothing on stdout and the reason on stderr, when:
 
 - `nodrail.yaml` or a local file changed since it was locked, or a locked file is no longer imported;
 - a catalog module's files don't match the lock;
@@ -91,7 +91,7 @@ Each message says what to run next, usually `nodrail policy lock`.
 A shell redirect empties the target file before `nodrail` runs. In CI, export to a temporary file and replace the deployed file only on success:
 
 ```sh
-nodrail policy export --frozen > effective.apf.yaml.tmp && mv effective.apf.yaml.tmp effective.apf.yaml
+nodrail policy export --frozen > effective.yaml.tmp && mv effective.yaml.tmp effective.yaml
 ```
 
 ### `example` (preview)
@@ -119,7 +119,7 @@ One `nodrail.yaml` can set up several hosts with `runtimes: [claude-code, codex,
 | --- | --- |
 | `.claude/agents/<name>.md` | Each team member: its description, model, skills to preload, and its instructions as the body |
 | `.claude/skills/<skill>/` | Each member's skill folders, copied |
-| `.nodrail/effective.apf.yaml` | The locked policy, exactly what `policy export --frozen` prints |
+| `.nodrail/effective.yaml` | The locked policy, exactly what `policy export --frozen` prints |
 | `.nodrail/protected.txt` | Every file the setup is made from, and every host's folders (`.claude`, `.codex`, `.agents`, `.nodrail`), which the hook keeps from agents |
 | `.claude/settings.json` | `"agent"` set to the team's entry agent, and a `PreToolUse` hook running `nodrail policy hook` on that policy with `onFailure: "block"`. Other settings and hooks stay as they are. |
 
@@ -137,9 +137,9 @@ For `runtime: codex` it plans:
 | `.codex/agents/<name>.toml` | Each other member: name, description, instructions and model |
 | `.agents/skills/<skill>/` | Each member's skill folders, copied |
 | `.codex/hooks.json` | A `PreToolUse` hook running `nodrail policy hook` on the policy |
-| `.nodrail/effective.apf.yaml`, `.nodrail/protected.txt` | The locked policy and the protected files, the same as for Claude Code |
+| `.nodrail/effective.yaml`, `.nodrail/protected.txt` | The locked policy and the protected files, the same as for Claude Code |
 
-nodrail owns these files whole: one that is already there and wasn't written by nodrail is `!`. A rule that needs a person's review is a deny on Codex, because Codex can't ask: the hook runs with `--host codex`. It checks for `codex` 0.169.0 or later.
+nodrail owns these files whole: one that is already there and wasn't written by nodrail is `!`. The hook runs with `--host codex`. It checks for `codex` 0.169.0 or later.
 
 Codex runs a project's config and hooks only after you trust them, and nodrail never does that for you. Until you have, Codex runs your agents without the policy. Once `apply` has written the files:
 
@@ -156,7 +156,7 @@ For `runtime: copilot` (GitHub Copilot CLI) it plans:
 | `.github/skills/<skill>/` | Each member's skill folders, copied |
 | `.github/mcp.json` | The connections, as MCP servers nodrail starts, when there are any |
 | `.github/hooks/nodrail.json` | A `preToolUse` hook running `nodrail policy hook --host copilot` on the policy, and the session-start observer |
-| `.nodrail/effective.apf.yaml`, `.nodrail/protected.txt` | The locked policy and the protected files, the same as for the other hosts |
+| `.nodrail/effective.yaml`, `.nodrail/protected.txt` | The locked policy and the protected files, the same as for the other hosts |
 
 - **How calls are judged:** the hook reads each of Copilot's calls as the Claude Code call it is, so the same rules decide. `bash` is `Bash`, `view` is `Read`, `create` is `Write`, `edit` is `Edit`, `rg` is `Grep`, `task` is a subagent, and `<server>-<tool>` is the connection's tool. An `apply_patch` is judged once per file it names, and the first deny wins.
 - **No asking:** a review is a deny, because Copilot's hook can't ask.
@@ -179,6 +179,14 @@ Whether apply *could* go ahead (`ready`, the exit code) is one question; whether
 | `configured` | The hook is in place and no settings file turns hooks off: `disableAllHooks` in `~/.claude/settings.json` (or `$CLAUDE_CONFIG_DIR`), `.claude/settings.local.json` or the managed settings, or `allowManagedHooksOnly` in the managed settings. Claude Code has no trust step and can't be asked. |
 | `inactive` | It doesn't run yet; the reason says what to do, such as trusting the hook in Codex or running `apply`. |
 | `unknown` | The host couldn't be asked, such as `codex` missing from `PATH`. |
+
+With `connect:` and `decide: cloud` (see [Connect to Nodrail](playbooks.md#connect-to-nodrail-in-progress)), `plan` also compares the policy live in that environment with the lock, using your own token for that address (`nodrail login --url <address>`). It reports one of:
+
+- **in sync**
+- **apply publishes** the lock, with what it adds, changes and removes
+- **drift:** the live rules were changed in Nodrail, or come from another project. `apply` refuses until you bring the change into the repo, or pass `--replace-live` to take them over.
+
+`apply` publishes before it writes any file, and only what `plan` previewed. A change made in between is refused.
 
 `plan` exits with 0 whenever apply could go ahead, whatever the activation. For automation that must not run agents without the policy, add `--require-active`: `plan` then also exits with 1 unless the state is `verified` or `configured`. The `active` key stays as before: `true` or `false` for Codex, `null` for Claude Code.
 
@@ -261,7 +269,7 @@ nodrail budgets status
 nodrail budgets reconcile claude-code:toolu_01… --released --note "the outbox has no such message"
 ```
 
-Offline except `submit`, and run by a person, never an agent: the setup guard refuses `nodrail` to agents. `evidence run` records what a check wrote to `$NODRAIL_EVIDENCE_OUT` about the current revision; `submit` sends a CI result to Cloud with the job's OIDC token. `budgets status` reads the local run ledger; `reconcile` settles a reservation whose outcome is unknown. See [evidence.md](evidence.md) and [budgets.md](budgets.md).
+Offline except `submit`, and run by a person, never an agent: the setup guard refuses `nodrail` to agents. `evidence run` records what a check wrote to `$NODRAIL_EVIDENCE_OUT` about the current revision; `submit` sends a CI result to the control plane with the job's OIDC token. `budgets status` reads the local run ledger; `reconcile` settles a reservation whose outcome is unknown. See [evidence.md](evidence.md) and [budgets.md](budgets.md).
 
 ## Policy commands
 
@@ -289,24 +297,21 @@ nodrail policy --help
 
 To use `nodrail` in the Claude Code hook, write `nodrail policy hook` where the [quickstart](../../policy-engine/docs/getting-started.md#connect-claude-code) writes `nodrail-policy hook`.
 
-## Cloud commands
+## Control plane commands
 
-These work with your Nodrail Cloud workspace and need a personal API token, which starts with `ndp_`. They are part of the [Personal API (preview)](https://nodrail.com/docs/api).
+These work with your workspace on the Nodrail control plane, self-hosted or Nodrail Cloud, and need a personal API token, which starts with `ndp_`. They use the [management API (preview)](https://nodrail.com/docs/api).
 
-> **Never give a token that can decide or publish to an agent Nodrail governs.** An agent holding a `decide` token could approve its own requests; one holding `rules:write` could rewrite the rules that hold it back. Agents and assistants get `read` tokens.
+> **Never give a token that can publish to an agent Nodrail governs.** One holding `rules:write` could rewrite the rules that hold it back. Agents and assistants get `read` tokens.
 
 | Command             | What it does                                                        |
 | ------------------- | ------------------------------------------------------------------- |
 | `login`             | Saves a personal token; `--token-stdin` to pipe it                  |
 | `logout`            | Forgets the saved token                                             |
 | `whoami`            | The person, workspace, role and scopes behind the token             |
-| `approvals`         | Requests waiting for a person; `--agent <key>`, `--watch`           |
-| `approve <id>`      | Approves a request once, after showing it and asking                |
-| `reject <id>`       | Rejects a request, after showing it and asking                      |
 | `activity`          | Events; `--q`, `--agent`, `--outcome`, `--kind`, `--range`, `--run` |
 | `runs`              | Runs; `--q`, `--agent`, `--outcome`, `--range`                      |
 | `run <id>`          | One run and its timeline                                            |
-| `insights`          | Approval and rule numbers; `--days 7`, `30` or `90`                 |
+| `insights`          | Decision and rule numbers; `--days 7`, `30` or `90`                 |
 | `rules pull [file]` | The rules file, to stdout without a file                            |
 | `rules push <file>` | Previews, shows the difference, asks and publishes                  |
 | `workspace publish [folder]` (preview) | Makes the lock here the revision your team should run, after asking; digests only (`rules:write`) |
@@ -314,15 +319,13 @@ These work with your Nodrail Cloud workspace and need a personal API token, whic
 
 ```sh
 nodrail login
-nodrail approvals --watch
-nodrail approve 6d1c2f0a-…
 nodrail activity --outcome denied --range 24h
 nodrail rules pull rules.yaml
 ```
 
 `workspace publish` needs the project's stable `id:` in nodrail.yaml: without it, two projects with the same folder name would share one intended revision, so it stops and suggests one. It sends the id, the project's name (its folder's), the lock's workspace and policy digests, and the lock's file paths with their digests. It never sends a file's contents: git carries those. The **Inventory** page then marks each machine applied from another revision as behind. To have machines report there, see [Observation](playbooks.md#observation-preview).
 
-`<id>` is the UUID that `nodrail approvals` lists, not the `APR-` reference. The token comes from `NODRAIL_TOKEN` when it is set, else from `nodrail login`. Tokens, scopes and what each command sends are described in the [Personal API (preview)](https://nodrail.com/docs/api).
+The token comes from `NODRAIL_TOKEN` when it is set, else from `nodrail login`. Tokens, scopes and what each command sends are described in the [management API (preview)](https://nodrail.com/docs/api).
 
 ### Options
 

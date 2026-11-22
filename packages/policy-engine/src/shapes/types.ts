@@ -49,7 +49,6 @@ export const SURFACES = [
   "S05",
   "S06",
   "S07",
-  "S08",
   "S09",
 ] as const;
 export type SurfaceId = (typeof SURFACES)[number];
@@ -58,7 +57,6 @@ export const CONSUMERS = [
   "C01",
   "C02",
   "C03",
-  "C04",
   "C05",
   "C06",
   "C07",

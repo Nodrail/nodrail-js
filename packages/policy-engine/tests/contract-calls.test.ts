@@ -13,7 +13,7 @@ import { describeToolCall } from "../src/actions";
 import { readBrief, type BriefContract } from "../src/shapes/brief";
 import { checkInput } from "../src/shapes/inputs";
 import { compilePolicies, renderPolicies } from "../src/yaml";
-import { cli } from "./run-cli.ts";
+import { cli, homeAt } from "./run-cli.ts";
 
 const CONTRACTS = `- required_engine_version: 4
 - contracts:
@@ -47,12 +47,12 @@ const RULES = `${CONTRACTS}- rule: Small refunds in staging
   resource: { kind: mcp_tool, match: any }
   where: { input.amount: { max: 5000 }, input.environment: staging }
   effect: allow
-- rule: Large refunds go to a person
+- rule: Never refund large amounts
   tool: stripe
   operation: refund
   resource: { kind: mcp_tool, match: any }
   where: { input.amount: { min: 5001 } }
-  effect: require_approval
+  effect: deny
 - rule: Never refund in production
   tool: stripe
   operation: refund
@@ -86,10 +86,13 @@ async function hook(
   { text = RULES, host = [] as string[] } = {},
 ): Promise<Answer> {
   const { folder, file } = rulesFile(text);
+  // The run ledger of a folder outside git is in the home: a fresh one, so
+  // no earlier run's history decides these calls.
+  const restore = homeAt(mkdtempSync(join(tmpdir(), "nodrail-home-")));
   const sent = await cli(
     ["hook", file, ...host],
     JSON.stringify({ session_id: "s", cwd: folder, ...event }),
-  );
+  ).finally(restore);
   expect(sent.code).toBe(0);
   if (!sent.stdout)
     return { permissionDecision: "allow", permissionDecisionReason: "" };
@@ -132,13 +135,13 @@ describe(
       expect(answer.permissionDecision).toBe("allow");
     });
 
-    test("a large refund goes to a person", async () => {
+    test("a large refund is denied by its typed where", async () => {
       const answer = await hook(
         refund({ amount: 9000, currency: "usd", environment: "staging" }),
       );
-      expect(answer.permissionDecision).toBe("ask");
+      expect(answer.permissionDecision).toBe("deny");
       expect(answer.permissionDecisionReason).toContain(
-        "large-refunds-go-to-a-person",
+        "never-refund-large-amounts",
       );
     });
 
@@ -346,11 +349,14 @@ describe(
 
     test("Copilot's task, native or in Claude Code's form, is read by its agent_type", async () => {
       const { folder, file } = rulesFile();
-      const send = (event: object) =>
-        cli(
+      const home = mkdtempSync(join(tmpdir(), "nodrail-home-"));
+      const send = (event: object) => {
+        const restore = homeAt(home);
+        return cli(
           ["hook", file, "--host", "copilot"],
           JSON.stringify({ sessionId: "s", cwd: folder, ...event }),
-        );
+        ).finally(restore);
+      };
       const big = {
         agent_type: "dev",
         description: "d",
@@ -361,6 +367,7 @@ describe(
       // Copilot 1.0.114 runs Claude Code's hook as `Agent` with its own
       // `agent_type`: read as Copilot's task, so dev is dev, not general-purpose.
       process.env.COPILOT_HOOK_DEPTH = "1";
+      const restore = homeAt(home);
       try {
         const compat = await cli(
           ["hook", file],
@@ -375,6 +382,7 @@ describe(
         expect(compat.stdout).toContain("dev-never-on-a-big-budget");
       } finally {
         delete process.env.COPILOT_HOOK_DEPTH;
+        restore();
       }
     });
 
@@ -556,7 +564,7 @@ test("a rule document checked against a hand-written where without values fails 
     params: {},
   };
   // Without validated values: the allow with where never matches; the deny
-  // on production and the review on large amounts still do.
+  // on production and the one on large amounts still do.
   expect(
     simulate({ document: compiled.document, descriptor, now: new Date() })
       .outcome,

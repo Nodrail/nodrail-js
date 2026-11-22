@@ -123,7 +123,6 @@ describe("through the SDK", () => {
     const nodrail = createNodrail({
       url: "https://nodrail.test",
       credential: "c",
-      waitMs: 0,
       fetch: server.fetch,
       env: {},
       subject: null,

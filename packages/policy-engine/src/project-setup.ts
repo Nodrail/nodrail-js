@@ -69,6 +69,7 @@ export function readSetup(
   setup.telemetry = manifest.telemetry ?? null;
   setup.id = manifest.id ?? null;
   setup.tested = manifest.tested ?? null;
+  setup.connect = manifest.connect ?? null;
   setup.observe = {
     names: manifest.observe?.names ?? false,
     sessionStart: manifest.observe?.sessionStart ?? true,

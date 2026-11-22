@@ -1,8 +1,8 @@
 # @nodrail/client
 
-Connect your agent’s tools to Nodrail Cloud for shared policies, approvals and decision history. A wrapped tool runs only after the client receives a fresh allow for the exact call. A denied request, a timeout or an invalid response blocks that invocation.
+Connect your agent’s tools to the Nodrail control plane, self-hosted or Nodrail Cloud, for the published policy, runs, budgets and decision history. A wrapped tool runs only after the client receives a fresh allow for the exact call. A denied request, a timeout or an invalid response blocks that invocation.
 
-For local YAML policies, use the [APF policy engine](https://github.com/Nodrail/nodrail-js/tree/main/packages/policy-engine).
+For local rules files with no server, use the [Nodrail policy engine](https://github.com/Nodrail/nodrail-js/tree/main/packages/policy-engine).
 
 **Developer preview:** the API may still change before 1.0. Licensed under
 [Apache-2.0](https://github.com/Nodrail/nodrail-js/blob/main/LICENSE). Report
@@ -52,18 +52,18 @@ const { text } = await generateText({ model, tools: guard(tools), prompt });
 That's the whole integration. Full examples, each checked by the type checker on
 every change:
 
-| Framework | Example | Pass to `guard` |
-| --- | --- | --- |
-| Vercel AI SDK | [`vercel-ai-sdk.ts`](examples/frameworks/vercel-ai-sdk.ts) | your `tools` record |
-| LangChain, LangGraph | [`langchain.ts`](examples/frameworks/langchain.ts) | your `tools` array, or use the [middleware](#langchain-middleware) |
-| OpenAI Agents SDK | [`openai-agents.ts`](examples/frameworks/openai-agents.ts) | your `tools` array |
-| Your own loop | [`plain-function.ts`](examples/frameworks/plain-function.ts) | the functions that do the work |
-| Mastra | | a tool or record of tools |
-| LlamaIndex | | a tool or array of tools |
-| Anthropic SDK tool runner | | your `tools` array |
-| Claude Agent SDK | | the tools from `tool()` |
-| MCP SDK | [`mcp-server.ts`](examples/frameworks/mcp-server.ts) | the server, with `guardMcpServer`, [see below](#mcp-servers) |
-| OpenAI SDK `runTools` | | your `tools` array |
+| Framework                 | Example                                                      | Pass to `guard`                                                    |
+| ------------------------- | ------------------------------------------------------------ | ------------------------------------------------------------------ |
+| Vercel AI SDK             | [`vercel-ai-sdk.ts`](examples/frameworks/vercel-ai-sdk.ts)   | your `tools` record                                                |
+| LangChain, LangGraph      | [`langchain.ts`](examples/frameworks/langchain.ts)           | your `tools` array, or use the [middleware](#langchain-middleware) |
+| OpenAI Agents SDK         | [`openai-agents.ts`](examples/frameworks/openai-agents.ts)   | your `tools` array                                                 |
+| Your own loop             | [`plain-function.ts`](examples/frameworks/plain-function.ts) | the functions that do the work                                     |
+| Mastra                    |                                                              | a tool or record of tools                                          |
+| LlamaIndex                |                                                              | a tool or array of tools                                           |
+| Anthropic SDK tool runner |                                                              | your `tools` array                                                 |
+| Claude Agent SDK          |                                                              | the tools from `tool()`                                            |
+| MCP SDK                   | [`mcp-server.ts`](examples/frameworks/mcp-server.ts)         | the server, with `guardMcpServer`, [see below](#mcp-servers)       |
+| OpenAI SDK `runTools`     |                                                              | your `tools` array                                                 |
 
 A framework's tools keep their exact type, so the result goes wherever the
 original went. A plain function now returns a promise, since it asks first. If
@@ -77,24 +77,22 @@ this call with these arguments. Your team's rules in Nodrail decide:
 
 - **Allowed:** the tool runs as before.
 - **Denied:** the tool doesn't run. The agent gets the reason as the tool's
-  result, so it can tell the user or try something else.
-- **Needs a person:** someone gets the request in Nodrail and allows or denies
-  it. The call waits up to 5 minutes for the answer, then counts as blocked
-  and withdraws the request, so nobody approves a call that will not run.
+  result, so it can fix what is missing (a gate waiting for a review step, say)
+  and try again, or tell the user. A call no rule covers is denied too.
 
-Every decision is recorded. Rules change in Nodrail, without a deploy.
+Nothing waits for a person, and every decision is recorded. Rules change in
+Nodrail, without a deploy.
 
-### Try all three
+### Try both
 
-Ask your agent to use a tool with no rule yet: the call waits, and the request
-appears in Nodrail under **Approvals**. Allow it there and the tool runs. Then,
-under **Policies**, add a rule that allows or denies that tool, and call it again.
+Ask your agent to use a tool with no rule yet: the call is denied, and the
+decision appears in Nodrail under **Activity**. Then, under **Policies**, add a
+rule that allows that tool, and call it again.
 
 ### In development and tests
 
 Without a credential nothing throws: every guarded call is blocked and says the
-credential is missing. Set `NODRAIL_WAIT_SECONDS=0` to block at once instead of
-waiting for a person. In unit tests of the tools themselves, test the unwrapped
+credential is missing. In unit tests of the tools themselves, test the unwrapped
 tools.
 
 ### LangChain middleware
@@ -144,7 +142,9 @@ then on is checked under the name it registers with:
 ```ts
 import { guardMcpServer } from "@nodrail/client";
 
-const server = guardMcpServer(new McpServer({ name: "github", version: "1.0.0" }));
+const server = guardMcpServer(
+  new McpServer({ name: "github", version: "1.0.0" }),
+);
 
 server.registerTool(
   "delete_repo",
@@ -161,22 +161,19 @@ reason. Tested against the real `@modelcontextprotocol/sdk` client and server.
 
 ### Options
 
-| Option      | Default                 | Meaning                                                   |
-| ----------- | ----------------------- | --------------------------------------------------------- |
-| `waitMs`    | `NODRAIL_WAIT_SECONDS`, or 5 minutes | How long a call waits for a person. `0` blocks at once and leaves the request open for a person to decide later. |
-| `onBlocked` | `"return"`              | `"throw"`, or a function, to change what a blocked tool does. Not used by the LangChain middleware, which always answers with an error message to the model. |
-| `describe`  | the tool's name         | What rules see for each tool. `guard` only.               |
-| `name`      | the function's name     | Needed for a function with no name. `guard` only.         |
-| `run`       | `NODRAIL_RUN`, else no run | The run calls belong to when no `inRun` or `step` says otherwise. `createNodrail()` only. |
-| `env`       | `process.env`           | Where `NODRAIL_*` settings are read from. `createNodrail()` only. |
-| `fetch`     | the global `fetch`      | The function requests to Nodrail use. `createNodrail()` only. |
-| `sleep`     | a timer                 | How the client waits between checks for a person's answer, for tests. `createNodrail()` only. |
+| Option      | Default                    | Meaning                                                                                                                                                      |
+| ----------- | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `onBlocked` | `"return"`                 | `"throw"`, or a function, to change what a blocked tool does. Not used by the LangChain middleware, which always answers with an error message to the model. |
+| `describe`  | the tool's name            | What rules see for each tool. `guard` only.                                                                                                                  |
+| `name`      | the function's name        | Needed for a function with no name. `guard` only.                                                                                                            |
+| `run`       | `NODRAIL_RUN`, else no run | The run calls belong to when no `inRun` or `step` says otherwise. `createNodrail()` only.                                                                    |
+| `env`       | `process.env`              | Where `NODRAIL_*` settings are read from. `createNodrail()` only.                                                                                            |
+| `fetch`     | the global `fetch`         | The function requests to Nodrail use. `createNodrail()` only.                                                                                                |
+| `sleep`     | a timer                    | How the client waits before sending a lost report again, for tests. `createNodrail()` only.                                                                  |
 
-`waitMs` and `onBlocked` also go to `createNodrail()`, which makes an instance
-with its own `url`, `credential` and `adapterVersion`. Each request to Nodrail
-times out after 10 seconds, and a call that waits for a person holds the agent
-until the answer or `waitMs`: keep that in mind in serverless functions with a
-short time limit.
+`onBlocked` also goes to `createNodrail()`, which makes an instance with its own
+`url`, `credential` and `adapterVersion`. Each request to Nodrail times out
+after 10 seconds, and a call is decided at once: nothing waits for a person.
 
 ### Without a framework
 
@@ -196,7 +193,10 @@ await nodrail.run(
 );
 
 // Or ask, act on the answer yourself, and say how it went.
-const decision = await nodrail.check({ tool: "github", operation: "issues.delete" });
+const decision = await nodrail.check({
+  tool: "github",
+  operation: "issues.delete",
+});
 if (decision.allowed) {
   await deleteIssue();
   await nodrail.report(decision, "success");
@@ -234,7 +234,7 @@ tree it is sent as unknown, which keeps such a gate closed. Pass
 
 **SDK walkthrough preview.** The examples below require client 0.2.0 or later, which provides `inRun` and `step`.
 
-Gates and budgets decide with what already happened in a piece of work: hold
+Gates and budgets decide with what already happened in a piece of work: deny
 the pull request until QA passed after the last change, or limit how many tool
 calls one agent step makes. Tell Nodrail which run a call belongs to, and wrap
 each agent's work as a step:
@@ -244,7 +244,7 @@ const nodrail = createNodrail({ run: "ENG-42" }); // or NODRAIL_RUN
 
 await nodrail.step("dev", () => devAgent.run(task));
 const review = await nodrail.step("qa", () => qaAgent.run(task));
-await nodrail.step("github", () => releaseAgent.run(task)); // a gate can hold its calls
+await nodrail.step("github", () => releaseAgent.run(task)); // a gate denies its calls until met
 ```
 
 Every guarded call made while a step runs belongs to it, through your agent
@@ -260,7 +260,7 @@ and the error goes on. Recording a step never stops the work: if it can't be
 recorded, gates that need it stay closed.
 
 `step` needs a run, and throws if there is none. Without a run, calls are
-decided as before, and any gate they match holds them.
+decided as before, and any gate they match denies them.
 
 ### Where the connection comes from
 
@@ -279,17 +279,16 @@ its secrets after importing its tools is checked as soon as they are there.
 The agent reads a sentence saying why, and `NodrailBlockedError.code` (or
 `decision.code`) says the same for your code:
 
-| Code | What it means | What to do |
-| --- | --- | --- |
-| `APPROVAL_PENDING`, `UNKNOWN_PERMISSION_BLOCKED` | Waiting for a person | Allow it in Nodrail under **Approvals**, then try again |
-| `DENIED` | A rule or a person said no | Change the rule, if it should be allowed |
-| `EXPIRED`, `INVALIDATED` | The request timed out, or something changed | Try again for a new decision |
-| `NOT_CONFIGURED` | No credential found | Set `NODRAIL_CREDENTIAL` |
-| `UNAUTHENTICATED` | The credential was refused | Check it, and that `NODRAIL_URL` points at your Nodrail |
-| `RATE_LIMITED`, `QUOTA_EXCEEDED` | Too many calls, or the month's allowance is used | Wait, or raise the plan |
-| `UNAVAILABLE` | Nodrail couldn't be reached | Check the network; nothing ran |
-| `INSECURE_URL` | `NODRAIL_URL` is plain `http` to another machine, so the credential wasn't sent | Use `https`. Plain `http` works only for `localhost` |
-| `INVALID_ACTION` | The call couldn't be described, for example a circular input | Pass plain JSON arguments |
+| Code                             | What it means                                                                   | What to do                                                                                     |
+| -------------------------------- | ------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| `DENIED`                         | A rule denies it, no rule allows it, or a gate or budget isn't met              | Meet what the reason says is missing and try again, or change the rule if it should be allowed |
+| `EXPIRED`, `INVALIDATED`         | The request timed out, or something changed                                     | Try again for a new decision                                                                   |
+| `NOT_CONFIGURED`                 | No credential found                                                             | Set `NODRAIL_CREDENTIAL`                                                                       |
+| `UNAUTHENTICATED`                | The credential was refused                                                      | Check it, and that `NODRAIL_URL` points at your Nodrail                                        |
+| `RATE_LIMITED`, `QUOTA_EXCEEDED` | Too many calls, or the month's allowance is used                                | Wait, or raise the plan                                                                        |
+| `UNAVAILABLE`                    | Nodrail couldn't be reached                                                     | Check the network; nothing ran                                                                 |
+| `INSECURE_URL`                   | `NODRAIL_URL` is plain `http` to another machine, so the credential wasn't sent | Use `https`. Plain `http` works only for `localhost`                                           |
+| `INVALID_ACTION`                 | The call couldn't be described, for example a circular input                    | Pass plain JSON arguments                                                                      |
 
 ### What guard can't cover
 
@@ -329,29 +328,30 @@ that history. Any other agent uses
 **Upgrading:** starting a subagent used to be ungoverned by the plugin. It is
 now tool `claude-code`, operation `agent`, with the subagent's type as a
 resource of type `agent` (`vercel:deployment-expert` becomes
-`vercel-deployment-expert`). Until a rule allows it, each start waits for a
-person. Rule files with a rule for the earlier resource, type `tool` with id
+`vercel-deployment-expert`). Until a rule allows it, each start is denied.
+Rule files with a rule for the earlier resource, type `tool` with id
 `Agent`, no longer compile.
 
 The Codex hook sends the run the same way. Codex doesn't say which subagent
 makes a call, so every call is the main agent's: gates on commands (such as
 `git push`) and budgets per run work, and a gate waiting for another agent's
-step holds until that step is recorded some other way, for example with
+step stays unmet, and the call is denied, until that step is recorded some other way, for example with
 `nodrail.step()` in a script.
 
-To see all three outcomes, add these rules under **Policies**, then ask the agent
+To see each outcome, add these rules under **Policies**, then ask the agent
 to run the commands:
 
-| Outcome            | Rule                                                                             | Command                 |
-| ------------------ | -------------------------------------------------------------------------------- | ----------------------- |
-| Allowed by a rule  | Allow `shell` `command.run`, resource type `command`, starting with `git status` | `git status`            |
-| Waits for a person | No rule needed                                                                   | `npm publish --dry-run` |
-| Denied             | Deny `shell` `command.run`, resource type `command`, exactly `git push`          | `git push`              |
+| Outcome           | Rule                                                                             | Command                 |
+| ----------------- | -------------------------------------------------------------------------------- | ----------------------- |
+| Allowed by a rule | Allow `shell` `command.run`, resource type `command`, starting with `git status` | `git status`            |
+| Denied, no rule   | No rule needed                                                                   | `npm publish --dry-run` |
+| Denied by a rule  | Deny `shell` `command.run`, resource type `command`, exactly `git push`          | `git push`              |
 
 ## Rule examples
 
 [`examples/policies`](examples/policies) holds one rule file per pattern: read one
-resource, require review for writes, and deny a sensitive operation. Try them
+resource, write only after a reviewer agent passed the work, and deny a
+sensitive operation. Try them
 without an account using the policy engine's command line:
 
 ```sh
@@ -359,44 +359,44 @@ npx -p @nodrail/policy-engine nodrail-policy eval examples/policies \
   --tool github --operation issues.read --kind repository --resource acme/support
 ```
 
-A simulation never approves anything or issues a permit.
+A simulation never issues a permit.
 
 ## Compatibility
 
-| Component            | Supported                                | Checked with      |
-| -------------------- | ---------------------------------------- | ----------------- |
-| Claude Code          | 2.1.295 or later, which adds `onFailure` | 2.1.322 on macOS, real CLI: a missing, timed-out or crashing hook blocks the tool |
-| Codex                | 0.155 or later                           | 0.155.1 on macOS, real CLI |
-| LangChain            | 1.x                                      | 1.6 agent loop    |
-| Vercel AI SDK        | 7                                        | 7.0 agent loop    |
-| OpenAI Agents SDK    | 0.21                                     | 0.21 agent loop   |
-| MCP SDK              | 1.x                                      | 1.32 client and server |
-| Mastra, LlamaIndex, Anthropic and OpenAI SDKs, Claude Agent SDK | Recognised by shape | Shape only |
-| Node.js              | 22 or later                              | 22 and 24         |
-| Linux                | Blocking paths checked on Alpine, arm64  | Node 22 in Docker |
-| Windows              | Supported                                | Node 22 in CI; the agents' hooks not yet in the real CLIs |
-| TypeScript consumers | `moduleResolution: bundler` or `nodenext` | TypeScript 7      |
-| Protocol             | schema 1, canonicalizer 1                |                   |
+| Component                                                       | Supported                                 | Checked with                                                                      |
+| --------------------------------------------------------------- | ----------------------------------------- | --------------------------------------------------------------------------------- |
+| Claude Code                                                     | 2.1.295 or later, which adds `onFailure`  | 2.1.322 on macOS, real CLI: a missing, timed-out or crashing hook blocks the tool |
+| Codex                                                           | 0.155 or later                            | 0.155.1 on macOS, real CLI                                                        |
+| LangChain                                                       | 1.x                                       | 1.6 agent loop                                                                    |
+| Vercel AI SDK                                                   | 7                                         | 7.0 agent loop                                                                    |
+| OpenAI Agents SDK                                               | 0.21                                      | 0.21 agent loop                                                                   |
+| MCP SDK                                                         | 1.x                                       | 1.32 client and server                                                            |
+| Mastra, LlamaIndex, Anthropic and OpenAI SDKs, Claude Agent SDK | Recognised by shape                       | Shape only                                                                        |
+| Node.js                                                         | 22 or later                               | 22 and 24                                                                         |
+| Linux                                                           | Blocking paths checked on Alpine, arm64   | Node 22 in Docker                                                                 |
+| Windows                                                         | Supported                                 | Node 22 in CI; the agents' hooks not yet in the real CLIs                         |
+| TypeScript consumers                                            | `moduleResolution: bundler` or `nodenext` | TypeScript 7                                                                      |
+| Protocol                                                        | schema 1, canonicalizer 1                 |                                                                                   |
 
 How a Claude Code call maps to a rule is part of the contract. A change to it uses
 new operation names or resource types, so an existing rule can never silently
 start matching something else; at worst it stops matching, and the call is
 blocked until the rule is updated.
 
-| Claude Code tool                                                               | Tool    | Operation          | Resource   |
-| ------------------------------------------------------------------------------ | ------- | ------------------ | ---------- |
-| Bash, PowerShell (one simple command)                                          | `shell` | `command.run`      | `command`  |
-| Bash, PowerShell (chains, redirects, substitution, or running another program) | `shell` | `command.compound` | `command`  |
-| Write                                                                          | `files` | `file.write`       | `file`     |
-| Edit, MultiEdit                                                                | `files` | `file.edit`        | `file`     |
-| NotebookEdit                                                                   | `files` | `notebook.edit`    | `file`     |
-| WebFetch                                                                       | `web`   | `fetch`            | `url`      |
-| WebSearch                                                                      | `web`   | `search`           | `query`    |
-| `mcp__server__tool`                                                            | server  | tool               | `mcp_tool` |
-| Agent (starting a subagent)                                                    | `claude-code` | `agent`      | `agent`, id the subagent's type |
-| Codex `apply_patch` (one file)                                                 | `files` | `file.write`, `file.edit` or `file.delete` | `file` |
-| Codex `apply_patch` (several files, or a rename)                               | `files` | `file.patch`       | `file`, id `patch:sha256:…` |
-| Any other tool                                                                 | `claude-code` | the tool's name in lowercase | `tool` |
+| Claude Code tool                                                               | Tool          | Operation                                  | Resource                        |
+| ------------------------------------------------------------------------------ | ------------- | ------------------------------------------ | ------------------------------- |
+| Bash, PowerShell (one simple command)                                          | `shell`       | `command.run`                              | `command`                       |
+| Bash, PowerShell (chains, redirects, substitution, or running another program) | `shell`       | `command.compound`                         | `command`                       |
+| Write                                                                          | `files`       | `file.write`                               | `file`                          |
+| Edit, MultiEdit                                                                | `files`       | `file.edit`                                | `file`                          |
+| NotebookEdit                                                                   | `files`       | `notebook.edit`                            | `file`                          |
+| WebFetch                                                                       | `web`         | `fetch`                                    | `url`                           |
+| WebSearch                                                                      | `web`         | `search`                                   | `query`                         |
+| `mcp__server__tool`                                                            | server        | tool                                       | `mcp_tool`                      |
+| Agent (starting a subagent)                                                    | `claude-code` | `agent`                                    | `agent`, id the subagent's type |
+| Codex `apply_patch` (one file)                                                 | `files`       | `file.write`, `file.edit` or `file.delete` | `file`                          |
+| Codex `apply_patch` (several files, or a rename)                               | `files`       | `file.patch`                               | `file`, id `patch:sha256:…`     |
+| Any other tool                                                                 | `claude-code` | the tool's name in lowercase               | `tool`                          |
 
 A command, URL or search that contains something that looks like a secret uses
 `command.redacted`, `fetch.redacted` or `search.redacted` instead, so a rule for
@@ -408,10 +408,10 @@ and `github` can never share a rule.
 ## What leaves your machine
 
 - **File contents:** never. Only a fingerprint and the path.
-- **Commands, URLs, searches, MCP and tool inputs:** sent so a person can review them, with
-  anything that looks like a secret replaced by `[redacted]`. The filter is best
-  effort, so keep secrets out of them. A fingerprint of the original binds an
-  approval to the exact call.
+- **Commands, URLs, searches, MCP and tool inputs:** sent so rules can decide
+  them and Activity can show them, with anything that looks like a secret
+  replaced by `[redacted]`. The filter is best effort, so keep secrets out of
+  them. A fingerprint of the original binds a decision to the exact call.
 - **Results:** only whether the tool succeeded and how long it took.
 - **Runs:** the run key each call belongs to (`NODRAIL_RUN`, else the
   repository and branch, such as `github.com/acme/app/fix-42`, without
@@ -432,8 +432,6 @@ and `github` can never share a rule.
 - File paths are resolved and URLs normalised before rules see them, in the
   machine's own form (`C:\repo\` on Windows). Shell prefix rules are a
   convenience, not a sandbox: prefer exact rules for commands.
-- A person's approval covers one call. Retrying after the wait creates a new
-  request.
 - Each installation can make 600 calls a minute.
 - A workspace has a monthly allowance of agent actions. Past it, new actions are
   blocked. Checks never stop running and nothing becomes allowed.

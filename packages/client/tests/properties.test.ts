@@ -10,7 +10,6 @@ describe("whatever a tool is given", () => {
   test("with no credential, it never runs", async () => {
     const nodrail = createNodrail({
       env: { NODRAIL_HOME: "/nonexistent" },
-      waitMs: 0,
     });
     const work = vi.fn((_input: unknown) => "ran");
     const send = nodrail.guard(work, { name: "send" });
@@ -28,7 +27,6 @@ describe("whatever a tool is given", () => {
     const nodrail = createNodrail({
       url: "https://nodrail.test",
       credential: "c",
-      waitMs: 0,
       fetch: server.fetch,
       env: {},
     });

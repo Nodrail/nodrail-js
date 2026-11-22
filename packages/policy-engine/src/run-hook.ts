@@ -131,11 +131,9 @@ function recordStep(
   }
 }
 
-/** Whether the call goes ahead, or goes to the person who may let it. */
+/** Whether the call goes ahead: allowed, or covered by no rule where those are allowed. */
 const wentAhead = (outcome: string, unmatched: LocalHookOptions["unmatched"]) =>
-  outcome === "allow" ||
-  outcome === "require_approval" ||
-  (outcome === "none" && unmatched === "ask");
+  outcome === "allow" || (outcome === "none" && unmatched === "allow");
 
 type Decided = { result: HookResult; wentAhead: boolean };
 

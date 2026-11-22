@@ -1,20 +1,31 @@
-# Agent Policy Format for AI agent permissions
+# Nodrail: the open control plane for AI agent development
 
-Write agent permissions in YAML, test the decisions locally and enforce them at the tool call. Nodrail maintains the open-source APF engine and a separate TypeScript client for teams using Nodrail Cloud.
+Nodrail keeps your agents' setup and rules in your repository and decides every agent action before it runs. `nodrail.yaml`, the rules files it imports and `nodrail.lock.yaml` are the desired state. `nodrail plan` shows what would change on each agent host (Claude Code, Codex, Copilot). `nodrail apply` sets it up, with a hook that allows or denies each action using the open engine. This repository holds the engine, the CLI and the TypeScript client.
 
 [![CI](https://github.com/Nodrail/nodrail-js/actions/workflows/ci.yml/badge.svg)](https://github.com/Nodrail/nodrail-js/actions/workflows/ci.yml)
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/Nodrail/nodrail-js/badge)](https://scorecard.dev/viewer/?uri=github.com/Nodrail/nodrail-js)
 [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/16692/badge)](https://www.bestpractices.dev/projects/16692)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 
-Write and test your first tool permission rule with the [Agent Policy Format guide](https://nodrail.com/docs/apf).
+## Set up a project
 
-## Try a policy locally
+Install the CLI with Node.js 22 or later, copy the example team and set it up on Claude Code.
+
+```sh
+npm install -g @nodrail/cli
+nodrail example support-desk ./desk
+nodrail plan ./desk --runtime claude-code    # what apply would set up, starting nothing
+nodrail apply ./desk --runtime claude-code   # set it up, after showing the plan
+```
+
+Read the [CLI README](packages/cli/README.md) for `nodrail.yaml`, the catalog and the lock.
+
+## Try a rules file
 
 Install the engine with Node.js 22 or later.
 
 ```sh
-pnpm add --global @nodrail/policy-engine
+npm install -g @nodrail/policy-engine
 ```
 
 In an empty directory, save this as `rules.yaml`.
@@ -43,20 +54,23 @@ The Claude Code local hook reads your rules before covered tools run. You can al
 
 - [Connect the local Claude Code hook](packages/policy-engine/docs/getting-started.md).
 - [Embed the evaluator](packages/policy-engine/docs/library.md) or use the [published test cases](packages/policy-engine/tests/fixtures/conformance-v1.json) when building a compatible evaluator.
-- [Check integration coverage](https://nodrail.com/integrations), including the Cloud-connected Codex plugin.
+- [Check integration coverage](https://nodrail.com/integrations), including the Codex plugin.
 
 ## GitHub merge check (pilot)
 
-We used the APF engine in a local adapter to evaluate QA evidence for a pull request. The adapter matched the receipt to the revision under review and posted a status to that commit. GitHub required the status on the pilot branch. A formatting-only push needed a fresh receipt before the PR was eligible to merge again. [Read the pilot case study](https://nodrail.com/guides/github-merge-check-ai-agent-qa) · [Inspect PR #11](https://github.com/Nodrail/agent-plugins/pull/11).
+We used the engine in a local adapter to evaluate QA evidence for a pull request. The adapter matched the receipt to the revision under review and posted a status to that commit. GitHub required the status on the pilot branch. A formatting-only push needed a fresh receipt before the PR was eligible to merge again. [Read the pilot case study](https://nodrail.com/guides/github-merge-check-ai-agent-qa) · [Inspect PR #11](https://github.com/Nodrail/agent-plugins/pull/11).
 
 ## Packages
 
-| Package                                            | When to use it                                                                                                  |
-| -------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
-| [`@nodrail/policy-engine`](packages/policy-engine) | Compile and evaluate APF locally, test rules in CI or integrate a local enforcement point. No account required. |
-| [`@nodrail/client`](packages/client)               | Check wrapped tools against workspace policies and coordinate human approvals in Nodrail Cloud.                 |
+| Package                                            | When to use it                                                                                                |
+| -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| [`@nodrail/cli`](packages/cli)                     | Declare agents and rules in `nodrail.yaml`, then plan and apply them on Claude Code, Codex and Copilot.       |
+| [`@nodrail/policy-engine`](packages/policy-engine) | Compile and evaluate rules locally, test them in CI or decide calls in your own harness. No account required. |
+| [`@nodrail/client`](packages/client)               | Check wrapped tools against the policy in your Nodrail control plane, self-hosted or Nodrail Cloud.           |
 
 ## Connect a team workspace
+
+The control plane is the open Nodrail server, self-hosted or Nodrail Cloud. It keeps the published policy, runs, receipts, decisions, shared budgets and evidence. The server and its console are Apache-2.0 too, and are being published as their own repository.
 
 Create a Nodrail credential in **Agents → Connect an agent**. Configure it on the server where the tools run. Pass the guarded tools to your agent.
 
@@ -70,7 +84,7 @@ This excerpt assumes your framework already supplies `createAgent`, `model` and 
 
 ## Enforcement and failure behavior
 
-The engine returns a decision. The harness controls execution. Code with a direct route to a tool can bypass the check. The Cloud client blocks a wrapped call when authorization fails or times out. Each plugin documents the behavior of its runtime when the hook itself cannot start. [Security model](packages/policy-engine/docs/security-model.md).
+The engine returns a decision. The harness controls execution. Code with a direct route to a tool can bypass the check. The client blocks a wrapped call when authorization fails or times out. Each plugin documents the behavior of its runtime when the hook itself cannot start. [Security model](packages/policy-engine/docs/security-model.md).
 
 ## Status
 

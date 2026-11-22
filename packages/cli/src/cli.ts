@@ -1,5 +1,4 @@
 import { parseArgs } from "node:util";
-import { decide, listApprovals } from "./commands/approvals.ts";
 import { login, logout, showWhoami } from "./commands/auth.ts";
 import { activity, insights, run, runs } from "./commands/read.ts";
 import { connection } from "./commands/connection.ts";
@@ -20,6 +19,7 @@ import { workspace } from "./commands/workspace.ts";
 import { commandFor, type Command, type Values } from "./context.ts";
 import { describeFailure, exitCodeOf, UsageError, type Io } from "./io.ts";
 
+import { connect } from "./commands/connect.ts";
 import { VERSION } from "./version.ts";
 
 export { VERSION };
@@ -34,10 +34,10 @@ const options = {
   agent: { type: "string" },
   runtime: { type: "string" },
   "require-active": { type: "boolean" },
+  "replace-live": { type: "boolean" },
   check: { type: "boolean" },
   detach: { type: "boolean" },
   names: { type: "boolean" },
-  watch: { type: "boolean", short: "w" },
   q: { type: "string" },
   outcome: { type: "string" },
   kind: { type: "string" },
@@ -58,19 +58,16 @@ const commands: Record<string, Entry> = {
   login: { run: login, options: ["token-stdin"] },
   logout: { run: logout, options: [] },
   whoami: { run: showWhoami, options: [] },
-  approvals: { run: listApprovals, options: ["agent", "watch"] },
-  approve: { run: (c) => decide(c, "allow_once"), options: ["yes"] },
-  reject: { run: (c) => decide(c, "deny"), options: ["yes"] },
   activity: { run: activity, options: [...listing, "kind", "run"] },
   runs: { run: runs, options: listing },
   run: { run, options: [] },
   insights: { run: insights, options: ["days"] },
   rules: { run: rules, options: ["yes"] },
   add: { run: add, options: [] },
-  plan: { run: plan, options: ["runtime", "require-active"] },
+  plan: { run: plan, options: ["runtime", "require-active", "replace-live"] },
   example: { run: example, options: [] },
   contracts: { run: contracts, options: [] },
-  apply: { run: apply, options: ["yes", "runtime"] },
+  apply: { run: apply, options: ["yes", "runtime", "replace-live"] },
   destroy: { run: destroy, options: ["yes", "runtime"] },
   status: { run: status, options: ["runtime"] },
   observe: { run: observe, options: ["detach", "names"] },
@@ -85,20 +82,17 @@ Usage: nodrail <command> [options]
   login                  Save a personal token (ndp_…); --token-stdin to pipe it
   logout                 Forget the saved token
   whoami                 The person, workspace, role and scopes behind the token
-  approvals              Requests waiting for a person; --agent <key>, --watch
-  approve <id>           Approve a request once, after showing it and asking
-  reject <id>            Reject a request, after showing it and asking
   activity               Events; --q --agent --outcome --kind --range --run
   runs                   Runs; --q --agent --outcome --range
   run <id>               One run and its timeline
-  insights               Approval and rule numbers; --days 7|30|90
+  insights               Decision and rule numbers; --days 7|30|90
   rules pull [file]      The rules file (to stdout without a file)
   rules push <file>      Preview, show the diff, confirm and publish
 
 Project policy (offline, no account; run where nodrail.yaml is)
   add <module | ./file>  Add a catalog module (@nodrail/…) or a rules file
   policy lock            Review the permission changes and record them
-  policy export --frozen The locked policy as one APF file, or an error
+  policy export --frozen The locked policy as one rules file, or an error
   example [name] [dir]   Copy an example project, such as support-desk (preview)
   plan [folder]          What \`nodrail apply\` would set up for the team (preview)
   apply [folder]         Set up the team on its host, after showing the plan (preview)
@@ -124,7 +118,7 @@ Policies (offline, no account), the same as nodrail-policy
 
 Evidence and budgets (engine level 5; a person runs these, never an agent)
   evidence run <name> -- <cmd>   Run a check and record what it wrote to $NODRAIL_EVIDENCE_OUT
-  evidence submit <name>         From GitHub Actions: send a result to Cloud with the job's OIDC token
+  evidence submit <name>         From GitHub Actions: send a result to the control plane with the job's OIDC token
   evidence show <name>           Evidence recorded here, and the gates reading it
   budgets status                 Numeric budgets as the local run ledger counts them
   budgets reconcile <key>        Settle an unknown reservation: --consumed|--released --note
@@ -134,13 +128,12 @@ Options
   -e, --environment      An environment's slug (default: the workspace's)
   --url                  Nodrail's address, for self-hosting (or NODRAIL_URL)
   --runtime              plan, apply, destroy, status: claude-code or codex
-  -y, --yes              Don't ask before deciding or publishing
+  -y, --yes              Don't ask before publishing
   --limit, --cursor      Page size (1–100) and the next page's cursor
   -h, --help, -v, --version
 
-<id> is the UUID that \`nodrail approvals\` lists, not the APR- reference.
 The token comes from NODRAIL_TOKEN when set, else from \`nodrail login\`.
-Never give a token that can decide or publish to an agent Nodrail governs.`;
+Never give a token that can publish to an agent Nodrail governs.`;
 
 function parse(argv: string[]) {
   try {
@@ -174,6 +167,8 @@ export async function main(argv: string[], io: Io): Promise<number> {
     // Their own flags, and `run` passes everything after -- to the command.
     if (argv[0] === "evidence") return await evidence(argv.slice(1), io);
     if (argv[0] === "budgets") return await budgets(argv.slice(1), io);
+    // Run by the host as the connected hook: its stdio is the host's.
+    if (argv[0] === "connect") return await connect(argv.slice(1), io);
     const { values, positionals } = parse(argv);
     if (values.version) {
       io.out(VERSION);

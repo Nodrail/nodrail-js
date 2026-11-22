@@ -15,6 +15,7 @@ import { ACCOUNTABLE_ENGINE_LEVEL } from "./shapes/limits.ts";
 import { agentName } from "./names.ts";
 import { sourceOf, type BudgetMeasure } from "./policies.ts";
 import { pick, type Path, type Place, type Where } from "./positions.ts";
+import { otherwiseProblem } from "./removed-syntax.ts";
 
 type Used = { lists: Set<string>; macros: Set<string> };
 export type Compiling = {
@@ -120,18 +121,16 @@ export function compileGates(compiling: Compiling, rules: RuleCompiler) {
       });
       continue;
     }
-    const missing = [
-      ...(requires ? [] : ["requires"]),
-      ...(otherwise ? [] : ["otherwise"]),
-    ];
-    if (missing.length) {
-      compiling.collector.error(
-        gate,
-        `Gate "${name}" needs ${missing.join(", ")}.`,
-      );
+    if (!requires) {
+      compiling.collector.error(gate, `Gate "${name}" needs requires.`);
       continue;
     }
-    const asRule = { ...match, effect: otherwise };
+    const removed = otherwiseProblem(`Gate "${name}"`, otherwise);
+    if (removed) {
+      compiling.collector.error(pick(gate, [["otherwise"]]), removed);
+      continue;
+    }
+    const asRule = { ...match, effect: "deny" };
     const problem = rules.problem(name, asRule);
     if (problem) {
       compiling.collector.error(
@@ -291,7 +290,7 @@ function compileNumeric(
     label: source === "admission" ? "enforced-allowance" : "measured-usage",
     limit,
     ...window,
-    effect: budget.otherwise,
+    effect: "deny",
   });
 }
 
@@ -330,12 +329,13 @@ function compileBudget(
 ): Compiled | null {
   const { collector } = compiling;
   const set = metrics.filter((metric) => budget[metric] !== undefined);
-  const missing = [
-    ...(budget.per ? [] : ["per"]),
-    ...(budget.otherwise ? [] : ["otherwise"]),
-  ];
-  if (missing.length) {
-    collector.error(budget, `Budget "${name}" needs ${missing.join(", ")}.`);
+  if (!budget.per) {
+    collector.error(budget, `Budget "${name}" needs per.`);
+    return null;
+  }
+  const removed = otherwiseProblem(`Budget "${name}"`, budget.otherwise);
+  if (removed) {
+    collector.error(pick(budget, [["otherwise"]]), removed);
     return null;
   }
   if (isNumeric(budget)) return compileNumeric(name, budget, compiling, slug);
@@ -357,7 +357,7 @@ function compileBudget(
     metric,
     limit: budget[metric],
     warnAt: budget.warn_at ?? null,
-    effect: budget.otherwise,
+    effect: "deny",
   });
 }
 

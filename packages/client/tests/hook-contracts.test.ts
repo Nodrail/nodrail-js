@@ -105,7 +105,6 @@ describe("the Cloud hook sends what Cloud's where reads", () => {
     const server = fakeNodrail();
     const result = await runHook(dispatch(below, BRIEF), env(), {
       fetch: server.fetch,
-      sleep: async () => {},
     });
     expect(decision(result.stdout).permissionDecision).toBe("allow");
     const [sent] = server.seen();
@@ -120,7 +119,7 @@ describe("the Cloud hook sends what Cloud's where reads", () => {
     await runHook(
       dispatch(elsewhere, BRIEF),
       env({ CLAUDE_PROJECT_DIR: root }),
-      { fetch: server.fetch, sleep: async () => {} },
+      { fetch: server.fetch },
     );
     expect(server.seen()[0]!.params.brief).toEqual({
       issue: "ENG-7",
@@ -155,7 +154,7 @@ describe("the Cloud hook sends what Cloud's where reads", () => {
         cwd: root,
       }),
       env(),
-      { fetch: server.fetch, sleep: async () => {} },
+      { fetch: server.fetch },
     );
     expect(server.seen()[0]!.params.input).toEqual({
       amount: 1200,
@@ -169,7 +168,6 @@ describe("the Cloud hook sends what Cloud's where reads", () => {
     const server = fakeNodrail();
     await runHook(dispatch(root, BRIEF), env(), {
       fetch: server.fetch,
-      sleep: async () => {},
     });
     expect(server.seen()[0]!.params.brief).toBeUndefined();
   });

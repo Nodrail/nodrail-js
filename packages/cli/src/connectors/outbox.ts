@@ -7,7 +7,7 @@ const CHANNEL = /^[A-Za-z0-9_-]{1,64}$/;
 /**
  * A tool with an effect you can count: `publish` writes the text to a new
  * file in `<folder>/<channel>/`, one per publication. A publication the
- * policy denies, or holds for a person, never gets here, so the files in
+ * policy denies never gets here, so the files in
  * the folder are the publications that happened, whatever an agent says.
  */
 export function outboxTool(folder: string): Tool {

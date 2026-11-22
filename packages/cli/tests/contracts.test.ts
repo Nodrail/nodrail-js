@@ -29,7 +29,7 @@ import {
   RESOURCES,
 } from "./support/setup-project.ts";
 
-const api = "apiVersion: apf.nodrail.com/v1alpha1";
+const api = "apiVersion: nodrail.com/v1alpha1";
 
 const SHAPES = `shapes:
   result-base:
@@ -864,7 +864,7 @@ receipts:
   c: { shape: t }
 `);
     const agent = (spec: object) => ({
-      apiVersion: "apf.nodrail.com/v1alpha1",
+      apiVersion: "nodrail.com/v1alpha1",
       kind: "Agent",
       metadata: { name: "x" },
       spec,

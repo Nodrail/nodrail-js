@@ -30,7 +30,6 @@ function connect(
   const nodrail = createNodrail({
     url: "https://nodrail.test",
     credential: "c",
-    waitMs: 0,
     fetch: server.fetch,
     env: {},
     sleep: noSleep,

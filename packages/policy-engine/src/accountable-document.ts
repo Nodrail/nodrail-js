@@ -141,7 +141,7 @@ export const numericBudget = z
     per: z.enum(["step", "run", "day"]),
     timezone: z.string().min(1).max(64).nullable(),
     across: z.enum(["run", "environment"]),
-    effect: z.enum(["deny", "require_approval"]),
+    effect: z.literal("deny"),
   })
   .strict()
   .refine((b) => (b.per === "day") === (b.timezone !== null), {

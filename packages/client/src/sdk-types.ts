@@ -53,7 +53,6 @@ export type GuardOptions = {
   describe?: Describe | Record<string, Describe>;
   /** Names a bare function. Otherwise its own name is used. */
   name?: string;
-  waitMs?: number;
 };
 
 export type NodrailOptions = {
@@ -61,8 +60,6 @@ export type NodrailOptions = {
   credential?: string;
   /** Shown on the agent's page in Nodrail. */
   adapterVersion?: string;
-  /** How long a call waits for a person. Default 5 minutes. */
-  waitMs?: number;
   onBlocked?: OnBlocked;
   env?: Environment;
   fetch?: typeof fetch;

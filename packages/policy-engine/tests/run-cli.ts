@@ -9,6 +9,24 @@ export const self = [
   fileURLToPath(new URL("../src/cli.ts", import.meta.url)),
 ];
 
+/**
+ * Makes `home` the person's home (HOME on Unix, USERPROFILE on Windows,
+ * which `os.homedir()` reads there). Answers what puts it back.
+ */
+export function homeAt(home: string) {
+  const saved = {
+    HOME: process.env.HOME,
+    USERPROFILE: process.env.USERPROFILE,
+  };
+  process.env.HOME = home;
+  process.env.USERPROFILE = home;
+  return () => {
+    for (const [name, value] of Object.entries(saved))
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+  };
+}
+
 export async function cli(args: string[], stdin = "") {
   const out: string[] = [];
   const err: string[] = [];

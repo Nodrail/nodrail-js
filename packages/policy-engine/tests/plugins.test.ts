@@ -15,7 +15,7 @@ import {
 } from "../src/yaml";
 import { memoryHost } from "./support/project-host";
 
-const api = "apiVersion: apf.nodrail.com/v1alpha1";
+const api = "apiVersion: nodrail.com/v1alpha1";
 const resources = [
   `${api}\nkind: Agent\nmetadata: { name: marketing }`,
   `${api}\nkind: Agent\nmetadata: { name: support }`,

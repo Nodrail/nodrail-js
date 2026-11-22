@@ -1,15 +1,14 @@
 {
   "name": "@nodrail/client",
-  "version": "0.6.0",
-  "description": "TypeScript client for Nodrail Cloud. Check supported tool calls against workspace policies and coordinate human approvals.",
+  "version": "0.7.0",
+  "description": "TypeScript client for the Nodrail control plane, self-hosted or Nodrail Cloud. Each wrapped tool call is allowed or denied before it runs.",
   "keywords": [
     "ai",
     "agents",
     "ai-agents",
+    "control-plane",
     "guardrails",
     "governance",
-    "approvals",
-    "human-in-the-loop",
     "langchain",
     "vercel-ai-sdk",
     "openai-agents",
@@ -35,7 +34,8 @@
     ".": "./src/index.ts",
     "./protocol": "./src/protocol.ts",
     "./langchain": "./src/langchain.ts",
-    "./setup": "./src/setup.ts"
+    "./setup": "./src/setup.ts",
+    "./hooks": "./src/hooks.ts"
   },
   "scripts": {
     "build": "pnpm --filter @nodrail/policy-engine build && node scripts/build.mjs && tsc -p tsconfig.build.json && node ../policy-engine/scripts/declarations.mjs dist",
@@ -102,6 +102,10 @@
       "./setup": {
         "types": "./dist/setup.d.ts",
         "default": "./dist/setup.js"
+      },
+      "./hooks": {
+        "types": "./dist/hooks.d.ts",
+        "default": "./dist/hooks.js"
       }
     },
     "bin": {

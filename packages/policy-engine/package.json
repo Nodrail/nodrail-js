@@ -1,22 +1,21 @@
 {
   "name": "@nodrail/policy-engine",
-  "version": "0.6.0",
-  "description": "Compile, test and evaluate Agent Policy Format (APF) rules locally. Includes the CLI, TypeScript evaluator and local Claude Code hook.",
+  "version": "0.7.0",
+  "description": "The open Nodrail policy engine. Compile, test and evaluate rules locally; it decides allow or deny for every agent action on the host. Includes the CLI, TypeScript evaluator and local hook.",
   "keywords": [
     "ai",
     "agents",
     "ai-agents",
     "policy",
     "policy-engine",
+    "control-plane",
     "guardrails",
     "governance",
-    "approvals",
     "claude-code",
     "codex",
+    "copilot",
     "mcp",
-    "yaml",
-    "apf",
-    "agent-policy-format"
+    "yaml"
   ],
   "homepage": "https://github.com/Nodrail/nodrail-js/tree/main/packages/policy-engine#readme",
   "repository": {

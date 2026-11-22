@@ -44,11 +44,11 @@ nodrail.yaml:
         }
     qa: { shape: qa-result }
 resources:
-  - apiVersion: apf.nodrail.com/v1alpha1
+  - apiVersion: nodrail.com/v1alpha1
     kind: Agent
     metadata: { name: developer }
     spec: { receipt: developer }
-  - apiVersion: apf.nodrail.com/v1alpha1
+  - apiVersion: nodrail.com/v1alpha1
     kind: Agent
     metadata: { name: qa }
     spec: {}
