@@ -1,6 +1,6 @@
-// Consumer references in rule files: gates (C01), permission rules (C02),
-// budgets (C03) and approval links (C04). Each is checked against the shapes
-// it reads. Views, insights and notifications are in outputs.ts.
+// Consumer references in rule files: gates (C01), permission rules (C02)
+// and budgets (C03). Each is checked against the shapes it reads. Views,
+// insights and notifications are in outputs.ts.
 import type { z } from "zod";
 import {
   evidenceRequirement,
@@ -9,6 +9,7 @@ import {
   type PolicyItem,
   type WhereDecl,
 } from "./grammar.ts";
+import { REMOVED_KEYS } from "../removed-syntax.ts";
 import { satisfiesAuthority } from "./authority.ts";
 import { ACCOUNTABLE_ENGINE_LEVEL, CONTRACTS_ENGINE_LEVEL } from "./limits.ts";
 import { bound, dotted, type Registry } from "./registry.ts";
@@ -54,7 +55,7 @@ function ruleScope(registry: Registry, item: PolicyItem): Scope {
 }
 
 const usesContracts = (item: PolicyItem) =>
-  Boolean(item.where || item.approval || item.sum || item.unit) ||
+  Boolean(item.where || item.sum || item.unit) ||
   (item.requires ?? []).some(
     (r) =>
       typeof r === "object" &&
@@ -275,20 +276,6 @@ function policyEntry(registry: Registry, item: PolicyItem, at: Path) {
       detail: { tool: item.tool ?? null, operation: item.operation ?? null },
     });
   }
-  if (item.approval !== undefined) {
-    if (!registry.manifest.approvals?.[item.approval])
-      registry.report(
-        "unknown-reference",
-        [...at, "approval"],
-        `No approval form named ${item.approval}`,
-      );
-    if ((item.effect ?? item.otherwise) !== "require_approval")
-      registry.report(
-        "approval-effect",
-        [...at, "approval"],
-        "Only a require_approval rule or gate has an approval form",
-      );
-  }
   if (item.gate !== undefined)
     (item.requires ?? []).forEach((raw, index) => {
       const here = [...at, "requires", index];
@@ -306,6 +293,12 @@ export function compilePolicy(registry: Registry, items: unknown[], at: Path) {
     const result = policyItem.safeParse(raw);
     if (!result.success)
       grammarIssues(registry, [...at, index], result.error.issues);
+    else if (typeof raw === "object" && raw !== null && "approval" in raw)
+      registry.report(
+        "grammar",
+        [...at, index, "approval"],
+        REMOVED_KEYS.approval!,
+      );
     return result.success ? result.data : null;
   });
   const level = Math.max(

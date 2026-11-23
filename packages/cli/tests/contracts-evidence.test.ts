@@ -15,7 +15,7 @@ import {
   RESOURCES,
 } from "./support/setup-project.ts";
 
-const api = "apiVersion: apf.nodrail.com/v1alpha1";
+const api = "apiVersion: nodrail.com/v1alpha1";
 
 const SHAPES = `shapes:
   reviewer-result:
@@ -110,7 +110,7 @@ const WITH = {
 };
 
 const effective = (p: ReturnType<typeof project>) =>
-  fileOf(planFor(p, "claude-code"), ".nodrail/effective.apf.yaml");
+  fileOf(planFor(p, "claude-code"), ".nodrail/effective.yaml");
 
 describe("a project without evidence", () => {
   test("keeps its lock and contracts entry byte for byte", async () => {
@@ -119,7 +119,7 @@ describe("a project without evidence", () => {
       "./fixtures/contracts-source/nodrail.lock.yaml",
     );
     await expect(effective(p)).toMatchFileSnapshot(
-      "./fixtures/contracts-source/effective.apf.yaml",
+      "./fixtures/contracts-source/effective.yaml",
     );
   });
 });

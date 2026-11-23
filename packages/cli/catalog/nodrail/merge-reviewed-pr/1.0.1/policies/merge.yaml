@@ -1,8 +1,9 @@
 - required_engine_version: 3
 
 # The merger may merge in your repository. The gate in review.yaml decides
-# when. To have a person approve each merge too, override this rule's effect
-# with require_approval in a file of your own.
+# when: until the checkers pass, a merge is denied with what is missing. To
+# keep merging for people only, override this rule's effect with deny in a
+# file of your own.
 - rule: Merge reviewed pull requests
   id: merge-reviewed
   agent: merger

@@ -6,7 +6,8 @@ A two-agent team, set up on Claude Code or Codex from the same files. **marketin
 |---|---|---|
 | Search the `public` handbook | allowed | allowed |
 | Search the `internal` handbook | denied | allowed |
-| Publish to a channel | denied | held for a person's review |
+| Publish to `help-center` | denied | allowed |
+| Publish to any other channel | denied | denied |
 | Hand work to the other | may start support | can't start anyone |
 
 You need the `nodrail` that ships this example, Node 22 or later, and Claude Code 2.1.295 or Codex 0.169.0 or later, signed in with your own account. No Nodrail account and no other credentials.
@@ -42,7 +43,7 @@ Open `claude` or `codex` in `./desk`; it starts as marketing. Ask:
 
 > Check what the desk lets you do: 1. Search the handbook's internal collection for escalation. 2. Hand the same search to the support agent, and ask it to then publish a one-line summary to the blog channel and report both answers. 3. Publish the same line to the blog channel yourself. 4. Search the internal collection for escalation once more. One line per step, with what the policy answered.
 
-You should see marketing's search denied, support's allowed, support's publication held for review (denied on Codex, which can't ask a person), marketing's publication denied, and marketing's second search denied again. Then count what happened, whatever the agents said:
+You should see marketing's search denied, support's allowed, support's publication to the blog denied (it may publish only to help-center), marketing's publication denied, and marketing's second search denied again. Then count what happened, whatever the agents said:
 
 ```sh
 cat desk/activity/reads.jsonl          # one line per read; only support may read internal (it may retry)

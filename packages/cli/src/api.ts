@@ -27,7 +27,7 @@ export const visible = (text: string) => escapeControls(text, new Set());
 export const visibleLines = (text: string) =>
   escapeControls(text, new Set(["\n", "\t"]));
 
-export type Scope = "read" | "decide" | "rules:write" | "inventory:write";
+export type Scope = "read" | "rules:write" | "inventory:write";
 
 export type Me = {
   token: {
@@ -42,32 +42,8 @@ export type Me = {
   person: { name: string };
   workspace: { id: string; name: string; slug: string };
   role: string;
-  can: { read: boolean; decide: boolean; rules_write: boolean };
+  can: { read: boolean; rules_write: boolean };
   environments: { slug: string; name: string; default: boolean }[];
-};
-
-export type Approval = {
-  id: string;
-  reference: string;
-  state: string;
-  reason: string;
-  created_at: string;
-  expires_at: string;
-  agent_key: string;
-  installation_name: string;
-  environment: string;
-  tool_key: string;
-  operation_key: string;
-  resource_kind: string;
-  resource: string;
-  /** As the agent sent it. Untrusted. */
-  parameters: Record<string, unknown>;
-  action_digest: string;
-  attempts: number;
-  decided_at: string | null;
-  decided_by: string | null;
-  can_decide: boolean;
-  [field: string]: unknown;
 };
 
 export type Page<T> = { items: T[]; next_cursor: string | null };
@@ -115,15 +91,27 @@ export type Preview = {
   unchanged: number;
 };
 
+/** The repository project and lock a policy is published from (R383). */
+export type ManagedSource = {
+  project_id: string;
+  revision: string;
+  policy_revision: string | null;
+};
+
+export type LiveRules = {
+  environment: string;
+  policy_revision: number;
+  published_at: string | null;
+  published_by: string | null;
+  managed: ManagedSource | null;
+};
+
 export type Published = {
   policy_revision: number;
   added: number;
   changed: number;
   removed: number;
-  closed_requests: number;
 };
-
-export type Decision = "allow_once" | "deny";
 
 /** The workspace revision a team intends for a project, in an environment. */
 export type IntendedRevision = {
@@ -248,20 +236,6 @@ export class NodrailApi {
     return this.call<Me>("GET", "/me", { scoped: false });
   }
 
-  approvals(query: { agent?: string } = {}) {
-    return this.call<Page<Approval>>("GET", "/approvals", { query });
-  }
-
-  approval(id: string) {
-    return this.call<Approval>("GET", `/approvals/${enc(id)}`);
-  }
-
-  decide(id: string, decision: Decision, expectedActionDigest: string) {
-    return this.call<Approval>("POST", `/approvals/${enc(id)}/decision`, {
-      body: { decision, expected_action_digest: expectedActionDigest },
-    });
-  }
-
   activity(query: Query = {}) {
     return this.call<Page<ActivityEvent>>("GET", "/activity", { query });
   }
@@ -322,18 +296,25 @@ export class NodrailApi {
   publishRules(
     yaml: string,
     preview: Pick<Preview, "policy_revision" | "file_digest">,
+    managed?: ManagedSource,
   ) {
     return this.call<Published>("POST", "/rules/publish", {
       body: {
         yaml,
         policy_revision: preview.policy_revision,
         file_digest: preview.file_digest,
+        ...(managed ? { managed } : {}),
       },
     });
+  }
+
+  /** What is live in the environment, and the project and lock it came from. */
+  liveRules() {
+    return this.call<LiveRules>("GET", "/rules/live");
   }
 }
 
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-/** The API names requests by UUID, not by the APR- reference shown on screen. */
+/** The API names requests by UUID, not by the REQ- reference shown on screen. */
 export const isUuid = (value: string) => uuid.test(value);

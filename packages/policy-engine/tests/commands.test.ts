@@ -43,7 +43,7 @@ const rules = documentOf(
   effect: deny
 - rule: Review deploys
   command: { prefix: ./deploy }
-  effect: require_approval
+  effect: deny
 - rule: Source edits
   tool: files
   operation: file.write
@@ -53,7 +53,7 @@ const rules = documentOf(
   tool: github
   operation: create_issue
   resource: { kind: mcp_tool, match: any }
-  effect: require_approval
+  effect: deny
 `),
 );
 
@@ -340,7 +340,7 @@ describe("chains", () => {
   effect: deny
 - rule: Push
   command: { prefix: git push }
-  effect: require_approval
+  effect: deny
 - rule: Vouch
   tool: shell
   operation: command.compound
@@ -355,7 +355,7 @@ describe("chains", () => {
   tool: shell
   operation: command.compound
   resource: { kind: command, match: exact, value: "cd a && pnpm test -w" }
-  effect: require_approval
+  effect: deny
 `),
   );
   const chain = (command: string) => {
@@ -371,12 +371,12 @@ describe("chains", () => {
   test.each([
     ["cd a && pnpm test", "allow"],
     ["cd a && rm x", "deny"],
-    ["cd a && git push", "require_approval"],
+    ["cd a && git push", "deny"],
     ["cd a && unknown", "none"],
     ["unknown && rm x", "deny"],
-    ["git push && unknown", "require_approval"],
+    ["git push && unknown", "deny"],
     ["cd a && mystery", "allow"],
-    ["cd a && pnpm test -w", "require_approval"],
+    ["cd a && pnpm test -w", "deny"],
     ["cd a && $(rm x)", "none"],
   ])("%j is %s", (command, outcome) => {
     expect(chain(command)).toBe(outcome);
@@ -443,15 +443,32 @@ describe("starter packs", () => {
     ["read-only", "TeamCreate", { name: "x" }, "none"],
     ["repo-work", "Write", { file_path: "a", content: "" }, "allow"],
     ["repo-work", "Edit", { file_path: ".claude/settings.json" }, "deny"],
+    ["repo-work", "Write", { file_path: ".github/x.yml", content: "" }, "deny"],
+    ["repo-work", ...bash("git add . && git commit -m x"), "allow"],
+    // Feature branches are pushed by name; main, a bare push and a force
+    // push are denied, so merging to main stays with people.
+    ["repo-work", ...bash("git push origin feat"), "allow"],
+    ["repo-work", ...bash("git push origin main-fix"), "allow"],
+    ["repo-work", ...bash("git push"), "deny"],
+    ["repo-work", ...bash("git push origin"), "deny"],
+    ["repo-work", ...bash("git push origin HEAD"), "deny"],
+    ["repo-work", ...bash("git push origin main"), "deny"],
+    ["repo-work", ...bash("git push origin master"), "deny"],
+    ["repo-work", ...bash("git push origin main --force"), "deny"],
+    ["repo-work", ...bash("git push origin HEAD:main"), "deny"],
+    ["repo-work", ...bash("git push --all"), "deny"],
+    ["repo-work", ...bash("git push --force"), "deny"],
+    ["repo-work", ...bash("git push --force origin feat"), "deny"],
+    ["repo-work", ...bash("git push -f origin feat"), "deny"],
+    ["repo-work", ...bash("git push origin --force-with-lease feat"), "deny"],
+    ["repo-work", "Write", { file_path: "package.json", content: "" }, "deny"],
     [
       "repo-work",
       "Write",
-      { file_path: ".github/x.yml", content: "" },
-      "require_approval",
+      { file_path: ".github/workflows/x.yml", content: "" },
+      "deny",
     ],
-    ["repo-work", ...bash("git add . && git commit -m x"), "allow"],
-    ["repo-work", ...bash("git push origin main"), "require_approval"],
-    ["repo-work", ...bash("git push --force"), "deny"],
+    ["repo-work", "Edit", { file_path: ".github/workflows/x.yml" }, "deny"],
     ["repo-work", ...bash("rm -rf x"), "deny"],
     ["repo-work", ...bash("git log; curl x"), "none"],
     // Running Nodrail by hand could write a verdict into the run ledger.
@@ -459,12 +476,7 @@ describe("starter packs", () => {
     ["repo-work", ...bash("git add . && nodrail-claude-hook"), "deny"],
     ["read-only", ...bash("nodrail-policy runs"), "deny"],
     ["repo-work", ...bash("node .claude/hooks/nodrail-hook.mjs"), "none"],
-    [
-      "repo-work",
-      "Write",
-      { file_path: ".npmrc", content: "" },
-      "require_approval",
-    ],
+    ["repo-work", "Write", { file_path: ".npmrc", content: "" }, "deny"],
     [
       "repo-work",
       "Write",
@@ -582,13 +594,8 @@ describe("starter packs", () => {
       { file_path: ".Codex/config.toml", content: "" },
       "deny",
     ],
-    ["repo-work", "Edit", { file_path: "package.json" }, "require_approval"],
-    [
-      "repo-work",
-      "Write",
-      { file_path: "Makefile", content: "" },
-      "require_approval",
-    ],
+    ["repo-work", "Edit", { file_path: "package.json" }, "deny"],
+    ["repo-work", "Write", { file_path: "Makefile", content: "" }, "deny"],
     ["repo-work", ...bash("npm test --script-shell=/tmp/evil.sh"), "none"],
     ["repo-work", ...bash("pnpm --config.x=y test"), "none"],
     ["repo-work", ...bash("npm test"), "allow"],
@@ -1087,7 +1094,7 @@ describe("command rules", () => {
     ["git push --force origin", "deny"],
     ["git push --force-with-lease", "none"],
     ["g'i't push --force", "deny"],
-    ["./deploy prod", "require_approval"],
+    ["./deploy prod", "deny"],
     ["git log; rm x", "none"],
     ["FOO=1 git log", "none"],
   ])("%s is %s", (command, outcome) => {
@@ -1163,7 +1170,7 @@ describe("who the local hook says is calling", () => {
 - rule: The publisher publishes
   agent: publisher
   command: { prefix: publish }
-  effect: require_approval
+  effect: allow
 - rule: The editor never publishes
   agent: editor
   command: { prefix: publish }
@@ -1206,7 +1213,7 @@ describe("who the local hook says is calling", () => {
   };
 
   test("a subagent is judged by the rules for the agent the host says it is", () => {
-    expect(outcome(call("publish draft-1", "publisher"))).toBe("ask");
+    expect(outcome(call("publish draft-1", "publisher"))).toBe("allow");
     expect(outcome(call("publish draft-1", "editor"))).toBe("deny");
     expect(outcome(call("show-draft 1", "editor"))).toBe("allow");
     expect(outcome(call("show-draft 1", "publisher"))).toBe("deny");
@@ -1216,9 +1223,9 @@ describe("who the local hook says is calling", () => {
     expect(outcome(call("publish draft-1", "editor"), "publisher")).toBe(
       "deny",
     );
-    expect(outcome(call("publish draft-1"), "publisher")).toBe("ask");
+    expect(outcome(call("publish draft-1"), "publisher")).toBe("allow");
     // Named as the host names subagents, whatever its case.
-    expect(outcome(call("publish draft-1", "Publisher"))).toBe("ask");
+    expect(outcome(call("publish draft-1", "Publisher"))).toBe("allow");
   });
 
   test("an agent starts only the agents its rules allow", () => {
@@ -1235,9 +1242,9 @@ describe("the local hook", () => {
       tool_input,
       ...extra,
     });
-  const decide = (stdin: string, unmatched: "deny" | "ask" = "deny") =>
+  const decide = (stdin: string, unmatched: "deny" | "allow" = "deny") =>
     decideToolCall(stdin, { document: rules, now, unmatched });
-  const decision = (stdin: string, unmatched?: "deny" | "ask") => {
+  const decision = (stdin: string, unmatched?: "deny" | "allow") => {
     const { stdout } = decide(stdin, unmatched);
     return stdout
       ? (
@@ -1258,7 +1265,7 @@ describe("the local hook", () => {
         event("Write", { file_path: inRepo("src", "a.ts"), content: "x" }),
       ),
     ).toBe("silent");
-    expect(decision(event("mcp__github__create_issue", {}))).toBe("ask");
+    expect(decision(event("mcp__github__create_issue", {}))).toBe("deny");
   });
 
   test("a relative path that climbs out is judged where it lands", () => {
@@ -1273,14 +1280,22 @@ describe("the local hook", () => {
     ).toBe("deny");
   });
 
-  test("a review goes to the person at the keyboard", () => {
-    expect(decision(event("Bash", { command: "./deploy prod" }))).toBe("ask");
+  test("a deny names its rule; nothing waits for a person", () => {
+    const { stdout } = decide(event("Bash", { command: "./deploy prod" }));
+    expect(stdout).toContain('"permissionDecision":"deny"');
+    expect(stdout).toContain(
+      "rule review-deploys-args denies shell command.run on ./deploy prod.",
+    );
   });
 
-  test("no rule blocks, unless told to ask", () => {
+  test("no rule blocks and says how to fix it, unless told to allow", () => {
     const call = event("Bash", { command: "unknown-program" });
     expect(decision(call)).toBe("deny");
-    expect(decision(call, "ask")).toBe("ask");
+    expect(decide(call).stdout).toContain(
+      "no rule covers shell command.run on unknown-program, so it is denied. Add a rule that allows it if it should run.",
+    );
+    // Allowed, it is left to the host's own permissions, as an allow is.
+    expect(decision(call, "allow")).toBe("silent");
   });
 
   test.each([

@@ -210,8 +210,8 @@ function decisionOf(
       };
     };
     const decision = answer.hookSpecificOutput?.permissionDecision;
-    // Copilot can't ask the person from a hook: a review is a deny here.
-    return decision === "deny" || decision === "ask"
+    // Only silence or an allow lets a call through; any other answer blocks.
+    return decision !== undefined && decision !== "allow"
       ? {
           deny: true,
           reason:

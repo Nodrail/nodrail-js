@@ -5,7 +5,7 @@ import {
   NodrailApi,
   withoutTrailingSlashes,
 } from "../src/api.ts";
-import { APPROVAL_ID, TOKEN, fakeApi } from "./support/fake-api.ts";
+import { RUN_ID, TOKEN, fakeApi } from "./support/fake-api.ts";
 
 describe("NodrailApi", () => {
   test("sends the bearer token and the environment, trims the URL", async () => {
@@ -19,13 +19,13 @@ describe("NodrailApi", () => {
     expect(client.url).toBe("https://nodrail.example");
     await client.me();
     expect(api.seen.at(-1)?.query).toEqual({});
-    await client.approvals({ agent: "" });
+    await client.activity({ agent: "" });
     expect(api.seen.at(-1)?.query).toEqual({ environment: "production" });
   });
 
   test("errors carry status, code and request id", async () => {
     const client = new NodrailApi({ token: "bad", fetch: fakeApi().fetch });
-    const error = await client.approval(APPROVAL_ID).catch((e: unknown) => e);
+    const error = await client.run(RUN_ID).catch((e: unknown) => e);
     expect(error).toBeInstanceOf(ApiError);
     expect(error).toMatchObject({
       status: 401,
@@ -47,7 +47,7 @@ describe("NodrailApi", () => {
   });
 
   test("isUuid", () => {
-    expect(isUuid(APPROVAL_ID)).toBe(true);
+    expect(isUuid(RUN_ID)).toBe(true);
     expect(isUuid("APR-6D1C2F0A")).toBe(false);
   });
 });

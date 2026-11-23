@@ -5,11 +5,12 @@
 // these keys, so the resolver reads the files without them, and the
 // contracts compiler reads them whole. Nothing else may slip past: every
 // other contract key stays refused by the setup schema.
-import type {
-  ProjectHost,
-  ProjectResolution,
-  ProjectSetup,
-  SetupAgent,
+import {
+  RESOURCE_API,
+  type ProjectHost,
+  type ProjectResolution,
+  type ProjectSetup,
+  type SetupAgent,
 } from "@nodrail/policy-engine/yaml";
 import { parse, parseAllDocuments, stringify } from "yaml";
 import { CliError } from "../io.ts";
@@ -26,8 +27,6 @@ export const MANIFEST_KEYS = ["shapes", "receipts", "evidence"] as const;
 export const CONNECTION_SLOTS = ["input", "output"] as const;
 /** What an Agent resource may declare. */
 export const AGENT_KEYS = ["receipt", "brief"] as const;
-
-const RESOURCE_API = "apf.nodrail.com/v1alpha1";
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);

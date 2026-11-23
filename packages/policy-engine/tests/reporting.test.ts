@@ -338,7 +338,7 @@ describe("what a run reports", () => {
     const id = machineId(home);
     expect(id).toMatch(/^[0-9a-f]{32}$/);
     expect(machineId(home)).toBe(id);
-    const file = join(home, "effective.apf.yaml");
+    const file = join(home, "effective.yaml");
     writeFileSync(file, "version: 1\n");
     expect(policyRevision([file])).toBe(
       createHash("sha256").update("version: 1\n").digest("hex"),

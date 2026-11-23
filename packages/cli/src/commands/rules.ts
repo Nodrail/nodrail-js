@@ -90,11 +90,7 @@ export async function pushRules(command: Command, file?: string) {
   const published = await api.publishRules(yaml, preview);
   command.print(
     { preview, published },
-    () =>
-      `Published revision ${published.policy_revision}.` +
-      (published.closed_requests
-        ? ` ${published.closed_requests} waiting request(s) were closed.`
-        : ""),
+    () => `Published revision ${published.policy_revision}.`,
   );
 }
 

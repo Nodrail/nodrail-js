@@ -1,6 +1,6 @@
 # Playbooks
 
-> **Preview.** Playbooks need `@nodrail/cli` 0.1.0 or later. Modules with gates need APF engine feature level 3: see [Runs, gates and budgets (preview)](../../policy-engine/docs/runs.md).
+> **Preview.** Playbooks need `@nodrail/cli` 0.1.0 or later. Modules with gates need engine feature level 3: see [Runs, gates and budgets (preview)](../../policy-engine/docs/runs.md).
 
 A playbook is a policy for one way of working, packaged so a repository can add it by name: "a publisher agent may open a draft pull request once QA and review passed", or "a triage agent may label issues and nothing else". You add it with `nodrail`, give it your values, review what it permits, and commit the result. Your agents follow it once you activate an export of it.
 
@@ -14,10 +14,10 @@ npm i -g @nodrail/cli
 
 A repository's policy is described by two files at its root. Commit both.
 
-- **`nodrail.yaml`**, the manifest. It lists what the policy is made of, in order, under `imports`. An import is a catalog module, such as `@nodrail/open-reviewed-pr`, with its values under `with:`, or a `.yaml` file in your repository. A local file is either an ordinary APF rules file or another manifest with its own `imports`.
+- **`nodrail.yaml`**, the manifest. It lists what the policy is made of, in order, under `imports`. An import is a catalog module, such as `@nodrail/open-reviewed-pr`, with its values under `with:`, or a `.yaml` file in your repository. A local file is either an ordinary rules file or another manifest with its own `imports`.
 - **`nodrail.lock.yaml`**, the lock. `nodrail` writes it. It records the exact version of each catalog module, the SHA-256 of every file, the values each module was given, the import graph and order, the digest of the effective policy, and the effective policy last reviewed.
 
-A **module** is a set of APF files with a name and a version, plus the values it needs, such as your repository. The catalog of modules ships inside `@nodrail/cli`, so adding one downloads nothing.
+A **module** is a set of rules files with a name and a version, plus the values it needs, such as your repository. The catalog of modules ships inside `@nodrail/cli`, so adding one downloads nothing.
 
 ```yaml
 kind: nodrail.project/v1
@@ -28,7 +28,7 @@ imports:
   - ref: ./policies/team.yaml
 ```
 
-The **effective policy** is every imported file compiled together, in order, into one APF file. That file is what an agent's hook or adapter reads.
+The **effective policy** is every imported file compiled together, in order, into one rules file. That file is what an agent's hook or adapter reads.
 
 ## Quickstart
 
@@ -95,10 +95,10 @@ Reviewers see the same change in the pull request: the manifest, and the lock wi
 **5. Export.**
 
 ```sh
-nodrail policy export --frozen > effective.apf.yaml
+nodrail policy export --frozen > effective.yaml
 ```
 
-The export is one ordinary APF file. Check it like any other with `nodrail policy validate effective.apf.yaml`.
+The export is one ordinary rules file. Check it like any other with `nodrail policy validate effective.yaml`.
 
 **6. Activate it.** Until now nothing governs an agent. Adding a module installs no hook and runs nothing. Agents follow the policy once you point an enforcement point at the export. See [Activate an export](#activate-an-export).
 
@@ -188,9 +188,9 @@ Pin the `nodrail` version you lock with, and build the export from the committed
 
 ```sh
 set -e
-nodrail policy export --frozen > effective.apf.yaml.tmp
-nodrail policy validate effective.apf.yaml.tmp
-mv effective.apf.yaml.tmp effective.apf.yaml
+nodrail policy export --frozen > effective.yaml.tmp
+nodrail policy validate effective.yaml.tmp
+mv effective.yaml.tmp effective.yaml
 ```
 
 A pull request that changes `nodrail.yaml` or a local file without running `nodrail policy lock` fails here, with the reason. To check expected decisions too, run [`nodrail policy test`](../../policy-engine/docs/cli.md#test) against the export with a cases file.
@@ -202,7 +202,7 @@ A pull request that changes `nodrail.yaml` or a local file without running `nodr
 | `@nodrail/open-reviewed-pr`   | A publisher agent (`github`) may open draft pull requests after QA, a gatekeeper and a reviewer accept the current candidate. Merging stays denied. Also named `@nodrail/pr_policy.yaml`. | `repository` |
 | `@nodrail/merge-reviewed-pr`  | A separate `merger` agent may merge only after QA, the checks and a review pass on the current head.                                                                                         | `repository` |
 | `@nodrail/triage-issues`      | A `triage` agent may read issues, comment and label. It can't close, assign, edit code or open pull requests.                                                                                | `repository` |
-| `@nodrail/dependency-updates` | A `deps` agent may write lockfiles and refresh them with scripts off. Changes to package.json, commits and pushes wait for a person. It may open a draft pull request after the checks pass, and can't merge or force-push. | `repository` |
+| `@nodrail/dependency-updates` | A `deps` agent may write lockfiles, refresh them with scripts off, commit, and push its own branch. It never changes package.json or pushes to main. It may open a draft pull request after the checks pass, and can't merge or force-push. | `repository` |
 | `@nodrail/read-only`          | The `read-only` starter pack as a module.                                                                                                                                                    | None         |
 
 `repository` is one exact repository, as `owner/name`. A wildcard or a path is refused.
@@ -272,7 +272,7 @@ imports:
 `resources` is a file, a folder of `.yaml` files, or a list of both. Each document in them is one resource:
 
 ```yaml
-apiVersion: apf.nodrail.com/v1alpha1
+apiVersion: nodrail.com/v1alpha1
 kind: Agent
 metadata: { name: publisher }
 spec:
@@ -280,7 +280,7 @@ spec:
   instructions: ./agents/publisher.md
   skills: [./skills/release-notes]
 ---
-apiVersion: apf.nodrail.com/v1alpha1
+apiVersion: nodrail.com/v1alpha1
 kind: Team
 metadata: { name: release }
 spec:
@@ -289,7 +289,7 @@ spec:
   handoffs:
     - { from: lead, to: publisher }
 ---
-apiVersion: apf.nodrail.com/v1alpha1
+apiVersion: nodrail.com/v1alpha1
 kind: PolicyBinding
 metadata: { name: open-prs }
 spec:
@@ -508,12 +508,12 @@ observe:
 - **Never in the way.** The hook starts `nodrail observe` apart and returns at once. Observing never fails, and never changes the project. `nodrail status` shows when it last recorded, and calls a record older than 24 hours stale.
 - **Codex** asks you to trust the new hook once: open `codex` in the folder and run `/hooks`. Until then it doesn't run, and the policy hook is unaffected. `nodrail status` says which.
 - **Sent only with telemetry.** Without `telemetry:` a record stays on the machine. With it, each record also goes to the same receiver as the decisions: one `nodrail.observation` span per host, one trace per record, with `nodrail.machine` (a random id kept in `~/.nodrail/machine-id`, never the hostname), `nodrail.host`, `nodrail.agent`, `nodrail.activation`, `nodrail.in_step`, `nodrail.drift`, `nodrail.workspace.revision`, `nodrail.workspace.locked` and `nodrail.unmanaged.<kind>` counts. With `names: true`, also `nodrail.drift.names` and `nodrail.unmanaged.names` (JSON lists, at most 4,000 characters). Never the project's path or anything under home. Offline, records wait in the same bounded queue as decisions.
-- **Your team's inventory.** Nodrail Cloud is one such receiver.
+- **Your team's inventory.** The Nodrail control plane, self-hosted or Nodrail Cloud, is one such receiver.
   1. Create a reporting token: API tokens → `inventory:write`, chosen alone. It reads nothing.
   2. Give the project an `id:` in nodrail.yaml.
-  3. Point `telemetry:` at `https://app.nodrail.com/api/v1/otlp/v1/traces?environment=<slug>`, with `bearer: { fromEnv: NODRAIL_TOKEN }` and the raw token in that variable.
+  3. Point `telemetry:` at `<your Nodrail address>/api/v1/otlp/v1/traces?environment=<slug>` (`https://app.nodrail.com` on Nodrail Cloud), with `bearer: { fromEnv: NODRAIL_TOKEN }` and the raw token in that variable.
 
-  The **Inventory** page then shows each person's machines, project by project, and Activity → **Reported locally** shows each decision and local run. All of it is evidence of local enforcement, never a Cloud approval. Admins and policy managers see everyone; others see their own. `nodrail workspace publish` marks which locked revision the team should run.
+  The **Inventory** page then shows each person's machines, project by project, and Activity → **Reported locally** shows each decision and local run. All of it is evidence of local enforcement, recorded rather than decided again. Admins and policy managers see everyone; others see their own. `nodrail workspace publish` marks which locked revision the team should run.
 
 ### Telemetry (preview)
 
@@ -532,7 +532,7 @@ telemetry:
 
 `bearer` takes a raw token and adds `Bearer `, so `NODRAIL_TOKEN` can hold the same `ndp_` token the CLI reads. `headers` are sent as written, for collectors that want something else. Without an `id`, reports name the project by its folder only: a clone, a rename or another project of the same name can't be told apart. `plan` suggests an id to add.
 
-Each export carries `service.name` `nodrail`, `nodrail.schema` `2`, the project's folder name and its `id`. Each decision is one span, `nodrail.decision`. It carries what the host can't know: the decision the host was told (`nodrail.decision`: allow, deny or require_approval), what the rules said (`nodrail.match`, `none` when no rule did), the rule, the agent it was judged as, the tool, operation and kind of resource, the host, and the policy's revision. It carries the policy's revision two ways. `nodrail.policy.revision` is the effective policy file's full SHA-256, the same digest the lock records. `nodrail.revision` is the older short hash, kept for old receivers and never compared. Each decision also carries the machine's random id, and the run and step when the rules keep a run ledger.
+Each export carries `service.name` `nodrail`, `nodrail.schema` `2`, the project's folder name and its `id`. Each decision is one span, `nodrail.decision`. It carries what the host can't know: the decision the host was told (`nodrail.decision`: allow or deny), what the rules said (`nodrail.match`, `none` when no rule did), the rule, the agent it was judged as, the tool, operation and kind of resource, the host, and the policy's revision. It carries the policy's revision two ways. `nodrail.policy.revision` is the effective policy file's full SHA-256, the same digest the lock records. `nodrail.revision` is the older short hash, kept for old receivers and never compared. Each decision also carries the machine's random id, and the run and step when the rules keep a run ledger.
 
 It also carries the ids the host's own telemetry uses, `session.id`, `gen_ai.conversation.id` and `gen_ai.tool.call.id`. A backend that also receives Claude Code's or Codex's own telemetry can then join each decision to the call it was about. A call's arguments, the resource it names, prompts and secrets are never sent.
 
@@ -549,6 +549,34 @@ The hook doesn't wait on the network. It adds the span to a queue in `~/.nodrail
 A receiver that is down or busy (408, 429, 5xx, no connection) gets the same spans again, with the same ids, after 30 seconds. A receiver that deduplicates, like Nodrail's, keeps each once. A batch the receiver partly accepted is never resent.
 
 Claude Code and Codex can export their own telemetry too, which this doesn't switch on. Both send the person's email and account ids with every record, and Codex sends each tool call's arguments and output: route theirs through a Collector that drops what you don't want sent.
+
+### Connect to Nodrail (in progress)
+
+`connect:` names the control plane the project is connected to, a self-hosted Nodrail server or Nodrail Cloud, and who decides each call:
+
+```yaml
+connect:
+  url: https://app.nodrail.com       # or your self-hosted address; Nodrail Cloud when left out
+  workspace: acme                     # slugs, as in /app/<workspace>/<environment>
+  environment: development
+  decide: cloud                       # cloud: the control plane decides, with its runs and budgets | local: this machine
+  enforce: on                         # on | watch: record what would be blocked, block nothing
+  credential: { fromEnv: NODRAIL_CREDENTIAL }   # the agent credential (ndr_…), never written
+```
+
+`decide` has no default, so nobody is surprised by who decides. `plan` says it in words. With a credential, `plan` asks Nodrail whose credential it is, and fails when it belongs to another workspace or environment. It never prints the credential. When Nodrail can't be reached, the credential stays unchecked, not failed.
+
+With `decide: cloud`, the locked policy is what Nodrail runs. `plan` compares the live version with the lock: in sync, apply publishes, or drift when the rules were changed in Nodrail. Each version `apply` publishes names this project's `id` and lock, so the next `plan` can tell. Your own token publishes it, never the agent's credential. See `plan` in [the CLI reference](cli.md).
+
+With `decide: cloud`, `apply` sets up Claude Code with the **connected hook** (`nodrail connect hook`) instead of the local one:
+
+- **Before every call**, the local guards run first, exactly as in the local hook: the protect list, the setup, the run ledger, git's folders and the connections' data. A call they refuse never leaves the machine.
+- **Everything else is decided by Nodrail**, with the same client hook the plugin ships. A call is allowed or denied at once, with the reason; nothing waits for a person. A call Nodrail hasn't answered in 25 seconds is denied.
+- **Subagent steps and call outcomes** go to Nodrail too, so its Runs show the run, its receipts and its budgets.
+- `.nodrail/connect.json` holds the address and the credential's **reference**, never the credential. Set `NODRAIL_CREDENTIAL`, or the variable you named, where Claude Code runs. Without it, every call is blocked, never let through.
+- `apply` publishes the locked policy first. When the live policy can't be checked (no token, Nodrail unreachable), it refuses rather than install a hook against rules nobody compared with the lock.
+
+`decide: cloud` sets up Claude Code only for now; `plan` refuses it for Codex and Copilot. `enforce: watch` is checked but still refused.
 
 ### Tested versions (proposed)
 
@@ -575,15 +603,15 @@ Any other version is unverified, not refused: `?` doesn't block `apply`, and it 
 
 Agents follow a playbook only through an enforcement point that reads the export. Which one depends on the calls the playbook covers.
 
-**File and shell rules** work with the local Claude Code hook today. That covers `@nodrail/read-only` and the file part of `@nodrail/dependency-updates`. Point the hook from [Try APF locally](../../policy-engine/docs/getting-started.md#connect-claude-code) at the export:
+**File and shell rules** work with the local Claude Code hook today. That covers `@nodrail/read-only` and the file part of `@nodrail/dependency-updates`. Point the hook from [Write and test rules locally](../../policy-engine/docs/getting-started.md#connect-claude-code) at the export:
 
 ```sh
-nodrail policy hook effective.apf.yaml
+nodrail policy hook effective.yaml
 ```
 
-`nodrail-policy hook effective.apf.yaml` does the same. The hook blocks any call no rule covers, so the export needs rules for every shell and file call your agent makes. Import those with the module, such as your own rules file or `@nodrail/read-only`, rather than loading a second file next to the export.
+`nodrail-policy hook effective.yaml` does the same. The hook blocks any call no rule covers, so the export needs rules for every shell and file call your agent makes. Import those with the module, such as your own rules file or `@nodrail/read-only`, rather than loading a second file next to the export.
 
-**GitHub rules** describe calls with tool `github`, operations such as `pr.open`, `pr.merge` or `issues.comment`, and resource kind `repository` with the id `owner/name`, as in the [APF guide](https://nodrail.com/docs/apf). They take effect only where an adapter maps your agents' GitHub calls to those names and supplies the run evidence the gates need: which candidate or head is being acted on, and the verdicts of QA, the checks and review for it. The local Claude Code hook doesn't map GitHub calls. An agent's own GitHub credentials don't go through these rules at all, so the merge and triage modules deny those agents the shell, where `gh` and `git push` would run. See [Runs, gates and budgets (preview)](../../policy-engine/docs/runs.md) for the evidence a gate reads.
+**GitHub rules** describe calls with tool `github`, operations such as `pr.open`, `pr.merge` or `issues.comment`, and resource kind `repository` with the id `owner/name`, as in the [policies guide](https://nodrail.com/docs/policies). They take effect only where an adapter maps your agents' GitHub calls to those names and supplies the run evidence the gates need: which candidate or head is being acted on, and the verdicts of QA, the checks and review for it. The local Claude Code hook doesn't map GitHub calls. An agent's own GitHub credentials don't go through these rules at all, so the merge and triage modules deny those agents the shell, where `gh` and `git push` would run. See [Runs, gates and budgets (preview)](../../policy-engine/docs/runs.md) for the evidence a gate reads.
 
 ## Limits
 

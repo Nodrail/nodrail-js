@@ -21,7 +21,7 @@ Every call is described as a tool, an operation and a resource, and rules match 
 | Any other Claude Code tool                                 | `claude-code` | tool name, lowercase      | `tool`                          |
 | A subagent handing back its report (`SubagentHandback`)    | `claude-code` | `subagenthandback`        | `tool`                          |
 
-A subagent in Claude Code's `auto` permission mode ends by calling `SubagentHandback`, which delivers its final report to the agent that started it, as a stop does. When no rule covers that call it goes ahead, even under rules that block what they don't cover, such as the starter packs: blocking it would strand the subagent. A rule on `claude-code subagenthandback` still decides it as written (deny it, or send it to a person), and a receipt contract refuses a hand-back whose receipt is invalid or missing, so the subagent resends ([How a receipt is read](contracts.md#how-a-receipt-is-read-enforced-engine-level-4)). Cloud decides a hand-back with the workspace's rules.
+A subagent in Claude Code's `auto` permission mode ends by calling `SubagentHandback`, which delivers its final report to the agent that started it, as a stop does. When no rule covers that call it goes ahead, even under rules that block what they don't cover, such as the starter packs: blocking it would strand the subagent. A rule on `claude-code subagenthandback` still decides it as written (allow or deny it), and a receipt contract refuses a hand-back whose receipt is invalid or missing, so the subagent resends ([How a receipt is read](contracts.md#how-a-receipt-is-read-enforced-engine-level-4)). The control plane decides a hand-back with the workspace's rules.
 
 The subagent's type is named the way runs name agents, so `vercel:deployment-expert` is `vercel-deployment-expert`. Rules written before engine level 3 described this call as resource `{ kind: tool, id: Agent }`; a rules file with such a rule is now refused: see [Upgrading rules for subagents (preview)](runs.md#upgrading-rules-for-subagents).
 
@@ -65,7 +65,7 @@ Braces are shell syntax, so `cp x logs/{a,b}.txt` is judged as a whole (`command
 
 ## Chains
 
-`cd app && pnpm test` is judged part by part. It is allowed only if every part is, and denied if any part is. A part that needs review sends the whole chain to review.
+`cd app && pnpm test` is judged part by part. It is allowed only if every part is, and denied if any part is.
 
 The whole line goes to `command.compound` when it uses substitution, redirects, background `&`, or a part that runs another program. Such a line only matches a rule written for it:
 
@@ -77,7 +77,7 @@ The whole line goes to `command.compound` when it uses substitution, redirects, 
   effect: allow
 ```
 
-A rule on the whole line can vouch for parts nothing else covers, but it can't overrule a part's deny or review.
+A rule on the whole line can vouch for parts nothing else covers, but it can't overrule a part's deny.
 
 ## What a prefix trusts
 

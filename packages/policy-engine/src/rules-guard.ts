@@ -186,9 +186,7 @@ export function touchedData(
     action.tool === "files"
       ? [...targets(action), action.resource.id]
       : action.tool === "shell" && command
-        ? words(command).map((word) =>
-            wordPath(word.replace(/[*?[{].*$/, ""), cwd),
-          )
+        ? words(command).map((word) => wordPath(beforeGlob(word), cwd))
         : [];
   for (const path of paths) {
     const place = within(path);
@@ -196,6 +194,12 @@ export function touchedData(
   }
   return null;
 }
+
+/** The literal part of a word, up to its first glob character; linear on any input. */
+const beforeGlob = (word: string) => {
+  const at = word.search(/[*?[{]/);
+  return at < 0 ? word : word.slice(0, at);
+};
 
 const words = (command: string) =>
   command.split(/[\s;|&<>()`'"=:$]+/).filter(Boolean);

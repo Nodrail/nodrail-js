@@ -17,7 +17,6 @@ const connected = (answer?: Parameters<typeof fakeNodrail>[0]) => {
   const nodrail = createNodrail({
     url: "https://nodrail.test",
     credential: "c",
-    waitMs: 0,
     fetch: server.fetch,
     env: {},
   });
@@ -84,7 +83,6 @@ const middlewareOn = (server: ReturnType<typeof fakeNodrail>) =>
   nodrailMiddleware({
     url: "https://nodrail.test",
     credential: "c",
-    waitMs: 0,
     fetch: server.fetch,
     env: {},
   });
@@ -323,7 +321,6 @@ describe("guard", () => {
     const env: Record<string, string | undefined> = {};
     const nodrail = createNodrail({
       url: "https://nodrail.test",
-      waitMs: 0,
       fetch: server.fetch,
       env,
     });
@@ -373,7 +370,6 @@ describe("guard", () => {
     }) as unknown as typeof fetch;
     const nodrail = createNodrail({
       credential: "c",
-      waitMs: 0,
       fetch: send,
       env: {},
     });
@@ -417,7 +413,6 @@ describe("configuration", () => {
   test("the service being unreachable blocks", async () => {
     const nodrail = createNodrail({
       credential: "c",
-      waitMs: 0,
       env: {},
       fetch: (() =>
         Promise.reject(new Error("down"))) as unknown as typeof fetch,
@@ -500,7 +495,7 @@ describe("what guard's type promises", () => {
 // Each of these ran unchecked in 0.1.0: guard returned the tool untouched.
 describe("nothing with code of its own slips through", () => {
   const unconfigured = () =>
-    createNodrail({ env: { NODRAIL_HOME: "/nonexistent" }, waitMs: 0 });
+    createNodrail({ env: { NODRAIL_HOME: "/nonexistent" } });
   const ran = vi.fn(() => "RAN");
 
   test.each([
@@ -569,7 +564,7 @@ describe("MCP SDK tools", () => {
     return client;
   }
   const unconfigured = () =>
-    createNodrail({ env: { NODRAIL_HOME: "/nonexistent" }, waitMs: 0 });
+    createNodrail({ env: { NODRAIL_HOME: "/nonexistent" } });
   const deleteRepo = (client: Client) =>
     client.callTool({ name: "delete_repo", arguments: { repo: "a/b" } });
 

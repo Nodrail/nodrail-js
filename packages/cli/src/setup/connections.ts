@@ -77,13 +77,22 @@ export function telemetryNote(
     : `Telemetry: ${status.sent} kept by ${to}${losses}${why}; last at ${status.at}.${unbound}`;
 }
 
-/** The hook's flags for the setup's connections and telemetry, if any. */
-export function hookReads(setup: ProjectSetup, path: (file: string) => string) {
+/**
+ * The hook's flags for the setup's connections and telemetry, if any. The
+ * connected hook takes no telemetry: Nodrail records each decision itself.
+ */
+export function hookReads(
+  setup: ProjectSetup,
+  path: (file: string) => string,
+  options: { telemetry?: boolean } = {},
+) {
   return [
     ...(setup.connections.length > 0 || pluginServers(setup)
       ? [`--connections ${path(CONNECTIONS_FILE)}`]
       : []),
-    ...(setup.telemetry ? [`--telemetry ${path(TELEMETRY_FILE)}`] : []),
+    ...(setup.telemetry && options.telemetry !== false
+      ? [`--telemetry ${path(TELEMETRY_FILE)}`]
+      : []),
   ]
     .map((flag) => ` ${flag}`)
     .join("");

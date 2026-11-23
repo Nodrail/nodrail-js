@@ -2,7 +2,7 @@
   "version": 1,
   "evaluation_cases": [
     {
-      "id": "deny-wins-over-review-and-allow",
+      "id": "deny-wins-over-allow",
       "descriptor": {
         "agentId": "support-agent",
         "installationId": "support-dev",
@@ -14,30 +14,9 @@
       },
       "rules": [
         { "id": "allow-rule", "effect": "allow" },
-        { "id": "review-rule", "effect": "require_approval" },
         { "id": "deny-rule", "effect": "deny" }
       ],
       "expected": { "outcome": "deny", "matchedRuleId": "deny-rule" }
-    },
-    {
-      "id": "review-wins-over-allow",
-      "descriptor": {
-        "agentId": "support-agent",
-        "installationId": "support-dev",
-        "toolKey": "github",
-        "operationKey": "issues.delete",
-        "resourceKind": "repository",
-        "resourceId": "acme/support",
-        "params": {}
-      },
-      "rules": [
-        { "id": "allow-rule", "effect": "allow" },
-        { "id": "review-rule", "effect": "require_approval" }
-      ],
-      "expected": {
-        "outcome": "require_approval",
-        "matchedRuleId": "review-rule"
-      }
     },
     {
       "id": "exact-allow",

@@ -5,7 +5,7 @@ This page says what the engine guarantees, and what it leaves to you. Read it be
 ## What it guarantees
 
 - The same rules, call and clock always give the same outcome.
-- Deny beats review, and review beats allow, whatever order rules are in.
+- A rule only allows or denies, and deny beats allow, whatever order rules are in. Nothing waits for a person.
 - A call no rule covers is never allowed.
 - A parameter that is missing or of the wrong type never helps an allow rule.
 - In the Claude Code hook, unreadable events, calls it can't describe, and rules it can't load are blocked. With gates or budgets, so is an action when the run ledger can't be read or the action can't be recorded.
@@ -27,7 +27,7 @@ This page says what the engine guarantees, and what it leaves to you. Read it be
 
 **Declared facts are declared.** Conditions compare what the caller says. Agent names are not authenticated, and an allow doesn't prove that the action ran or what it did.
 
-**Runs are reported, not proven.** Run keys, steps and receipts are what the integration and the agents report. A receipt is what an agent said, and the local run ledger is a file that an agent able to write there can change. With `repo-work`, tests the agent writes and runs can write the local ledger, so local gates guard against mistakes, not against a determined agent; Cloud keeps the history on its server. See the [limits of runs (preview)](runs.md#limits) and protect the ledger as [described there](runs.md#claude-code).
+**Runs are reported, not proven.** Run keys, steps and receipts are what the integration and the agents report. A receipt is what an agent said, and the local run ledger is a file that an agent able to write there can change. With `repo-work`, tests the agent writes and runs can write the local ledger, so local gates guard against mistakes, not against a determined agent; the control plane keeps the history on its server. See the [limits of runs (preview)](runs.md#limits) and protect the ledger as [described there](runs.md#claude-code).
 
 **Redaction is best effort.** It catches common credential shapes, not everything.
 

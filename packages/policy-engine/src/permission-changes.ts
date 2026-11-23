@@ -21,8 +21,6 @@ import {
   canonical,
   describeCondition,
   describeScope,
-  coversAll,
-  mayOverlap,
   nameRelation,
   scopeRelation,
 } from "./permission-scope.ts";
@@ -117,22 +115,6 @@ function change(
   } satisfies PermissionChange;
 }
 
-const allows = (items: Item[], rule: PolicyRule) =>
-  items.some(
-    (other) =>
-      other.entry === "rule" &&
-      other.value.effect === "allow" &&
-      mayOverlap(other.value, rule),
-  );
-
-const coveredByAllow = (items: Item[], rule: PolicyRule) =>
-  items.some(
-    (other) =>
-      other.entry === "rule" &&
-      other.value.effect === "allow" &&
-      coversAll(other.value, rule),
-  );
-
 function ruleDetails(rule: PolicyRule | PolicyGate) {
   return [
     ...rule.conditions.map((item) => `where ${describeCondition(item)}`),
@@ -140,16 +122,13 @@ function ruleDetails(rule: PolicyRule | PolicyGate) {
   ];
 }
 
-/**
- * A new rule. A review can block an allowed action or open a blocked one, so
- * where an allow may already apply it is only "changed".
- */
-function added(item: Item, before: Item[], how = "added"): PermissionChange {
+/** A new rule: an allow grants, a deny tightens. */
+function added(item: Item, how = "added"): PermissionChange {
   if (item.entry === "budget")
     return change(item, [
       {
         impact: "tightened",
-        text: `${how}: ${item.value.effect.replace("_", " ")} over ${describeBudget(item.value)}`,
+        text: `${how}: ${item.value.effect} over ${describeBudget(item.value)}`,
       },
     ]);
   const details = ruleDetails(item.value);
@@ -158,20 +137,18 @@ function added(item: Item, before: Item[], how = "added"): PermissionChange {
       ...item.value.requires.map(describeRequirement),
       ...evidenceOf(item.value).map(describeEvidenceNeed),
     ].join("; ");
-    const text = `${how}: ${item.value.effect.replace("_", " ")} until ${needs}`;
+    const text = `${how}: ${item.value.effect} until ${needs}`;
     return change(item, [{ impact: "tightened", text, details }]);
   }
   const { effect } = item.value;
-  const text = `${how} (${effect.replace("_", " ")})`;
+  const text = `${how} (${effect})`;
   if (effect === "allow")
     return change(item, [{ impact: "granted", text, details }]);
-  if (effect === "deny") return change(item, [gained(effect, text, details)]);
-  const impact = allows(before, item.value) ? "changed" : "granted";
-  return change(item, [{ impact, text, details }]);
+  return change(item, [gained(effect, text, details)]);
 }
 
-/** A rule gone. Without a review, what it covered falls to any allow or to the default. */
-function removed(item: Item, after: Item[], how = "removed"): PermissionChange {
+/** A rule gone: an allow is revoked, a deny no longer blocks what it covered. */
+function removed(item: Item, how = "removed"): PermissionChange {
   if (item.entry === "budget")
     return change(item, [
       {
@@ -186,18 +163,10 @@ function removed(item: Item, after: Item[], how = "removed"): PermissionChange {
       { impact: "loosened", warning: true, text: how, details },
     ]);
   const { effect } = item.value;
-  const text = `${how} (${effect.replace("_", " ")})`;
+  const text = `${how} (${effect})`;
   if (effect === "allow")
     return change(item, [{ impact: "revoked", text, details }]);
-  if (effect === "deny") return change(item, [lost(effect, text, details)]);
-  // What the review held falls to an allow where one covers it, else to the
-  // default block: looser only if an allow covers all of it.
-  const impact = coveredByAllow(after, item.value)
-    ? "loosened"
-    : allows(after, item.value)
-      ? "changed"
-      : "revoked";
-  return change(item, [{ impact, text, details }]);
+  return change(item, [lost(effect, text, details)]);
 }
 
 /**
@@ -220,7 +189,6 @@ function comparable(
 }
 
 type Pair = { before: Item; after: Item };
-type Sides = { before: Item[]; after: Item[] };
 
 /** What changed in an entry kept under its id, or null when it can't be compared. */
 function aspectsOf(before: Item, after: Item): Aspect[] | null {
@@ -242,14 +210,11 @@ function aspectsOf(before: Item, after: Item): Aspect[] | null {
   return aspects;
 }
 
-function edited({ before, after }: Pair, sides: Sides): PermissionChange[] {
+function edited({ before, after }: Pair): PermissionChange[] {
   if (canonical(before.value) === canonical(after.value)) return [];
   const aspects = aspectsOf(before, after);
   if (!aspects)
-    return [
-      removed(before, sides.after, "moved away"),
-      added(after, sides.before, "moved here"),
-    ];
+    return [removed(before, "moved away"), added(after, "moved here")];
   // Conditions or requirements only reordered: nothing to show.
   return aspects.length ? [change(after, aspects)] : [];
 }
@@ -306,7 +271,7 @@ export function permissionChanges(
   const changes = [
     ...sides.after.flatMap((item) => {
       const old = was.get(keyOf(item));
-      return old ? edited({ before: old, after: item }, sides) : [];
+      return old ? edited({ before: old, after: item }) : [];
     }),
     ...renamed.map(({ before, after }) =>
       change(
@@ -322,10 +287,10 @@ export function permissionChanges(
     ),
     ...sides.after
       .filter((item) => !kept.has(keyOf(item)) && !paired.has(item))
-      .map((item) => added(item, sides.before)),
+      .map((item) => added(item)),
     ...sides.before
       .filter((item) => !kept.has(keyOf(item)) && !paired.has(item))
-      .map((item) => removed(item, sides.after)),
+      .map((item) => removed(item)),
   ];
   return sortChanges(changes);
 }

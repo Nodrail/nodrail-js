@@ -178,12 +178,12 @@ describe("nodrail policy lock and export --frozen", () => {
     expect(a.read("nodrail.lock.yaml")).not.toContain(a.cwd);
   });
 
-  test("the export is one APF file that compiles", async () => {
+  test("the export is one rules file that compiles", async () => {
     const p = await locked();
     const { out } = await p.run("policy", "export", "--frozen");
-    expect(
-      compilePolicies([{ name: "effective.apf.yaml", text: out }]).ok,
-    ).toBe(true);
+    expect(compilePolicies([{ name: "effective.yaml", text: out }]).ok).toBe(
+      true,
+    );
     expect(out).toContain('value: "acme/widgets"');
   });
 
@@ -348,7 +348,7 @@ describe("nodrail policy lock and export --frozen", () => {
 });
 
 describe("a team's resources", () => {
-  const api = "apiVersion: apf.nodrail.com/v1alpha1";
+  const api = "apiVersion: nodrail.com/v1alpha1";
   const agents = ["lead", "publisher", "tester", "gate", "critic", "builder"]
     .map((name) => `${api}\nkind: Agent\nmetadata: { name: ${name} }\n`)
     .join("---\n");
@@ -392,9 +392,9 @@ spec:
     expect(code).toBe(0);
     expect(out).toContain("agent: publisher");
     expect(out).not.toMatch(/agent: (github|qa|gatekeeper|reviewer)\b/);
-    expect(
-      compilePolicies([{ name: "effective.apf.yaml", text: out }]).ok,
-    ).toBe(true);
+    expect(compilePolicies([{ name: "effective.yaml", text: out }]).ok).toBe(
+      true,
+    );
     // Adding another module keeps the setup nodrail.yaml declares.
     expect((await p.run("add", "@nodrail/read-only")).code).toBe(0);
     expect(p.read("nodrail.yaml")).toContain("runtime: claude-code");
@@ -519,16 +519,16 @@ describe("a write killed partway", () => {
   test("a write planted in the repository is never put in place", async () => {
     const p = await locked();
     p.write(
-      "effective.apf.yaml",
+      "effective.yaml",
       "- rule: Reviewed\n  command: ls\n  effect: allow\n",
     );
     const planted =
       "- rule: Anything\n  command: { prefix: '' }\n  effect: allow\n";
     mkdirSync(join(p.cwd, ".nodrail-write", "next"), { recursive: true });
-    p.write(".nodrail-write/next/effective.apf.yaml", planted);
+    p.write(".nodrail-write/next/effective.yaml", planted);
     p.write(".nodrail-write/ready", "");
     await p.run("policy", "lock");
-    expect(p.read("effective.apf.yaml")).not.toBe(planted);
+    expect(p.read("effective.yaml")).not.toBe(planted);
   });
 
   test("a staged write that changed after staging is dropped, not applied", async () => {
@@ -537,12 +537,12 @@ describe("a write killed partway", () => {
     const folder = stagingFolder({ root: p.cwd, home: p.home });
     mkdirSync(join(folder, "next"), { recursive: true });
     writeFileSync(join(folder, "next", "nodrail.yaml"), "kind: changed\n");
-    writeFileSync(join(folder, "next", "effective.apf.yaml"), "anything\n");
+    writeFileSync(join(folder, "next", "effective.yaml"), "anything\n");
     writeFileSync(
       join(folder, "ready"),
       JSON.stringify({
         "nodrail.yaml": "0".repeat(64),
-        "effective.apf.yaml": "0".repeat(64),
+        "effective.yaml": "0".repeat(64),
       }),
     );
     expect((await p.run("policy", "lock")).code).toBe(0);

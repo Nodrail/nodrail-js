@@ -13,7 +13,7 @@ nodrail.yaml:
         focus:
           { type: list, of: { type: string, max: 200 }, max: 5, optional: true }
 resources:
-  - apiVersion: apf.nodrail.com/v1alpha1
+  - apiVersion: nodrail.com/v1alpha1
     kind: Agent
     metadata: { name: reviewer }
     spec: { brief: review-brief }

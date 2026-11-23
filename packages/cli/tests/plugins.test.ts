@@ -121,7 +121,7 @@ describe.skipIf(windows)("plugins on Claude Code", () => {
       await terminal.run(
         "policy",
         "hook",
-        join(p.cwd, ".nodrail/effective.apf.yaml"),
+        join(p.cwd, ".nodrail/effective.yaml"),
         "--connections",
         join(p.cwd, ".nodrail/connections.json"),
         "--agent",

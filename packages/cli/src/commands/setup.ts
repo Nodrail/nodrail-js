@@ -27,6 +27,12 @@ import {
   type Activation,
 } from "../setup/status.ts";
 import { budgetText, evidenceText } from "../setup/accountable.ts";
+import { credentialChecks } from "../setup/connect.ts";
+import {
+  livePolicy,
+  publishPolicy,
+  type Publication,
+} from "../setup/connect-policy.ts";
 import { verifierChecks } from "../setup/verifiers.ts";
 
 /** ✓ passed, ! blocks, ? passes but wasn't proven here. */
@@ -150,6 +156,11 @@ export async function plan(command: Command) {
   const result = planSetup({ root, home: io.home, env: io.env, runtime });
   result.checks.push(...secretChecks(result, io.env));
   result.checks.push(...(await verifierChecks(command, result)));
+  result.checks.push(...(await credentialChecks(result, io.env, io.fetch)));
+  const live = await livePolicy(result, io, {
+    replaceLive: values["replace-live"] === true,
+  });
+  result.checks.push(...live.checks);
   const active = await activation(result, root, io);
   command.print(
     {
@@ -231,12 +242,18 @@ export async function apply(command: Command) {
   if (writeInProgress(place)) holdProject(place, () => undefined);
   const reviewed = planSetup(place);
   reviewed.checks.push(...secretChecks(reviewed, io.env));
+  reviewed.checks.push(...(await credentialChecks(reviewed, io.env, io.fetch)));
+  const policy = await livePolicy(reviewed, io, {
+    replaceLive: values["replace-live"] === true,
+    required: true,
+  });
+  reviewed.checks.push(...policy.checks);
   if (!values.json) io.out(planText(reviewed, { footer: false }));
   if (!isReady(reviewed))
     throw new CliError(
       `Nothing was changed. Fix what is marked ! first, then run ${again("apply")} again.`,
     );
-  const count = changesIn(reviewed);
+  const count = changesIn(reviewed) + (policy.publish ? 1 : 0);
   if (!(await confirmed(command, count))) {
     io.out("Nothing was changed.");
     return;
@@ -244,9 +261,20 @@ export async function apply(command: Command) {
   // Accepted: now, and only now, each connection may start, to show it
   // offers what it declares. One that doesn't stops apply before any write.
   if (count > 0) await connectionsStart(command, reviewed, root);
+  // Published before any file is written, so a hook that asks Nodrail
+  // never runs against the rules this apply replaces.
+  if (policy.publish) await published(command, policy.publish);
   // Even with nothing to change: the state records what nodrail owns.
   applySetup(place, reviewed, again("apply"));
   await finish(command, reviewed, count, { root, again });
+}
+
+/** Publishes the locked policy plan showed; a change made since is refused. */
+async function published(command: Command, publication: Publication) {
+  const result = await publishPolicy(publication);
+  command.say(
+    `Published lock ${publication.managed.revision.slice(0, 12)} to ${publication.api.url}: policy v${result.policy_revision} (${result.added} added, ${result.changed} changed, ${result.removed} removed).`,
+  );
 }
 
 /** Starts each connection once after the plan was accepted, and checks it. */

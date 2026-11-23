@@ -50,13 +50,7 @@ export const nonceDigest = (nonce: string) =>
   sha256(`nodrail:nonce:v1\n${nonce}`);
 
 export type ActionCode =
-  | "READY"
-  | "APPROVAL_PENDING"
-  | "UNKNOWN_PERMISSION_BLOCKED"
-  | "DENIED"
-  | "EXPIRED"
-  | "INVALIDATED"
-  | "PERMIT_ISSUED";
+  "READY" | "DENIED" | "EXPIRED" | "INVALIDATED" | "PERMIT_ISSUED";
 
 export type ActionStatus = {
   code: ActionCode;

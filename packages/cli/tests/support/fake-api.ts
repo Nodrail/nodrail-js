@@ -1,13 +1,12 @@
-import type { Approval, Me, Scope } from "../../src/api.ts";
+import type { Me, Scope } from "../../src/api.ts";
 
 export const TOKEN = `ndp_0123456789ab_${"A".repeat(43)}`;
-export const APPROVAL_ID = "6d1c2f0a-1111-4111-8111-111111111111";
 export const RUN_ID = "7e2d3a1b-2222-4222-8222-222222222222";
 export const EVENT_ID = "8f3e4b2c-3333-4333-8333-333333333333";
 
 type Options = {
   scopes?: Scope[];
-  role?: "viewer" | "approver" | "policy_manager" | "admin";
+  role?: "viewer" | "policy_manager" | "admin";
   /** Answers every call with this error instead. */
   failWith?: { status: number; code: string };
 };
@@ -21,33 +20,10 @@ type Seen = {
 };
 
 const roleCan = {
-  viewer: { decide: false, rules_write: false },
-  approver: { decide: true, rules_write: false },
-  policy_manager: { decide: false, rules_write: true },
-  admin: { decide: true, rules_write: true },
+  viewer: { rules_write: false },
+  policy_manager: { rules_write: true },
+  admin: { rules_write: true },
 };
-
-export const pendingApproval = (): Approval => ({
-  id: APPROVAL_ID,
-  reference: "APR-6D1C2F0A",
-  state: "pending",
-  reason: "new_permission",
-  created_at: "2026-11-12T10:00:00.000Z",
-  expires_at: "2026-11-12T11:00:00.000Z",
-  agent_key: "support-bot",
-  installation_name: "support-bot-prod",
-  environment: "Production",
-  tool_key: "github",
-  operation_key: "issues.delete",
-  resource_kind: "issue",
-  resource: "acme/support#482",
-  parameters: { issue: 482 },
-  action_digest: "sha256:abc",
-  attempts: 1,
-  decided_at: null,
-  decided_by: null,
-  can_decide: true,
-});
 
 export const CURRENT_YAML = "version: 1\nrules:\n  - name: Read issues\n";
 
@@ -56,7 +32,6 @@ export function fakeApi(options: Options = {}) {
   const scopes = options.scopes ?? ["read"];
   const role = options.role ?? "admin";
   const seen: Seen[] = [];
-  const approval = pendingApproval();
   const state = {
     revision: 3,
     yaml: CURRENT_YAML,
@@ -66,7 +41,6 @@ export function fakeApi(options: Options = {}) {
   };
   const can = {
     read: true,
-    decide: scopes.includes("decide") && roleCan[role].decide,
     rules_write: scopes.includes("rules:write") && roleCan[role].rules_write,
   };
   const me: Me = {
@@ -99,16 +73,6 @@ export function fakeApi(options: Options = {}) {
       : allowed
         ? null
         : error(403, "FORBIDDEN");
-
-  function decide(body: Record<string, unknown>) {
-    const refused = needs("decide", can.decide);
-    if (refused) return refused;
-    if (body.expected_action_digest !== approval.action_digest)
-      return error(409, "ACTION_CHANGED");
-    approval.state = body.decision === "deny" ? "denied" : "approved_once";
-    approval.decided_by = "Ana Ruiz";
-    return { status: 200, body: approval };
-  }
 
   function preview(body: Record<string, unknown>) {
     const refused = needs("rules:write", can.rules_write);
@@ -149,7 +113,6 @@ export function fakeApi(options: Options = {}) {
         added: 1,
         changed: 0,
         removed: 0,
-        closed_requests: 0,
       },
     };
   }
@@ -159,15 +122,6 @@ export function fakeApi(options: Options = {}) {
     (body: Record<string, unknown>) => { status: number; body: unknown }
   > = {
     "GET /me": () => ({ status: 200, body: me }),
-    "GET /approvals": () => ({
-      status: 200,
-      body: {
-        items: approval.state === "pending" ? [approval] : [],
-        next_cursor: null,
-      },
-    }),
-    [`GET /approvals/${APPROVAL_ID}`]: () => ({ status: 200, body: approval }),
-    [`POST /approvals/${APPROVAL_ID}/decision`]: decide,
     "GET /activity": () => ({
       status: 200,
       body: { items: [activityEvent()], next_cursor: "next-page" },
@@ -222,17 +176,17 @@ export function fakeApi(options: Options = {}) {
     });
   };
 
-  return { fetch: fetch as typeof globalThis.fetch, seen, approval, state, me };
+  return { fetch: fetch as typeof globalThis.fetch, seen, state, me };
 }
 
 function activityEvent() {
   return {
     id: EVENT_ID,
     occurred_at: "2026-11-12T10:05:00.000Z",
-    code: "approval_allowed_once",
-    group: "decision",
-    outcome: "allowed",
-    label: "Allowed once",
+    code: "rule_create",
+    group: "change",
+    outcome: "informational",
+    label: "Rule created",
     actor: { kind: "human", name: "Ana Ruiz", via: "laptop" },
     agent_key: "support-bot",
     action: {
@@ -241,14 +195,11 @@ function activityEvent() {
       resource_kind: "issue",
       resource: "acme/support#482",
       installation_name: "support-bot-prod",
-      approval_id: APPROVAL_ID,
       run: null,
-      reference: "APR-6D1C2F0A",
+      reference: "REQ-6D1C2F0A",
     },
     environment: "Production",
     rule: null,
-    closed_reason: null,
-    closed_requests: null,
     subject: null,
     detail: null,
     latest_report: null,
@@ -303,29 +254,7 @@ function timeline() {
 function insights() {
   return {
     days: 30,
-    approvals: {
-      requests: 12,
-      approved: 9,
-      denied: 2,
-      expired: 1,
-      withdrawn: 0,
-      closed: 0,
-      waiting: 0,
-      median_seconds_to_decide: 42,
-      p90_seconds_to_decide: 300,
-      decisions: { actions: 40, by_rule: 28, by_person: 12 },
-    },
+    decisions: { actions: 40, allowed: 28, denied: 12, no_rule: 5 },
     rules: { top: [], unused: [], newer: 0, active_rules: 4 },
-    repeated_approvals: [
-      {
-        agent_key: "support-bot",
-        installation_name: "support-bot-prod",
-        tool_key: "github",
-        operation_key: "issues.read",
-        resource_kind: "issue",
-        resource: "acme/support#1",
-        approved: 4,
-      },
-    ],
   };
 }

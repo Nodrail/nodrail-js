@@ -42,7 +42,7 @@ receipts:
 
 ```yaml
 # resources/team.yaml
-apiVersion: apf.nodrail.com/v1alpha1
+apiVersion: nodrail.com/v1alpha1
 kind: Agent
 metadata: { name: reviewer }
 spec: { instructions: ./reviewer.md, receipt: reviewer }
@@ -62,7 +62,7 @@ spec:
     }
 ```
 
-The engine's compiler checks all of it, and the CLI refuses the project on any issue: an unknown key, a missing shape, a receipt without a verdict, a gate waiting for a verdict the receipt can't give (`pass isn't a verdict this receipt can give (verdict-value)`). `evidence:` is read too, with engine level 5: see [evidence.md](evidence.md). Every other contract key (`approvals:`, `views:`…) is still refused, with the key named: this release reads none of them.
+The engine's compiler checks all of it, and the CLI refuses the project on any issue: an unknown key, a missing shape, a receipt without a verdict, a gate waiting for a verdict the receipt can't give (`pass isn't a verdict this receipt can give (verdict-value)`). `evidence:` is read too, with engine level 5: see [evidence.md](evidence.md). Every other contract key (`views:`…) is still refused, with the key named: this release reads none of them. `approvals:` was removed: nothing waits for a person.
 
 A connection's operation may name the shape of its arguments and of its result:
 
@@ -81,7 +81,7 @@ A project that declares no contracts is resolved, locked and set up exactly as b
 
 ## What the hook reads
 
-The hook reads only rule files, so `plan`, `apply` and `policy export --frozen` put the contracts at the top of the effective policy (`.nodrail/effective.apf.yaml`) as one `contracts` entry, in a file that asks for engine level 4:
+The hook reads only rule files, so `plan`, `apply` and `policy export --frozen` put the contracts at the top of the effective policy (`.nodrail/effective.yaml`) as one `contracts` entry, in a file that asks for engine level 4:
 
 ```yaml
 # ── nodrail.yaml (contracts)
@@ -126,7 +126,7 @@ A rule or gate reads a checked value with `where` on `input.` (the call's argume
 
 An invalid, missing or (on Codex) unobservable brief denies the dispatch, and invalid arguments deny the call, before any rule: the agent never starts and the provider is never called. Reasons name paths and codes, never a value.
 
-**In Nodrail Cloud, `where` reads only reported fields.** Cloud evaluates a condition on a brief or an input with the fields the projection reports; one on a field that isn't reported is never met there (fail-closed). The local hook reads the whole value. `plan` lists each such condition, and `contracts explain` marks it. Report a field (`report: true`) only if it may leave the machine.
+**On the control plane, `where` reads only reported fields.** The control plane evaluates a condition on a brief or an input with the fields the projection reports; one on a field that isn't reported is never met there (fail-closed). The local hook reads the whole value. `plan` lists each such condition, and `contracts explain` marks it. Report a field (`report: true`) only if it may leave the machine.
 
 With receipts, gates or budgets, `apply` runs the same hook when a subagent starts and stops: `SubagentStart` and `SubagentStop` in `.claude/settings.json`, `subagentStart` and `subagentStop` in `.github/hooks/nodrail.json`. The step finishes with the receipt that ends the agent's final message, read against its contract: only a **valid** one counts for a gate, and a gate's `where:` is checked on its values. An invalid or missing receipt leaves the gate unmet. Codex has no such hooks from nodrail yet: a gate that waits for a receipt stays closed there.
 
@@ -282,6 +282,6 @@ Contracts, compared with the last committed nodrail.lock.yaml:
 - Receipts are enforced on Claude Code and Copilot. On Codex nothing captures one yet: a gate that waits for a receipt stays closed.
 - Briefs are checked by the hook on Claude Code and Copilot. Codex hands the hook the dispatch prompt encrypted, so starting an agent that has a brief is denied there.
 - The hook checks a connection `input` before the rules; the `output` is checked only by the connection Nodrail runs.
-- In Nodrail Cloud a `where` on an unreported brief or input field is never met.
+- On the control plane, a `where` on an unreported brief or input field is never met.
 - Evidence is declared once, in nodrail.yaml, like shapes and receipts; a rule file's own `contracts` entry that declares evidence is refused there. Gates read it at engine level 5 ([evidence.md](evidence.md)).
-- Every other contract key (`approvals:`, `views:`…) is refused: this engine can't observe them yet.
+- Every other contract key (`views:`…) is refused: this engine can't observe them yet. `approvals:` was removed.

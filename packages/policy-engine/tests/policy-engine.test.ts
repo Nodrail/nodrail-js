@@ -37,7 +37,7 @@ const conformance = JSON.parse(
     }>;
     now?: string;
     expected: {
-      outcome: "deny" | "require_approval" | "allow" | "none";
+      outcome: "deny" | "allow" | "none";
       matchedRuleId: string | null;
     };
   }>;
@@ -66,7 +66,7 @@ const descriptor: Descriptor = {
   params: { issue: 482, labels: ["resolved"] },
 };
 
-const policyRule = (effect: "allow" | "deny" | "require_approval") => ({
+const policyRule = (effect: "allow" | "deny") => ({
   id: `${effect}-rule`,
   name: `${effect} rule`,
   effect,
@@ -115,7 +115,7 @@ describe("policy-engine evaluation contract", () => {
     (field) => {
       const sparse = { ...descriptor, params: {} };
       const condition = { field, op: "neq" as const, value: "unexpected" };
-      const decision = (effect: "allow" | "deny" | "require_approval") =>
+      const decision = (effect: "allow" | "deny") =>
         simulate({
           document: {
             version: 1,
@@ -126,7 +126,6 @@ describe("policy-engine evaluation contract", () => {
         });
       expect(decision("allow").outcome).toBe("none");
       expect(decision("deny").outcome).toBe("deny");
-      expect(decision("require_approval").outcome).toBe("require_approval");
     },
   );
 

@@ -6,7 +6,8 @@ import { CliError } from "../io.ts";
 import { journalWriter, onDisk, replayReviewed } from "../project/journal.ts";
 import { holdProject, type Place } from "../project/store.ts";
 import { claudeUndoSteps, type UndoStep } from "./claude-settings.ts";
-import { removalStep, type Step } from "./plan.ts";
+import type { Step } from "./plan.ts";
+import { removalStep } from "./steps.ts";
 import { CODEX_MARKETPLACE } from "./plugins.ts";
 import {
   readState,

@@ -2,7 +2,7 @@
 // as before contracts existed. The files under fixtures/unchanged/ were
 // written by nodrail 0.3.2 (before declared contracts) from this project;
 // the lock's engine line was regenerated when the engine moved to level 4,
-// the only line that changed.
+// and its digests when the team rules lost the old .apf.yaml suffix.
 import { describe, expect, test } from "vitest";
 import { planSetup } from "../src/setup/plan.ts";
 import { locked, RESOURCES } from "./support/setup-project.ts";

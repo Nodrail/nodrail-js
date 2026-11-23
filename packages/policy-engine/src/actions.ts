@@ -469,13 +469,13 @@ export type HookResult = { stdout: string; stderr: string; exitCode: number };
 
 export const allowQuietly: HookResult = { stdout: "", stderr: "", exitCode: 0 };
 
-/** Claude Code's own answers to a PreToolUse hook. */
-function hookAnswer(decision: "deny" | "ask", reason: string): HookResult {
+/** Claude Code's own deny answer to a PreToolUse hook. */
+export function deny(reason: string): HookResult {
   return {
     stdout: JSON.stringify({
       hookSpecificOutput: {
         hookEventName: "PreToolUse",
-        permissionDecision: decision,
+        permissionDecision: "deny",
         permissionDecisionReason: reason,
       },
     }),
@@ -483,6 +483,3 @@ function hookAnswer(decision: "deny" | "ask", reason: string): HookResult {
     exitCode: 0,
   };
 }
-
-export const deny = (reason: string) => hookAnswer("deny", reason);
-export const askPerson = (reason: string) => hookAnswer("ask", reason);

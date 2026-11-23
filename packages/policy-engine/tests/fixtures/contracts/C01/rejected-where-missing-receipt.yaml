@@ -37,7 +37,7 @@ nodrail.yaml:
         - { class: externally-verified, verifier: github-actions }
       subject: revision
 resources:
-  - apiVersion: apf.nodrail.com/v1alpha1
+  - apiVersion: nodrail.com/v1alpha1
     kind: Agent
     metadata: { name: developer }
     spec: {}

@@ -7,10 +7,10 @@ const blocked = (code: string, reference: string | null = "APR-1") =>
 
 describe("each reason a call is blocked", () => {
   test.each([
-    ["APPROVAL_PENDING", /waiting for a person.*APR-1/],
-    ["UNKNOWN_PERMISSION_BLOCKED", /waiting for a person/],
+    // A hold from an older server is a deny, never a wait.
+    ["APPROVAL_PENDING", /APPROVAL_PENDING\), so it is denied\. Request APR-1/],
     ["DENIED", /denied.*APR-1/],
-    ["EXPIRED", /expired before anyone decided/],
+    ["EXPIRED", /expired before it was used/],
     ["INVALIDATED", /something changed/],
     ["NOT_CONFIGURED", /NODRAIL_CREDENTIAL/],
     ["INSECURE_URL", /https/],
@@ -24,6 +24,17 @@ describe("each reason a call is blocked", () => {
 
   test("without a reference, none is mentioned", () => {
     expect(blocked("DENIED", null)).toBe("Nodrail: this action is denied.");
+  });
+
+  test("a call no rule covers says so, and how to get past it", () => {
+    const text = blockedText({
+      allowed: false,
+      code: "DENIED",
+      reason: "no_rule",
+      reference: "REQ-1",
+    });
+    expect(text).toMatch(/denied\. Request REQ-1\. No rule covers this call/);
+    expect(text).toMatch(/add a rule that allows it, then try again/);
   });
 
   test("a gate says which steps to run, so the agent can run them", () => {

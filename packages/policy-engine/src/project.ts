@@ -95,7 +95,7 @@ type Options = {
 /** A catalog module being read, and how the project uses it. */
 type Owner = { module: CatalogModule; use: ModuleUse };
 
-const isApf = (value: unknown) => value === null || Array.isArray(value);
+const isRulesFile = (value: unknown) => value === null || Array.isArray(value);
 const kindOf = (value: unknown) =>
   value !== null && typeof value === "object" && "kind" in value
     ? value.kind
@@ -170,7 +170,7 @@ class Resolver {
     this.result.inputs.push({ kind: "local", path, text });
     const value = this.parsed(text, ref, from);
     if (value === undefined) return;
-    if (isApf(value)) {
+    if (isRulesFile(value)) {
       this.result.sources.push({ name: path, text });
       this.result.checking.push({ name: path, text });
       return;
@@ -247,7 +247,7 @@ class Resolver {
     }
     // Last, the started team's own rules: who may start whom, setup kept safe.
     if (setup.team === null) return;
-    const name = `team/${setup.team.name}.apf.yaml`;
+    const name = `team/${setup.team.name}.yaml`;
     const text = teamRules(setup.team, setup);
     this.result.sources.push({ name, text });
     this.result.checking.push({ name, text });
@@ -265,7 +265,7 @@ class Resolver {
     const value =
       text === undefined ? undefined : this.parsed(text, path, from);
     if (text === undefined) this.problem(path, from, "No such file");
-    else if (value !== undefined && !isApf(value))
+    else if (value !== undefined && !isRulesFile(value))
       this.problem(path, from, "A Policy's source is a rules file");
     else if (value !== undefined) {
       this.result.inputs.push({ kind: "local", path, text });
@@ -417,7 +417,7 @@ class Resolver {
         this.moduleFile(owner, joinPath(path, child), key);
       return;
     }
-    if (!isApf(value))
+    if (!isRulesFile(value))
       return this.problem(path, key, "Expected rules or a module manifest");
     this.bound(owner.use, { path, text }, key);
   }

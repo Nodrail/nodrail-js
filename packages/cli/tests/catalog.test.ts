@@ -149,19 +149,17 @@ describe("@nodrail/merge-reviewed-pr", () => {
       expect(decide("merger", call, reviewed)).toBe("deny");
   });
 
-  test("a project's own file can make each merge wait for a person", async () => {
-    const person = `- rule: Merge reviewed pull requests
-  effect: require_approval
+  test("a project's own file can keep merging for people only", async () => {
+    const people = `- rule: Merge reviewed pull requests
+  effect: deny
   override: { effect: replace }
 `;
     const { document, cwd } = await installed(
-      ["@nodrail/merge-reviewed-pr", "./person.yaml"],
-      { "person.yaml": person },
+      ["@nodrail/merge-reviewed-pr", "./people.yaml"],
+      { "people.yaml": people },
     );
     const decide = decider(document, cwd);
-    expect(decide("merger", { github: "pr.merge" }, reviewed)).toBe(
-      "require_approval",
-    );
+    expect(decide("merger", { github: "pr.merge" }, reviewed)).toBe("deny");
   });
 });
 
@@ -206,14 +204,12 @@ describe("@nodrail/triage-issues", () => {
 });
 
 describe("@nodrail/dependency-updates", () => {
-  test("deps writes lockfiles by name; package.json waits for a person", async () => {
+  test("deps writes lockfiles by name; never package.json", async () => {
     const { document, cwd } = await installed(["@nodrail/dependency-updates"]);
     const decide = decider(document, cwd);
     for (const file of ["pnpm-lock.yaml", "packages/ui/package-lock.json"])
       expect(decide("deps", edit(join(cwd, file)))).toBe("allow");
-    expect(decide("deps", edit(join(cwd, "package.json")))).toBe(
-      "require_approval",
-    );
+    expect(decide("deps", edit(join(cwd, "package.json")))).toBe("deny");
     expect(decide("dev", edit(join(cwd, "pnpm-lock.yaml")))).not.toBe("allow");
   });
 
@@ -253,16 +249,17 @@ describe("@nodrail/dependency-updates", () => {
       expect(decide("deps", bash(command))).not.toBe("allow");
   });
 
-  test("commits and pushes ask a person; force, mirror and delete never", async () => {
+  test("commits and pushes its branch; never main, force, mirror or delete", async () => {
     const { document, cwd } = await installed(["@nodrail/dependency-updates"]);
     const decide = decider(document, cwd);
-    expect(decide("deps", bash('git commit -m "bump"'))).toBe(
-      "require_approval",
-    );
-    expect(decide("deps", bash("git push origin deps"))).toBe(
-      "require_approval",
-    );
+    expect(decide("deps", bash('git commit -m "bump"'))).toBe("allow");
+    expect(decide("deps", bash("git push origin deps"))).toBe("allow");
     for (const command of [
+      "git push",
+      "git push origin",
+      "git push origin main",
+      "git push origin master --force",
+      "git push origin HEAD:main",
       "git push --force",
       "git push -f origin deps",
       "git push --force-with-lease",

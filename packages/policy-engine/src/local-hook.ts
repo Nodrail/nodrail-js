@@ -1,6 +1,5 @@
 import {
   allowQuietly,
-  askPerson,
   deny,
   describeToolCall,
   nonEmptyText,
@@ -46,8 +45,11 @@ export const toDescriptor = (
 export type LocalHookOptions = Identity & {
   document: PolicyDocument;
   now: Date;
-  /** What to do when no rule covers a call. Blocked unless asked otherwise. */
-  unmatched: "deny" | "ask";
+  /**
+   * What to do when no rule covers a call: deny it, or allow it and leave it
+   * to the host's own permissions. Denied unless set otherwise.
+   */
+  unmatched: "deny" | "allow";
   /** The run this call belongs to, when the rules have gates or budgets. */
   run?: RunContext | null;
   /** Reads the revision the work is at, for requirements with `subject: revision`. */
@@ -65,11 +67,6 @@ export type LocalHookOptions = Identity & {
   protect?: readonly string[];
   /** A setup no shell command may name, whatever the rules say. */
   setup?: SetupGuard | null;
-  /**
-   * Whether the host can ask the person. Codex can't: it treats an "ask"
-   * answer as a failed hook and runs the call, so a review is a deny there.
-   */
-  canAsk?: boolean;
   /** The setup's tool connections: how to read a call to each. */
   connections?: ConnectionCalls | null;
   /** The data the connections keep, which agents reach only through them. */
@@ -127,21 +124,17 @@ const refused = (text: string): Judged => ({
 const heldByRun = (decision: SimulationResult) =>
   decision.reason === "gate" || decision.reason === "budget";
 
-/** A gate waits for something; a used-up budget stays used up for the step or run. */
-const holdLead = (decision: SimulationResult) =>
-  decision.reason === "budget" ? "Over the limit," : "Until then,";
-
-/** A rule says what it does; a gate or budget says what it is waiting for. */
+/**
+ * A rule says what it does; a gate or budget says what is missing, so the
+ * agent can fix it and retry. A gate is met by doing what it needs; a
+ * used-up budget stays used up for the step or run. Nothing waits for a person.
+ */
 function denied(decision: SimulationResult, subject: string) {
-  return heldByRun(decision)
-    ? `Nodrail: ${decision.explanation} ${holdLead(decision)} ${subject} is denied.`
-    : `Nodrail: rule ${decision.matchedRuleId} denies ${subject}.`;
-}
-
-function toReview(decision: SimulationResult, subject: string) {
-  return heldByRun(decision)
-    ? `Nodrail: ${decision.explanation} ${holdLead(decision)} a person must review ${subject}.`
-    : `Nodrail: rule ${decision.matchedRuleId} needs a person to review ${subject}.`;
+  if (!heldByRun(decision))
+    return `Nodrail: rule ${decision.matchedRuleId} denies ${subject}.`;
+  return decision.reason === "budget"
+    ? `Nodrail: ${decision.explanation} Over the limit, ${subject} is denied.`
+    : `Nodrail: ${decision.explanation} Until then, ${subject} is denied; meet the gate, then try again.`;
 }
 
 /**
@@ -208,17 +201,13 @@ function readView(
     : null;
 }
 
-const STRICTNESS: Record<string, number> = {
-  deny: 3,
-  require_approval: 2,
-  allow: 1,
-};
+const STRICTNESS: Record<string, number> = { deny: 2, allow: 1 };
 
 type View = { view: ActionDescriptor; decision: SimulationResult };
 
 /**
- * Of a call and the read it also is, the decision that holds: a deny over a
- * review over an allow over nothing. The call's own wins a tie, so its rules
+ * Of a call and the read it also is, the decision that holds: a deny over an
+ * allow over nothing. The call's own wins a tie, so its rules
  * keep the meaning they had.
  */
 function stricter(call: View, read: View | null): View {
@@ -248,13 +237,9 @@ function handbackDefault(
     : decision;
 }
 
-/** On a host that can't ask, a review is refused and says why. */
-const cannotAsk = (reason: string) =>
-  deny(`${reason} This host can't ask a person, so it is denied.`);
-
 /**
  * Decides a Claude Code PreToolUse event from local rules, with no server.
- * Nobody is waiting to review here, so a review goes to the person at the keyboard.
+ * A call is allowed or denied with its reason; nothing ever waits for a person.
  */
 export function judgeToolCall(
   stdin: string,
@@ -295,7 +280,6 @@ function judgeCall(stdin: string, options: LocalHookOptions): Judged {
   if (guarded) return refused(guarded);
 
   const { document, now, unmatched, run } = options;
-  const ask = options.canAsk === false ? cannotAsk : askPerson;
   const caller = callerOf(event, options);
   const judge = (view: ActionDescriptor) =>
     handbackDefault(
@@ -328,13 +312,14 @@ function judgeCall(stdin: string, options: LocalHookOptions): Judged {
       return judged(allowQuietly);
     case "deny":
       return judged(deny(denied(decision, subject)));
-    case "require_approval":
-      return judged(ask(toReview(decision, subject)));
     default:
+      // Allowed when set so, like an allow: the host's permissions decide.
       return judged(
-        (unmatched === "ask" ? ask : deny)(
-          `Nodrail: no rule covers ${subject}.`,
-        ),
+        unmatched === "allow"
+          ? allowQuietly
+          : deny(
+              `Nodrail: no rule covers ${subject}, so it is denied. Add a rule that allows it if it should run.`,
+            ),
       );
   }
 }
@@ -382,4 +367,32 @@ export function decideToolCall(
   options: LocalHookOptions,
 ): HookResult {
   return judgeToolCall(stdin, options).result;
+}
+
+/**
+ * What the local hook refuses whatever the rules say, for a hook that asks
+ * Nodrail for everything else (connected mode, R383): the same protect
+ * list, setup and connection-data checks, run here before the call leaves
+ * the machine, so a connected setup is never weaker than a local one.
+ * Null for a call these don't refuse, and for any event but PreToolUse.
+ */
+export function guardRefusalFor(
+  stdin: string,
+  options: Pick<
+    LocalHookOptions,
+    "protect" | "setup" | "connections" | "data" | "host"
+  >,
+): string | null {
+  const event = parseEvent(stdin);
+  if (event?.hook_event_name !== "PreToolUse") return null;
+  const name = nonEmptyText(event.tool_name);
+  const input = event.tool_input;
+  if (!name || typeof input !== "object" || input === null) return null;
+  const full = options as LocalHookOptions;
+  const action = describedCall(name, input as ToolInput, event, full);
+  if (typeof action === "string") return action;
+  return (
+    guardRefusal(action, input as ToolInput, event, full) ??
+    dataRefusal(action, input as ToolInput, event, full)
+  );
 }

@@ -1,13 +1,17 @@
 {
   "name": "@nodrail/cli",
-  "version": "0.4.0",
-  "description": "Your Nodrail workspace from the terminal: approvals, Activity, runs, Insights and rules, with a personal API token.",
+  "version": "0.5.0",
+  "description": "Nodrail, the open control plane for AI agent development: declare agents and rules in nodrail.yaml, then plan and apply them on Claude Code, Codex and Copilot.",
   "keywords": [
     "ai",
     "agents",
     "ai-agents",
-    "approvals",
-    "human-in-the-loop",
+    "ai-agent-development",
+    "control-plane",
+    "claude-code",
+    "codex",
+    "copilot",
+    "policy",
     "governance",
     "cli",
     "nodrail"
@@ -37,6 +41,7 @@
     "verify": "pnpm check && pnpm lint && pnpm test && pnpm test:pack"
   },
   "dependencies": {
+    "@nodrail/client": "workspace:^",
     "@nodrail/policy-engine": "workspace:^",
     "yaml": "^2.9.1",
     "zod": "^4.6.7"

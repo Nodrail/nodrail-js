@@ -1,6 +1,6 @@
 # Runs, gates and budgets
 
-> **Preview reference.** Gates and budgets require APF engine feature level 3, which engine 0.2.0 and later support. The local policy quickstart works without them.
+> **Preview reference.** Gates and budgets require engine feature level 3, which engine 0.2.0 and later support. The local policy quickstart works without them.
 
 This page covers gates, budgets and receipts: rules that depend on what already happened in a piece of work, how the Claude Code hook records that history, and how to test it.
 
@@ -41,7 +41,6 @@ Agent names in a run are the names of the steps (for Claude Code, the subagent t
   requires:
     - { agent: qa, verdict: pass, since: { list: builders } }
     - { agent: reviewer, verdict: [ship, ship_with_debt], since: { list: builders } }
-  otherwise: require_approval
 ```
 
 A gate matches exactly as a rule with the same fields would: `tool`, `operation` and `resource`, or `command`, plus `condition`, `agent`, `installation`, `expires` and `enabled`. Like a rule, it is named in decisions by its `id`, or by an id made from its name when it has none (see [Ids](rules.md#ids)). Instead of `effect` it has:
@@ -50,16 +49,16 @@ A gate matches exactly as a rule with the same fields would: `tool`, `operation`
   - `agent`: the step that must have finished.
   - `verdict`: one verdict or a list. Any of them meets it.
   - `since` (optional): an agent, a list of agents, or `{ list: <name> }`. The step must have started and finished after the latest work: anything these agents did (started, acted or finished), and any [change](#what-counts-as-a-change) by another agent than the one required. Without `since`, any time in the run counts.
-- `otherwise`: `deny` or `require_approval`, applied while a requirement is unmet.
+- `otherwise` (optional): `deny`, the only value and the default, applied while a requirement is unmet. `otherwise: require_approval` was removed; a file that still has it fails to compile and says to write `deny` or leave it out.
 
 What a gate does:
 
-1. **It never allows.** Met, it adds nothing, and your rules decide as usual. Unmet, it adds its `otherwise` effect as if it were a matching rule. Deny beats review beats allow, as always.
+1. **It never allows.** Met, it adds nothing, and your rules decide as usual. Unmet, it denies as if it were a matching deny rule, and the reason says what is missing, so the agent can get it done (run QA, get the review) and try again. Nothing waits for a person.
 2. **No history means unmet.** With no run, a step that reported no verdict, or a verdict not in the list, the gate holds. So does a step whose start wasn't recorded.
 3. **A builder still running counts as the latest work.** So does any action it took.
 4. **The step must cover all of the work.** A QA step that started before the last build action and finished after it saw only part of the build, so it doesn't count.
 5. **The latest step decides.** Only the agent's latest finished step counts, per revision when the requirement has `subject: revision`. A later step that fails, reports another verdict or ends with an invalid receipt closes a gate an earlier step opened, with no work between.
-6. **It never weakens the rules.** The rules decide first. An unmet gate can only make that stricter: when no rule matches, the action stays blocked even if the gate only asks for a review.
+6. **It never weakens the rules.** The rules decide first. An unmet gate can only make that stricter.
 
 ### What counts as a change
 
@@ -70,7 +69,7 @@ A change is:
 - a file written, edited, patched or deleted, and a notebook edited;
 - a shell command, except the read-only pack's look-around commands: `cd`, `ls`, `git status` and `git log` with any arguments, and `pwd`, `git branch`, `git diff` and `git diff --staged` as written.
 
-Starting a subagent, reads, searches, web and MCP tools are not changes. `git push` is: a second push after the reviewed one needs a new review. An action that was denied changed nothing, so only actions that went ahead or went to a person count. The local hook and `nodrail-policy test` record this with each action as `change: true`; Cloud works it out from the action with the same function, `isChange()` from `@nodrail/policy-engine`. An action recorded without `change`, as before engine level 3, is not a change.
+Starting a subagent, reads, searches, web and MCP tools are not changes. `git push` is: a second push after the reviewed one needs a new review. An action that was denied changed nothing, so only actions that went ahead count. The local hook and `nodrail-policy test` record this with each action as `change: true`; the control plane works it out from the action with the same function, `isChange()` from `@nodrail/policy-engine`. An action recorded without `change`, as before engine level 3, is not a change.
 
 Gating the `github` dispatch does not stop the main agent running `git push` itself. Gate the command too:
 
@@ -96,7 +95,6 @@ A command gate follows command-rule matching: `git push` covers `git push origin
   per: step
   tool_calls: 60
   warn_at: 40
-  otherwise: require_approval
 
 - budget: Run spend
   per: run
@@ -108,7 +106,7 @@ A command gate follows command-rule matching: `git push` covers `git push origin
 - One limit: `tool_calls`, `tokens` or `usd`. Use one budget per limit.
 - `step_agent` (optional): only that agent's steps. Without it, every agent.
 - `warn_at` (optional): from this amount, decisions carry a warning and nothing else changes. Must be below the limit.
-- `otherwise`: `deny` or `require_approval`, applied to every action the budget covers once it is used up, and to every action it covers that has no run to count in.
+- `otherwise` (optional): `deny`, the only value and the default, applied to every action the budget covers once it is used up, and to every action it covers that has no run to count in. The reason says which budget is used up.
 - `id`, `title`, `desc` and `enabled` work as they do for rules.
 
 How it counts:
@@ -133,7 +131,7 @@ findings: [flaky-test]
 ```
 ````
 
-Only the end of the message is read (the last 16 KB), and a block longer than 8 KB, fences included, is no receipt; Cloud takes the same 8 KB. `verdict` and each finding are lowercased, spaces become `_`, and they must be short words: up to 32 characters of `a-z`, `0-9`, `_` and `-`, starting with a letter or digit. A finding that isn't one is dropped; a verdict that isn't one leaves the step with no verdict. `tokens` and `usd` are optional numbers. A receipt followed by more text is treated as a quote and ignored, and so is any `agent` field: who ran comes from what the integration saw dispatched, not from what the agent wrote. Read one with `parseReceipt()` from `@nodrail/policy-engine/receipts`.
+Only the end of the message is read (the last 16 KB), and a block longer than 8 KB, fences included, is no receipt; the control plane takes the same 8 KB. `verdict` and each finding are lowercased, spaces become `_`, and they must be short words: up to 32 characters of `a-z`, `0-9`, `_` and `-`, starting with a letter or digit. A finding that isn't one is dropped; a verdict that isn't one leaves the step with no verdict. `tokens` and `usd` are optional numbers. A receipt followed by more text is treated as a quote and ignored, and so is any `agent` field: who ran comes from what the integration saw dispatched, not from what the agent wrote. Read one with `parseReceipt()` from `@nodrail/policy-engine/receipts`.
 
 In Claude Code, tell each subagent to end with a receipt in its definition. For a subagent defined in `.claude/agents/qa.md`, add this at the end of the file:
 
@@ -161,7 +159,7 @@ The subagent's type, the `name` in the file's front matter, is the agent name ga
 
 A run gate checks the steps supplied by the integration. To require QA on the exact Git revision you plan to merge, the integration also needs to identify the reviewed commit.
 
-In Nodrail’s **GitHub merge check pilot**, an adapter checked the repository, PR, base SHA and head SHA before supplying QA evidence to APF. A new head needed its own receipt even when only whitespace changed. The target branch required the status the adapter posted. [Read the pilot case study](https://nodrail.com/guides/github-merge-check-ai-agent-qa) · [Inspect PR #11](https://github.com/Nodrail/agent-plugins/pull/11).
+In Nodrail’s **GitHub merge check pilot**, an adapter checked the repository, PR, base SHA and head SHA before supplying QA evidence to the engine. A new head needed its own receipt even when only whitespace changed. The target branch required the status the adapter posted. [Read the pilot case study](https://nodrail.com/guides/github-merge-check-ai-agent-qa) · [Inspect PR #11](https://github.com/Nodrail/agent-plugins/pull/11).
 
 ## Which agents can use them
 
@@ -170,13 +168,13 @@ Gates and budgets don't depend on the model or its provider: Nodrail sees tool c
 | Integration | Run | Steps and receipts | Per-step budgets | Gates on another agent's step |
 | --- | --- | --- | --- | --- |
 | Claude Code, local hook (`nodrail-policy hook`) | Automatic | Automatic, from subagents | Yes | Yes |
-| Claude Code, Nodrail plugin (Cloud) | Automatic | Automatic, from subagents | Yes | Yes |
+| Claude Code, Nodrail plugin (control plane) | Automatic | Automatic, from subagents | Yes | Yes |
 | TypeScript SDK (`@nodrail/client`), with any framework: OpenAI Agents, Vercel AI SDK, LangChain, MCP, your own loop | `run` option or `NODRAIL_RUN` | Wrap each agent's work in `nodrail.step()` | Yes | Yes |
 | Codex plugin | Automatic | None: Codex doesn't say which subagent makes a call | No | Only for steps recorded another way |
-| [Cloud runtime API](https://nodrail.com/docs/runtime-api) (any language) | `run` on each intent | `POST /api/v1/runtime/steps` | Yes | Yes |
+| [Host API](https://nodrail.com/docs/runtime-api) (any language) | `run` on each intent | `POST /api/v1/runtime/steps` | Yes | Yes |
 | This engine as a library | Pass `run` to `simulate()` | You keep the history, with `change` on actions | Yes | Yes |
 
-In Cloud, a run belongs to the installation that reports it: another installation using the same key gets a run of its own, and can't record steps in yours. With Codex, gates on commands (`git push`) and per-run budgets work, because every call is the main agent's. Changes count as work in every integration: the local hook and `nodrail-policy test` record them, and Cloud works them out from each action it decides.
+On the control plane, a run belongs to the installation that reports it: another installation using the same key gets a run of its own, and can't record steps in yours. With Codex, gates on commands (`git push`) and per-run budgets work, because every call is the main agent's. Changes count as work in every integration: the local hook and `nodrail-policy test` record them, and the control plane works them out from each action it decides.
 
 ## Claude Code
 
@@ -279,11 +277,11 @@ The ledger is one JSON Lines file per run in `.git/nodrail/runs/` of the reposit
 
 A ledger line that can't be read blocks the next action rather than being skipped, and an action that can't be recorded is blocked, so a budget never undercounts. The one exception is a last line with no line break, a write that was cut off: it is left out, and cut away before the next event is added. Each decision reads the run, decides and records while holding a lock file next to the run's file, so two calls at once can't both take a budget's last call; a call that waits more than 5 seconds for the lock is blocked, and a lock older than 30 seconds, left by a hook that died, is taken over. Recording a step never blocks the agent; if it fails, the step has no verdict and gates that need it stay closed.
 
-`require_approval` asks the person at the keyboard. Their answer is Claude Code's, not recorded by Nodrail.
+A gate or budget that holds denies the call with its reason; nothing asks the person at the keyboard. The agent reads the reason, gets what is missing done, and tries again.
 
 **Protect the ledger.** It is a file, and an agent that can write to `.git` can write a verdict into it. The `repo-work` starter pack denies file writes and edits under `.git`, shell redirection is never a simple command, so a prefix rule doesn't cover it, and both packs deny running `nodrail-policy` and `nodrail-claude-hook`, which could record a step by hand. If you write your own rules, deny writes to `.git` too, and if you move the ledger with `NODRAIL_LEDGER`, deny writes to that folder. A hook given `--protect-list` (as `nodrail apply` sets it up) also checks this itself: file tools changing `.git` or the ledger are denied, and so are shell commands that name a path there (as written, spliced from quoted pieces, or with a wildcard that could match it), link to it, or copy a tree onto it. Reading shell commands is best effort, not a sandbox: a path built when the command runs, or a program that writes files on its own, isn't seen, so keep your own deny rules too.
 
-That is not enough against an agent set on it. `repo-work` lets the agent write tests and run them, and a test can write to the ledger like any other program. Local gates catch mistakes and keep an honest team of agents in order; they don't stop a determined agent. Cloud keeps the history on its server, where code the agent runs can't reach it.
+That is not enough against an agent set on it. `repo-work` lets the agent write tests and run them, and a test can write to the ledger like any other program. Local gates catch mistakes and keep an honest team of agents in order; they don't stop a determined agent. The control plane keeps the history on its server, where code the agent runs can't reach it.
 
 ### Reading the ledger
 
@@ -308,7 +306,6 @@ A cases file can carry the history a case runs in, so gates and budgets are test
   step_agent: dev
   per: step
   tool_calls: 2
-  otherwise: require_approval
 ```
 
 
@@ -329,7 +326,7 @@ A cases file can carry the history a case runs in, so gates and budgets are test
     - { action: dev }
     - { action: dev }
   step: dev
-  expect: require_approval
+  expect: deny
 ```
 
 ```sh
@@ -360,7 +357,7 @@ const run: RunContext = {
 
 // document: compiled from the gate example above; descriptor: starting `github`
 const result = simulate({ document, descriptor, now: new Date(), run });
-result.outcome;     // "allow" | "require_approval" | "deny" | "none"
+result.outcome;     // "allow" | "deny" | "none"
 result.explanation; // "Gate review-before-pr needs reviewer with ship or ship_with_debt after the last change or dev or infra work."
 result.gates;       // each gate: applies, missing requirements
 result.budgets;     // each budget that covers this action: used, limit, ok | warn | over

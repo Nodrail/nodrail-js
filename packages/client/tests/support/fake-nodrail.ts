@@ -75,10 +75,6 @@ export function fakeNodrail(
         expires_at: new Date(issued.getTime() + 30_000).toISOString(),
       });
     }
-    if (verb === "withdraw") {
-      if (action.code !== "READY") action.code = "INVALIDATED";
-      return json(status(action));
-    }
     if (verb === "reports") {
       reports.push({
         outcome: body.outcome as string,

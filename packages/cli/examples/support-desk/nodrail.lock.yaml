@@ -15,14 +15,14 @@ modules:
       - path: module.yaml
         sha256: "362edd8a6c7498c38ddc6f76a6ef5c7b4cca1b624c43491b57fccdb923109b4c"
       - path: policies/read-only.yaml
-        sha256: "c40201000d47610013b69e4728dbb55233d1677906e2be1a831d821bc3b46114"
+        sha256: "4441feb4aaddbdbba4caa13c8dcafa5d036356dba85053e98521c752f50845d4"
 files:
   - path: resources/agents.yaml
-    sha256: "a32c398bb4f645b528c3c0fa994a38d731f42d5ede1ceba338961fa17e34e24d"
+    sha256: "dd98854b1bc9fbe2641642d0d068df44ab4c1d31a1455fb9145a7fa00a1313e2"
   - path: resources/team.yaml
-    sha256: "d4efc790218cad986b29c90841b1da85f87b0973741aad4b18991c8f0df73cfa"
+    sha256: "5142a8613e058a6159fa056711e87455b5a373aa3b56e1ae3a338c5ce993fe0c"
   - path: policies/desk.yaml
-    sha256: "5398ead8460976cc8c5e34fea6c8eefc4218b269467f926fb78d05cabd334184"
+    sha256: "3898efb1e47b22e122a8560af85eb30109804f11d6c75598c315952b79bc472d"
 edges:
   - from: nodrail.yaml
     to: "@nodrail/read-only@1.0.1"
@@ -33,16 +33,16 @@ edges:
 order:
   - "@nodrail/read-only/policies/read-only.yaml"
   - policies/desk.yaml
-  - team/desk.apf.yaml
+  - team/desk.yaml
 effective:
-  sha256: "7937d7a2206f85461d8676a400305dc296b0f3e431a78e54fda6de8154596485"
+  sha256: "07ced3c72aecbc65744828db50d8021a13ea19b040a46a85d8e298490cfa951f"
 workspace:
-  sha256: "31f64740c52d64e248be9d951210027adef8e5f1953a7ef4a3e7012568e490ea"
+  sha256: "8b472d71f0740f8de8880130df93b8f9595f531ed9a2c3646fc0e0b06c7acff0"
   files:
     - path: resources/marketing.md
-      sha256: "ca70922abb537d7bd23bdd6b16d60445e510354baabdbe0fbaa267819c2addd3"
+      sha256: "8f75f09d1de60638a6119fd151831d0e1ebcabea5f6dbba73b4afc080d6e27a6"
     - path: resources/support.md
-      sha256: "e5fe14d1fe9554f77c5207965cd93bc99860b9463c8fe3d7f44ae64a9a022bfe"
+      sha256: "50a9e848196e3a7093c61df65878c41129eff52aa3bcaa8ec0d27bd6ac08accb"
     - path: skills/cite-sources/SKILL.md
       sha256: "655e7f53b8165477132b23ac7ed9d7efb13479e9fab2eb879f37ed785e8fa802"
 baseline: |
@@ -191,8 +191,8 @@ baseline: |
     effect: allow
 
   # Nodrail's own commands. Run by hand, the hook could write a step or a verdict
-  # into the run ledger, and `nodrail` can approve requests, so they are for
-  # you, not the agent. Starting the plugin hook through node or npx runs another
+  # into the run ledger, and `nodrail` can change the policy itself, so they are
+  # for you, not the agent. Starting the plugin hook through node or npx runs another
   # program, which no rule here allows.
   - list: nodrail_commands
     items: [nodrail, nodrail-policy, nodrail-claude-hook]
@@ -285,14 +285,16 @@ baseline: |
     operation: publish
     resource: { kind: channel, match: any }
     effect: deny
-  - rule: Support publishes after a person's review
+  # Support publishes to the help center only; any other channel, the blog
+  # included, has no rule that allows it, so it is denied.
+  - rule: Support publishes to the help center
     agent: support
     tool: outbox
     operation: publish
-    resource: { kind: channel, match: any }
-    effect: require_approval
+    resource: { kind: channel, match: exact, value: help-center }
+    effect: allow
 
-  # ── team/desk.apf.yaml
+  # ── team/desk.yaml
   # What Team desk means: who may start whom, which connections
   # each agent may use, and the setup kept out of every agent's reach. Written by nodrail from resources/team.yaml.
   - required_engine_version: 1

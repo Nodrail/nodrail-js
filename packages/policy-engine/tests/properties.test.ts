@@ -89,7 +89,7 @@ describe("commands", () => {
 });
 
 describe("rules", () => {
-  const effects = ["allow", "require_approval", "deny"] as const;
+  const effects = ["allow", "deny"] as const;
   const values = fc.stringMatching(/^[ab]{0,3}$/);
   const rule = fc.record({
     effect: fc.constantFrom(...effects),
@@ -108,7 +108,7 @@ describe("rules", () => {
       )
       .join("\n\n");
 
-  // An independent statement of precedence: deny, then review, then allow.
+  // An independent statement of precedence: deny, then allow.
   const expected = (
     rules: { effect: string; match: string; value: string }[],
     id: string,
@@ -119,12 +119,12 @@ describe("rules", () => {
         (item.match === "exact" && id === item.value) ||
         (item.match === "prefix" && id.startsWith(item.value)),
     );
-    for (const effect of ["deny", "require_approval", "allow"])
+    for (const effect of ["deny", "allow"])
       if (matching.some((item) => item.effect === effect)) return effect;
     return "none";
   };
 
-  test("deny beats review beats allow, and no match is never an allow", () => {
+  test("deny beats allow, and no match is never an allow", () => {
     fc.assert(
       fc.property(
         fc.array(rule, { maxLength: 6 }),

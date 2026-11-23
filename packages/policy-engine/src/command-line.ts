@@ -9,12 +9,21 @@ import { describeArguments, describeToolCall } from "./actions.ts";
 import { toDescriptor, type Identity } from "./local-hook.ts";
 import { hookCommand } from "./hook-command.ts";
 import { guardHook, hookFailure } from "./hook-guard.ts";
+import { sendDecisionQueue } from "./decision-sender.ts";
 import { sendSpool } from "./telemetry.ts";
 
 // Node-only helpers the nodrail command uses for a setup.
 export { hasSecret, secretName, secretValue } from "./secret-refs.ts";
+export { connectedGuard } from "./hook-command.ts";
 // The spool and its sender, for `nodrail observe` too.
 export * from "./telemetry.ts";
+// Decision reporting to the control plane (R388), for `nodrail` to install.
+export {
+  decisionSink,
+  reportFile,
+  type DecisionSink,
+} from "./decision-report.ts";
+export { sendDecisionQueue } from "./decision-sender.ts";
 export type { SpanRecord } from "./otlp.ts";
 export { machineId } from "./reporting-spans.ts";
 import { caseRun, toRunContext } from "./case-runs.ts";
@@ -44,14 +53,16 @@ Commands:
   check -- <program> [args]  Exit 0 only if the rules allow this command
   exec -- <program> [args]   Run it only if the rules allow it
   hook                 Claude Code hook; reads the event from stdin
-    --unmatched deny|ask   When no rule covers a call (default deny)
+    --unmatched deny|allow When no rule covers a call (default deny)
     --protect-list <file>  Also keep the files it lists from being changed
     --connections <file>   Read calls to the setup's tool connections as declared
     --telemetry <file>     Send each decision as an OpenTelemetry span
+    --report <file>        Record each decision and outcome in Nodrail ({ url,
+                           credential }, as .nodrail/connect.json has them)
     --evidence <file>      Ask Cloud about externally verified evidence ({ url,
                            workspace_revision }; the token is NODRAIL_TOKEN)
-    --host codex|copilot   Codex and Copilot can't ask a person: reviews become denies;
-                           Copilot's calls are read as the Claude Code calls they are
+    --host codex|copilot   Name the host; Copilot's calls are read as the
+                           Claude Code calls they are
     With gates or budgets, also SubagentStart, SubagentStop, PostToolUse and
     PostToolUseFailure (they settle numeric budgets), and the run
     is recorded in the repository's git folder.
@@ -143,7 +154,7 @@ const caseFile = z.array(
         installation: z.string().optional(),
       }),
     ]),
-    expect: z.enum(["allow", "deny", "require_approval", "none"]),
+    expect: z.enum(["allow", "deny", "none"]),
     // A run's history, so a gate or budget can be tested like a rule.
     ...caseRun,
   }),
@@ -190,6 +201,7 @@ const options = {
   "protect-list": { type: "string" },
   connections: { type: "string" },
   telemetry: { type: "string" },
+  report: { type: "string" },
   evidence: { type: "string" },
   host: { type: "string" },
   help: { type: "boolean", short: "h" },
@@ -392,6 +404,8 @@ export async function runPolicyCommandLine(
     // The hook's sender, run detached: not a command for people.
     if (argv[0] === "telemetry-send" && argv[1] && argv[2])
       return (await sendSpool(argv[1], argv[2], process.env), 0);
+    if (argv[0] === "decisions-send" && argv[1] && argv[2])
+      return (await sendDecisionQueue(argv[1], argv[2], process.env), 0);
     // The hook never fails open: see hook-guard.ts.
     if (argv[0] === "hook")
       return await guardHook(

@@ -1,7 +1,7 @@
 description: >-
   Typed memory behind an existing memory server. The kind decides who may
   write: a lesson by developer or reviewer, a decision by reviewer, a rule by
-  nobody (promotion to a rule is a separate approved policy change).
+  nobody (promotion to a rule is a separate policy change a person makes).
 nodrail.yaml:
   shapes:
     memory-note:
@@ -37,11 +37,11 @@ nodrail.yaml:
       deleters: [reviewer]
       max_records: 500
 resources:
-  - apiVersion: apf.nodrail.com/v1alpha1
+  - apiVersion: nodrail.com/v1alpha1
     kind: Agent
     metadata: { name: developer }
     spec: {}
-  - apiVersion: apf.nodrail.com/v1alpha1
+  - apiVersion: nodrail.com/v1alpha1
     kind: Agent
     metadata: { name: reviewer }
     spec: {}

@@ -62,7 +62,6 @@ const ROLE_RULES: Record<SurfaceId, { allowed: Role[]; once?: Role }> = {
   S05: { allowed: ["findings"] },
   S06: { allowed: ["kind"], once: "kind" },
   S07: { allowed: ["kind"] },
-  S08: { allowed: [] },
   S09: { allowed: [] },
 };
 

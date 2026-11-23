@@ -40,15 +40,15 @@ nodrail.yaml:
         - { class: runtime-observed }
       subject: revision
 resources:
-  - apiVersion: apf.nodrail.com/v1alpha1
+  - apiVersion: nodrail.com/v1alpha1
     kind: Agent
     metadata: { name: developer }
     spec: {}
-  - apiVersion: apf.nodrail.com/v1alpha1
+  - apiVersion: nodrail.com/v1alpha1
     kind: Agent
     metadata: { name: qa }
     spec: { receipt: qa }
-  - apiVersion: apf.nodrail.com/v1alpha1
+  - apiVersion: nodrail.com/v1alpha1
     kind: Agent
     metadata: { name: reviewer }
     spec: { receipt: reviewer }

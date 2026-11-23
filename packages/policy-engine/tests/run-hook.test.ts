@@ -41,7 +41,7 @@ const RULES = `
   requires:
     - { agent: qa, verdict: pass, since: { list: builders } }
     - { agent: reviewer, verdict: [ship, ship_with_debt], since: { list: builders } }
-  otherwise: require_approval
+  otherwise: deny
 - gate: Review before a push
   id: review-before-push
   command: { prefix: git push }
@@ -53,7 +53,7 @@ const RULES = `
   step_agent: dev
   per: step
   tool_calls: 2
-  otherwise: require_approval
+  otherwise: deny
 `;
 
 function scratchRepository(rules = RULES) {
@@ -140,9 +140,9 @@ describe("a run through the Claude Code hook", { timeout: 30_000 }, () => {
 
     const early = decision((await s.dispatch("github")).stdout);
     expect(early).toMatchObject({
-      permissionDecision: "ask",
+      permissionDecision: "deny",
       permissionDecisionReason:
-        "Nodrail: Gate review-before-pr needs qa with pass after the last change or dev work; reviewer with ship or ship_with_debt after the last change or dev work. Until then, a person must review claude-code agent on github.",
+        "Nodrail: Gate review-before-pr needs qa with pass after the last change or dev work; reviewer with ship or ship_with_debt after the last change or dev work. Until then, claude-code agent on github is denied; meet the gate, then try again.",
     });
 
     await step(s, "d1", "dev", "done");
@@ -150,7 +150,7 @@ describe("a run through the Claude Code hook", { timeout: 30_000 }, () => {
     await step(s, "r1", "reviewer", "ship");
     expect(
       decision((await s.dispatch("github")).stdout).permissionDecision,
-    ).toBe("ask");
+    ).toBe("deny");
 
     await step(s, "q2", "QA", "PASS");
     expect(
@@ -159,7 +159,7 @@ describe("a run through the Claude Code hook", { timeout: 30_000 }, () => {
 
     await s.start("d2", "dev");
     const again = decision((await s.dispatch("github")).stdout);
-    expect(again.permissionDecision).toBe("ask");
+    expect(again.permissionDecision).toBe("deny");
   });
 
   test("the main agent cannot push around the gate", async () => {
@@ -186,9 +186,9 @@ describe("a run through the Claude Code hook", { timeout: 30_000 }, () => {
     expect((await s.bash("ls", dev)).stdout).toBe("");
     expect((await s.bash("ls", dev)).stdout).toBe("");
     const third = decision((await s.bash("ls", dev)).stdout);
-    expect(third).toMatchObject({ permissionDecision: "ask" });
+    expect(third).toMatchObject({ permissionDecision: "deny" });
     expect(third.permissionDecisionReason).toContain(
-      "Budget builder-step is at 3 of 2 tool calls. Over the limit, a person must review",
+      "Budget builder-step is at 3 of 2 tool calls. Over the limit, shell command.run on ls is denied.",
     );
     // Another step of the same agent starts with a fresh budget.
     expect((await s.bash("ls", { id: "d2", type: "dev" })).stdout).toBe("");
@@ -203,7 +203,7 @@ describe("a run through the Claude Code hook", { timeout: 30_000 }, () => {
     await step(s, "r1", "reviewer", "ship");
     expect(
       decision((await s.dispatch("github")).stdout).permissionDecision,
-    ).toBe("ask");
+    ).toBe("deny");
   });
 
   test("the ledger is in the git folder, one file per run, and can be read", async () => {
@@ -454,7 +454,7 @@ describe("testing gates in a cases file", { timeout: 30_000 }, () => {
       `
 - name: no review yet
   call: { tool: claude-code, operation: agent, kind: agent, resource: github }
-  expect: require_approval
+  expect: deny
 - name: reviewed after the last build
   call: { tool: claude-code, operation: agent, kind: agent, resource: github }
   run:
@@ -470,7 +470,7 @@ describe("testing gates in a cases file", { timeout: 30_000 }, () => {
     - { action: dev }
     - { action: dev }
   step: dev
-  expect: require_approval
+  expect: deny
 - name: the main agent changed something after the review
   call: { command: git push }
   run:

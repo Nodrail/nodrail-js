@@ -83,7 +83,7 @@ export function sha256Hex(text: string) {
 
 /** What a digest pins; the tag keeps one kind from passing for another. */
 export type DigestDomain =
-  "shape" | "projection" | "binding" | "workspace" | "value" | "approval";
+  "shape" | "projection" | "binding" | "workspace" | "value";
 
 /**
  * `sha256:<hex>` of `nodrail:<domain>:v<dialect>\n` followed by the JCS

@@ -1,11 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { describeNamedTool } from "@nodrail/policy-engine/actions";
 import { blockedText } from "./blocked-text.ts";
-import {
-  resolveConnection,
-  waitMsFrom,
-  type Environment,
-} from "./connection.ts";
+import { resolveConnection, type Environment } from "./connection.ts";
 import { authorize } from "./authorize.ts";
 import { NodrailClient, type Decision } from "./client.ts";
 import type { ActionDescriptor } from "./protocol.ts";
@@ -26,7 +22,7 @@ import {
   type ToolHooks,
 } from "./tool-shapes.ts";
 
-export const SDK_VERSION = "0.6.0";
+export const SDK_VERSION = "0.7.0";
 
 type Blocked = Extract<Decision, { allowed: false }>;
 
@@ -78,7 +74,7 @@ function toDescriptor(action: ActionInput): ActionDescriptor {
   };
 }
 
-/** Plain JSON, or an error: what can't be shown to a reviewer can't be approved. */
+/** Plain JSON, or an error: what can't be described exactly can't be decided. */
 const asJson = (value: unknown) =>
   JSON.parse(JSON.stringify(value ?? {})) as unknown;
 
@@ -141,10 +137,7 @@ export class Nodrail {
       : null;
   }
 
-  private decide(
-    descriptor: ActionDescriptor,
-    waitMs = this.options.waitMs ?? waitMsFrom(this.env),
-  ): Promise<Decision> {
+  private decide(descriptor: ActionDescriptor): Promise<Decision> {
     this.client ??= this.connect();
     if (!this.client)
       return Promise.resolve({
@@ -154,8 +147,6 @@ export class Nodrail {
         reference: null,
       });
     return authorize(this.client, descriptor, randomUUID(), {
-      waitMs,
-      sleep: this.sleep,
       run: this.runs.current(),
       subject: this.subject(),
     });
@@ -169,14 +160,13 @@ export class Nodrail {
   }
 
   /** Asks without running anything. Run the action only on `allowed: true`. */
-  check(action: ActionInput, options: { waitMs?: number } = {}) {
+  check(action: ActionInput) {
     try {
       return this.decide(
         toDescriptor({
           ...action,
           params: asJson(action.params) as Record<string, unknown>,
         }),
-        options.waitMs,
       );
     } catch {
       return Promise.resolve<Decision>(invalidAction);
@@ -288,7 +278,7 @@ export class Nodrail {
       );
       return "refusal" in fields
         ? Promise.resolve(contractRefused(fields.refusal))
-        : this.decide(fields.action, options.waitMs);
+        : this.decide(fields.action);
     };
 
     const refuse = (decision: Blocked, asResult: (text: string) => unknown) => {

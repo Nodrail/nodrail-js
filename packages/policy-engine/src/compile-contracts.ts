@@ -181,7 +181,7 @@ function sources(compiling: Compiling, items: Item[]) {
       connections: entry.connections,
     },
     resources: Object.entries(agents).map(([name, spec]) => ({
-      apiVersion: "apf.nodrail.com/v1alpha1",
+      apiVersion: "nodrail.com/v1alpha1",
       kind: "Agent",
       metadata: { name },
       spec,

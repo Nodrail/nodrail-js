@@ -24,7 +24,6 @@ const connect = (
   const nodrail = createNodrail({
     url: "https://nodrail.test",
     credential: "c",
-    waitMs: 0,
     fetch: options.fetch ?? server.fetch,
     env: options.env ?? {},
     // A fixed revision, so what is sent doesn't depend on this checkout.

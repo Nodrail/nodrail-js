@@ -60,7 +60,7 @@ export type SimulationInput = {
   /**
    * The call's values validated against a declared contract, which typed
    * `where` conditions read. Without them, an allow with `where` never
-   * matches, and a deny or review with `where` does.
+   * matches, and a deny with `where` does.
    */
   values?: ContractValues | null;
   /**
@@ -118,10 +118,10 @@ function toEvaluated(rule: PolicyRule | PolicyGate): EvaluatedRule {
 }
 
 /**
- * Lower wins. No matching rule is blocked by default, so it is stronger than a
- * review: a gate or budget asking for one never turns "blocked" into "ask".
+ * Lower wins. No matching rule is blocked by default, so it is stronger than
+ * an allow.
  */
-const strength = { deny: 0, none: 1, require_approval: 2, allow: 3 } as const;
+const strength = { deny: 0, none: 1, allow: 2 } as const;
 
 function checkInput({ document, descriptor, now, run }: SimulationInput) {
   if (!Number.isFinite(now.getTime()))
@@ -274,7 +274,7 @@ function explain(
 /**
  * The rules decide alone first. A gate that still needs something, and a
  * budget that is used up or has no run to count in, can then only make that
- * stronger: deny, then blocked by default, then review, then allow. Neither
+ * stronger: deny, then blocked by default, then allow. Neither
  * ever allows anything, nor weakens what the rules decided.
  */
 export function simulate(input: SimulationInput): SimulationResult {
