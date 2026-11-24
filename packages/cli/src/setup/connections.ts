@@ -16,6 +16,7 @@ import {
 } from "@nodrail/policy-engine/command-line";
 import type { Env } from "../config.ts";
 import type { CompiledContracts } from "../contracts/engine.ts";
+import { commandForDisplay } from "../format.ts";
 import { askServer } from "./json-lines.ts";
 import type { DesiredFile } from "./team-files.ts";
 import { basename, join, resolve } from "node:path";
@@ -276,8 +277,7 @@ export function secretChecks(
  * command line, and its environment by name, secrets marked.
  */
 export function connectionLine({ name, spec }: SetupConnection) {
-  const word = (text: string) =>
-    /^[A-Za-z0-9._/:=@%+,-]+$/.test(text) ? text : JSON.stringify(text);
+  const command = commandForDisplay([spec.command, ...spec.args]);
   const env = Object.entries(spec.env).map(([key, value]) =>
     typeof value !== "string"
       ? `${key} (secret ${secretName(value)})`
@@ -288,7 +288,7 @@ export function connectionLine({ name, spec }: SetupConnection) {
   const data = spec.data
     ? `; keeps ${spec.data.join(", ")}, which agents reach only through it`
     : "";
-  return `${name}: runs ${[spec.command, ...spec.args].map(word).join(" ")}${env.length > 0 ? `; with ${env.join(", ")}` : ""}${data}`;
+  return `${name}: runs ${command}${env.length > 0 ? `; with ${env.join(", ")}` : ""}${data}`;
 }
 
 /** Programs that fetch the package they run, and how each pins a version. */

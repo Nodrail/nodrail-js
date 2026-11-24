@@ -17,7 +17,7 @@ import {
   type LocalHookOptions,
 } from "./local-hook.ts";
 import { evidenceOf, type PolicyDocument } from "./policies.ts";
-import { workRevision } from "./revision.ts";
+import { subjectReader } from "./run-steps.ts";
 import type { EvidenceReader, RemoteStatus } from "./run-evidence.ts";
 
 const hasEvidence = (document: PolicyDocument) =>
@@ -52,6 +52,14 @@ function configOf(file: string | undefined, env: Environment) {
   }
 }
 
+function ledgerOf(cwd: string, env: Environment) {
+  try {
+    return ledgerDirectory(cwd, env);
+  } catch {
+    return null;
+  }
+}
+
 /**
  * The evidence reader for one hook call, or null when the rules have no
  * evidence requirement. Never throws: what can't be read is unmet.
@@ -64,12 +72,7 @@ export async function hookEvidence(
   if (!hasEvidence(options.document)) return null;
   const event = parseEvent(stdin);
   const cwd = nonEmptyText(event?.cwd) ?? process.cwd();
-  let ledger: string | null = null;
-  try {
-    ledger = ledgerDirectory(cwd, input.env);
-  } catch {
-    ledger = null;
-  }
+  const ledger = ledgerOf(cwd, input.env);
   const local = localReader(ledger);
   const found = new Map<string, RemoteStatus>();
   const reader: EvidenceReader = {
@@ -80,8 +83,7 @@ export async function hookEvidence(
     input.config === undefined ? configOf(input.file, input.env) : input.config;
   if (!config || !ledger || event?.hook_event_name !== "PreToolUse")
     return reader;
-  const subject = workRevision(cwd);
-  if (!subject) return reader;
+  const revision = subjectReader(options.document, cwd);
   // Which gates cover this call, and which of their evidence isn't met here.
   const { decision } = judgeToolCall(stdin, {
     ...options,
@@ -89,7 +91,7 @@ export async function hookEvidence(
     observe: null,
     report: null,
     evidence: reader,
-    subject: () => subject,
+    subject: revision,
   });
   const unmet = (decision?.gates ?? []).flatMap((gate) =>
     gate.applies
@@ -97,6 +99,8 @@ export async function hookEvidence(
       : [],
   );
   if (!unmet.length) return reader;
+  const subject = revision?.();
+  if (!subject) return reader;
   const answers = await remoteStatuses(
     config,
     unmet.map((ask) => ({ ...ask, subject })),

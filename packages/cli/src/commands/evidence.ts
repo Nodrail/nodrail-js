@@ -12,7 +12,7 @@
 //   to Cloud, which checks who sent it. Retries are idempotent.
 // - `show <name>`: what was recorded here, and whether each gate
 //   requirement reading it is met for the current revision.
-import { spawn, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import {
   existsSync,
@@ -46,6 +46,7 @@ import {
 import { cleanRevision, workRevision } from "@nodrail/policy-engine/revision";
 import { visibleLines } from "../api.ts";
 import { UsageError, type Io } from "../io.ts";
+import { spawn } from "../spawn.js";
 import { contractOf, parseEvidenceArgs, short } from "./evidence-shared.ts";
 import { submit } from "./evidence-submit.ts";
 import { policyHere } from "./policy-here.ts";
@@ -100,7 +101,6 @@ function runCommand(command: string[], cwd: string, env: Io["env"]) {
       cwd,
       env: env as NodeJS.ProcessEnv,
       stdio: "inherit",
-      shell: process.platform === "win32",
     });
     child.on("error", (error) => done({ code: 127, error: error.message }));
     child.on("close", (code, signal) =>

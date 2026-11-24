@@ -2,19 +2,20 @@
 // files can be wrong or missing; this holds whatever they say.
 import { readdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import {
-  basename,
-  dirname,
-  isAbsolute,
-  join,
-  relative,
-  resolve,
-  sep,
-} from "node:path";
+import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import { CHANGING_FILE_OPERATIONS } from "./changes.ts";
-import { canonicalPath, isWithin } from "./paths.ts";
+import {
+  canonicalPath,
+  fullPath,
+  isWithin,
+  pathWithinLimits,
+  relativePath,
+} from "./paths.ts";
+import { dataGlob, dataGlobReaches } from "./data-globs.ts";
 import type { ActionDescriptor } from "./protocol.ts";
 import { shellWords } from "./commands.ts";
+import { globSegment } from "./secrets.ts";
+import { GLOB, wildcardParts } from "./shell-globs.ts";
 import { writesOntoRoot } from "./shell-writes.ts";
 import {
   git,
@@ -22,6 +23,8 @@ import {
   nodrailDirectory,
   type Environment,
 } from "./run-key.ts";
+
+export { GLOB, wildcardParts } from "./shell-globs.ts";
 
 /** The rule files and folders the hook loaded, as file tools name paths. */
 export function protectedPaths(paths: string[], cwd = process.cwd()) {
@@ -127,7 +130,10 @@ export function withLedger(
 ): SetupGuard {
   const roots = [
     canonicalPath(join(guard.root, ".git")),
-    ...cwds.flatMap((cwd) => [ledgerGuardPath(cwd, env), ...gitFolders(cwd)]),
+    ...[...new Set(cwds)].flatMap((cwd) => [
+      ledgerGuardPath(cwd, env),
+      ...gitFolders(cwd),
+    ]),
   ];
   return {
     ...guard,
@@ -165,8 +171,8 @@ export function dataGuard(
 /**
  * The data a call reaches outside its connection, or null: a file tool on
  * a path in it, reading or changing; a search from inside it; a shell
- * command naming it, or a folder in the project holding it. A wildcard word
- * counts by the folder before it: `cat memory/*` names `memory`.
+ * command naming it, or a folder in the project holding it. Shell glob
+ * alternatives count when they can select a protected path.
  */
 export function touchedData(
   action: ActionDescriptor,
@@ -176,30 +182,35 @@ export function touchedData(
 ): DataPlace | null {
   const { root, places } = guard;
   if (places.length === 0) return null;
-  const within = (path: string) =>
-    places.find(
-      (place) =>
-        isWithin(path, place.path) ||
-        (path !== root && isWithin(path, root) && isWithin(place.path, path)),
-    ) ?? null;
-  const paths =
-    action.tool === "files"
-      ? [...targets(action), action.resource.id]
-      : action.tool === "shell" && command
-        ? words(command).map((word) => wordPath(beforeGlob(word), cwd))
-        : [];
-  for (const path of paths) {
-    const place = within(path);
+  const named = (path: string) =>
+    places.find((place) => namesProtected(path, place.path, root));
+  if (action.tool === "files") {
+    for (const path of [...targets(action), action.resource.id]) {
+      const place = named(path);
+      if (place) return place;
+    }
+  }
+  if (action.tool !== "shell" || !command) return null;
+  for (const word of namedWords(command)) {
+    const path = fullPath(word, cwd);
+    if (path === null) return places[0]!;
+    const place =
+      named(path) ??
+      (dataGlob.test(word)
+        ? dataGlobReaches(word, cwd, guard, named)
+        : undefined);
     if (place) return place;
   }
   return null;
 }
 
-/** The literal part of a word, up to its first glob character; linear on any input. */
-const beforeGlob = (word: string) => {
-  const at = word.search(/[*?[{]/);
-  return at < 0 ? word : word.slice(0, at);
-};
+function namesProtected(path: string, protectedPath: string, root: string) {
+  const inside = relativePath(root, path);
+  return (
+    isWithin(path, protectedPath) ||
+    (inside !== null && inside !== "" && isWithin(protectedPath, path))
+  );
+}
 
 const words = (command: string) =>
   command.split(/[\s;|&<>()`'"=:$]+/).filter(Boolean);
@@ -217,50 +228,17 @@ const NODRAIL_PROGRAMS = new Set([
 function namedWords(command: string) {
   const joined = (shellWords(command) ?? []).flatMap((word) => [
     word,
+    ...word.split("="),
     ...word.split(/[=:]/),
   ]);
   return [...new Set([...words(command), ...joined])].filter(Boolean);
-}
-
-export const GLOB = /[*?[]/;
-
-/** One wildcard segment as a pattern; `[` with no `]` is itself. */
-function segmentPattern(segment: string) {
-  let source = "";
-  for (let at = 0; at < segment.length; at += 1) {
-    const char = segment[at]!;
-    const close = char === "[" ? segment.indexOf("]", at + 2) : -1;
-    if (char === "*") source += ".*";
-    else if (char === "?") source += ".";
-    else if (close > 0) {
-      const inner = segment.slice(at + 1, close).replace(/^[!^]/, "^");
-      source += `[${inner.replaceAll("\\", "\\\\")}]`;
-      at = close;
-    } else source += char.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
-  }
-  // Case-insensitive, as macOS and Windows disks are.
-  return new RegExp(`^${source}$`, "i");
 }
 
 /** Whether a segment as written could name `name`; a wildcard skips dotfiles. */
 function segmentMatches(segment: string, name: string) {
   if (!GLOB.test(segment)) return segment.toLowerCase() === name.toLowerCase();
   if (name.startsWith(".") && !segment.startsWith(".")) return false;
-  return segmentPattern(segment).test(name);
-}
-
-/** A wildcard word's literal folder and the segments from its first wildcard. */
-export function wildcardParts(word: string, cwd: string) {
-  const written = word.replace(/^~(?=$|\/)/, homedir());
-  // Not join(): it would fold `x*/..` away before it is read.
-  const full = isAbsolute(written) ? written : `${cwd}/${written}`;
-  const parts = full.split(/[\\/]/);
-  const first = parts.findIndex((part) => GLOB.test(part));
-  if (first < 0) return null;
-  return {
-    folder: canonicalPath(resolve(sep, ...parts.slice(0, first))),
-    rest: parts.slice(first).filter(Boolean),
-  };
+  return globSegment(segment)(name);
 }
 
 /** At most this many paths a wildcard is expanded to; more could be anything. */
@@ -358,9 +336,14 @@ export function touchedSetup(
   guard: SetupGuard,
 ): string | null {
   const roots = wildcardRoots(guard);
+  const words = namedWords(command);
+  const oversized = words.find(
+    (word) => GLOB.test(word) && !pathWithinLimits(word),
+  );
+  if (oversized !== undefined) return oversized;
   const onto = writesOntoRoot(command, cwd, roots);
   if (onto !== null) return onto;
-  for (const word of namedWords(command)) {
+  for (const word of words) {
     if (
       NODRAIL_PROGRAMS.has(basename(word)) ||
       /@nodrail\/(?:cli|policy-engine)/.test(word)
@@ -380,12 +363,7 @@ export function touchedSetup(
 
 /** Whether a path is a setup path, in one, or a project folder holding one. */
 function namesSetupPath(path: string, guard: SetupGuard) {
-  return guard.paths.some(
-    (protectedPath) =>
-      isWithin(path, protectedPath) ||
-      // A folder holding a setup path, inside the project: rm -r resources.
-      (path !== guard.root &&
-        isWithin(path, guard.root) &&
-        isWithin(protectedPath, path)),
+  return guard.paths.some((protectedPath) =>
+    namesProtected(path, protectedPath, guard.root),
   );
 }

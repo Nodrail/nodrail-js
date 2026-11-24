@@ -3,7 +3,7 @@
 // apply never sets up a project that silently decides on this machine.
 import { describe, expect, test } from "vitest";
 import { credentialChecks } from "../src/setup/connect.ts";
-import { locked, RESOURCES, windows } from "./support/setup-project.ts";
+import { locked, RESOURCES } from "./support/setup-project.ts";
 
 const connected = (block: string) =>
   locked({
@@ -11,7 +11,7 @@ const connected = (block: string) =>
     "nodrail.yaml": `${RESOURCES["nodrail.yaml"]}connect:\n${block}`,
   });
 
-describe.skipIf(windows)("connect: in plan and apply", () => {
+describe("connect: in plan and apply", () => {
   test("decide: local says so, and apply goes ahead as before", async () => {
     const p = await connected(
       "  workspace: acme\n  environment: development\n  decide: local\n",

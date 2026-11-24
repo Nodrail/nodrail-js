@@ -3,7 +3,8 @@
 // contract's root and pattern. Matching ignores case and Unicode form, as
 // the file systems agents run on often do, so `Docs/ADR/X.MD` can't slip
 // past a contract on `./docs/adr`: when in doubt a path is governed.
-import { posix } from "node:path";
+import { posix, win32 } from "node:path";
+import { relativePath, withoutNamespace } from "../paths.ts";
 import type { CompiledContracts } from "../shapes/compile.ts";
 import type { ResolvedShape } from "../shapes/types.ts";
 import { FILE_LIMITS } from "./limits.ts";
@@ -61,15 +62,56 @@ export type PathResult =
   | { ok: true; path: string }
   | { ok: false; code: "outside" | "unsafe-path"; message: string };
 
-/** Characters no project path needs: controls, and `\` that means a separator on Windows. */
+/** Characters no project path needs. */
 // oxlint-disable-next-line no-control-regex -- the point is to find them
-const UNSAFE_CHARS = /[\u0000-\u001F\u007F\\]/;
+const UNSAFE_CHARS = /[\u0000-\u001F\u007F]/;
 
 const unsafe = (message: string): PathResult => ({
   ok: false,
   code: "unsafe-path",
   message,
 });
+
+/** The host path flavor follows the absolute project root, even off-host. */
+export const projectFlavor = (root: string) =>
+  posix.isAbsolute(root) && !root.startsWith("//") ? posix : win32;
+
+function unsafeWindowsPart(part: string) {
+  // Win32 aliases trailing dots/spaces and devices. Colons also name streams.
+  return (
+    /[:*?"<>|]|[. ]$/.test(part) ||
+    /^(?:CON|PRN|AUX|NUL|COM[1-9¹²³]|LPT[1-9¹²³])(?:\.|$)/i.test(part)
+  );
+}
+
+export function absoluteProjectPath(
+  cwd: string,
+  name: string,
+  flavor: typeof posix,
+): PathResult {
+  if (!name) return unsafe("is empty");
+  if (UNSAFE_CHARS.test(name) || (flavor === posix && name.includes("\\")))
+    return unsafe("has a control character or backslash");
+  const written =
+    flavor === win32 ? withoutNamespace(name).replaceAll("/", "\\") : name;
+  const { root } = flavor.parse(written);
+  const parts = written.slice(root.length).split(flavor.sep);
+  if (parts.includes("..")) return unsafe("uses .. ; name the file directly");
+  if (
+    flavor === win32 &&
+    ((root !== "" && !win32.isAbsolute(written)) ||
+      /^[\\]{2}[?.][\\]/.test(written) ||
+      parts.some((part) => part !== "." && unsafeWindowsPart(part)))
+  )
+    return unsafe("uses an ambiguous Windows path");
+  return {
+    ok: true,
+    path: flavor.resolve(
+      flavor === win32 ? withoutNamespace(cwd) : cwd,
+      written,
+    ),
+  };
+}
 
 /**
  * A project-relative POSIX path for what a tool names: absolute, or
@@ -83,33 +125,24 @@ export function projectPath(
   projectRoot: string | string[],
   cwd: string,
   name: string,
+  flavor?: typeof posix,
 ): PathResult {
-  if (!name) return unsafe("is empty");
-  if (UNSAFE_CHARS.test(name))
-    return unsafe("has a control character or backslash");
-  if (name.split("/").includes(".."))
-    return unsafe("uses .. ; name the file directly");
-  const absolute = posix.isAbsolute(name)
-    ? posix.normalize(name)
-    : posix.join(cwd, name);
-  const relative = [projectRoot]
-    .flat()
-    .map((root) => posix.relative(posix.normalize(root), absolute))
-    .find(
-      (found) =>
-        found &&
-        found !== ".." &&
-        !found.startsWith("../") &&
-        !posix.isAbsolute(found),
-    );
-  if (relative === undefined)
+  const roots = [projectRoot].flat();
+  flavor ??= projectFlavor(roots[0] ?? cwd);
+  const absolute = absoluteProjectPath(cwd, name, flavor);
+  if (!absolute.ok) return absolute;
+  const relative = roots
+    .map((root) => relativePath(root, absolute.path, flavor))
+    .find(Boolean);
+  if (!relative)
     return { ok: false, code: "outside", message: "is outside the project" };
+  const parts = relative.split(flavor.sep);
   if (
     relative.length > FILE_LIMITS.pathLength ||
-    relative.split("/").length > FILE_LIMITS.pathDepth
+    parts.length > FILE_LIMITS.pathDepth
   )
     return unsafe("is too long");
-  return { ok: true, path: relative };
+  return { ok: true, path: parts.join("/") };
 }
 
 /** How paths compare: case and Unicode form never tell two files apart. */

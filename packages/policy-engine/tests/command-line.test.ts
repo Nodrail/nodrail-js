@@ -1,7 +1,13 @@
 // The nodrail-policy command line, run in-process so every path is measured.
 // Separate-process runs are covered by the docs and package tests.
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test } from "vitest";
@@ -318,7 +324,11 @@ describe("hook", () => {
 
   describe("--protect-list", () => {
     // A project whose setup files are listed, and rules that allow any write.
-    const project = mkdtempSync(join(tmpdir(), "nodrail-protect-"));
+    const project = realpathSync.native(
+      mkdtempSync(join(tmpdir(), "nodrail-protect-")),
+    );
+    // The guard runs synchronous Git discovery, which can take seconds on CI.
+    const timeout = 15_000;
     const anyWrite = write(
       "any-write.yaml",
       `- rule: Write anything
@@ -338,6 +348,7 @@ describe("hook", () => {
     const writing = (path: string) =>
       JSON.stringify({
         hook_event_name: "PreToolUse",
+        cwd: project,
         tool_name: "Write",
         tool_input: { file_path: join(project, path), content: "x" },
       });
@@ -351,6 +362,7 @@ describe("hook", () => {
         );
         expect(result.stdout).toContain('"deny"');
       },
+      timeout,
     );
 
     test("leaves the rest to the rules", async () => {
@@ -408,11 +420,15 @@ describe("hook", () => {
       "cp evil ~/.nodrail/writes/x/setup.json",
       "cat skills/style/SKILL.md > skills/style/x.md",
       "cat skills/style/SKILL.md; rm -r resources",
-    ])("denies %s, whatever the rules allow", async (command) => {
-      const result = await shell(command);
-      expect(result.stdout).toContain('"deny"');
-      expect(result.stdout).toContain("part of the setup this hook enforces");
-    });
+    ])(
+      "denies %s, whatever the rules allow",
+      async (command) => {
+        const result = await shell(command);
+        expect(result.stdout).toContain('"deny"');
+        expect(result.stdout).toContain("part of the setup this hook enforces");
+      },
+      timeout,
+    );
 
     // Codex loads a skill by reading it through its shell: a read in a shape
     // known exactly changes nothing, so the file rules decide it.
@@ -551,6 +567,14 @@ describe("hook", () => {
         stdout: "",
       });
     });
+
+    test.each([`cp x sub/*${"/next".repeat(260)}`, "cp x sub/*/../other"])(
+      "refuses a setup wildcard that cannot be bounded safely: %s",
+      async (command) => {
+        const { stdout } = await hook("Bash", { command });
+        expect(stdout).toContain("part of the setup");
+      },
+    );
 
     // R376: links pointing at a root, and trees copied onto one.
     describe("links and tree copies", () => {

@@ -30,7 +30,7 @@ function addUnmanaged(p: { write: (path: string, text: string) => void }) {
 
 const json = (text: string) => JSON.parse(text) as Record<string, any>;
 
-describe.skipIf(windows)("the run hooks", () => {
+describe("the run hooks", () => {
   const gated = {
     ...RESOURCES,
     "policies/base.yaml": `${RESOURCES["policies/base.yaml"]}- gate: Publish after the lead passes it
@@ -67,7 +67,7 @@ describe.skipIf(windows)("the run hooks", () => {
   });
 });
 
-describe.skipIf(windows)("the session-start hook", () => {
+describe("the session-start hook", () => {
   test("Claude Code: in settings by default; out with sessionStart: false, and on destroy", async () => {
     const p = await locked();
     await p.run("apply", "--yes");
@@ -112,29 +112,32 @@ describe.skipIf(windows)("the session-start hook", () => {
     });
   });
 
-  test("Codex: in hooks.json, by the project's full path", async () => {
-    const p = await locked(
-      {
-        ...RESOURCES,
-        "nodrail.yaml": RESOURCES["nodrail.yaml"].replace(
-          "runtime: claude-code",
-          "runtime: codex",
-        ),
-      },
-      codexTools(),
-    );
-    await p.run("apply", "--yes");
-    const hooks = json(p.read(".codex/hooks.json")).hooks;
-    expect(hooks.SessionStart[0].hooks[0].command).toMatch(
-      /^nodrail observe '\/.+' --detach$/,
-    );
-    expect(hooks.PreToolUse[0].hooks[0].command).toContain(
-      "nodrail policy hook",
-    );
-  });
+  test.skipIf(windows)(
+    "Codex: in hooks.json, by the project's full path",
+    async () => {
+      const p = await locked(
+        {
+          ...RESOURCES,
+          "nodrail.yaml": RESOURCES["nodrail.yaml"].replace(
+            "runtime: claude-code",
+            "runtime: codex",
+          ),
+        },
+        codexTools(),
+      );
+      await p.run("apply", "--yes");
+      const hooks = json(p.read(".codex/hooks.json")).hooks;
+      expect(hooks.SessionStart[0].hooks[0].command).toMatch(
+        /^nodrail observe '\/.+' --detach$/,
+      );
+      expect(hooks.PreToolUse[0].hooks[0].command).toContain(
+        "nodrail policy hook",
+      );
+    },
+  );
 });
 
-describe.skipIf(windows)("nodrail observe", () => {
+describe("nodrail observe", () => {
   test("records counts, not names, in the home folder; the project is untouched", async () => {
     const p = await locked();
     await p.run("apply", "--yes");
@@ -212,16 +215,15 @@ describe.skipIf(windows)("nodrail observe", () => {
       `require("node:fs").writeFileSync(${JSON.stringify(marker)}, process.argv.slice(2).join(" "));`,
     );
     const io = fakeIo({ self: [script] });
-    expect(
-      await io.run("observe", "/some/project", "--detach", "--names"),
-    ).toBe(0);
+    const project = join(tmpdir(), "some project");
+    expect(await io.run("observe", project, "--detach", "--names")).toBe(0);
     for (let i = 0; i < 100 && !existsSync(marker); i++)
       await new Promise((done) => setTimeout(done, 50));
-    expect(readFileSync(marker, "utf8")).toBe("observe /some/project --names");
+    expect(readFileSync(marker, "utf8")).toBe(`observe ${project} --names`);
   });
 });
 
-describe.skipIf(windows)("sending the observation (W3.3)", () => {
+describe("sending the observation (W3.3)", () => {
   const TELEMETRY =
     "telemetry:\n  traces:\n    endpoint: http://127.0.0.1:9/v1/traces\n";
 
@@ -307,23 +309,26 @@ describe.skipIf(windows)("sending the observation (W3.3)", () => {
     expect(JSON.stringify(queued(p))).not.toContain(SECRET);
   });
 
-  test("Codex and Claude Code in one observation share a trace", async () => {
-    const yaml = RESOURCES["nodrail.yaml"].replace(
-      "runtime: claude-code",
-      "runtimes: [claude-code, codex]",
-    );
-    const p = await locked(
-      { ...RESOURCES, "nodrail.yaml": `${yaml}${TELEMETRY}` },
-      codexTools(),
-    );
-    await p.run("apply", "--yes", "--runtime", "codex");
-    await p.run("apply", "--yes", "--runtime", "claude-code");
-    holdSender(p);
-    await p.run("observe", p.cwd);
-    const spans = queued(p);
-    expect(spans.map((span) => span.attributes["nodrail.host"]).sort()).toEqual(
-      ["claude-code", "codex"],
-    );
-    expect(new Set(spans.map((span) => span.traceId)).size).toBe(1);
-  });
+  test.skipIf(windows)(
+    "Codex and Claude Code in one observation share a trace",
+    async () => {
+      const yaml = RESOURCES["nodrail.yaml"].replace(
+        "runtime: claude-code",
+        "runtimes: [claude-code, codex]",
+      );
+      const p = await locked(
+        { ...RESOURCES, "nodrail.yaml": `${yaml}${TELEMETRY}` },
+        codexTools(),
+      );
+      await p.run("apply", "--yes", "--runtime", "codex");
+      await p.run("apply", "--yes", "--runtime", "claude-code");
+      holdSender(p);
+      await p.run("observe", p.cwd);
+      const spans = queued(p);
+      expect(
+        spans.map((span) => span.attributes["nodrail.host"]).sort(),
+      ).toEqual(["claude-code", "codex"]);
+      expect(new Set(spans.map((span) => span.traceId)).size).toBe(1);
+    },
+  );
 });

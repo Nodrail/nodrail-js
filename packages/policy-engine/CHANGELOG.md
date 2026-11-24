@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- Recognize Windows drive and UNC paths in file-contract checks, including
+  resolved project aliases, while preserving symlink protections.
+- Defer reading the Git revision for remote evidence until a gate needs it.
+- Match shell globs against connection data paths, including brace
+  alternatives and recursive segments.
+- Measure command performance regressions in CPU time so runner contention
+  does not cause spurious failures.
+
 ## 0.7.0
 
 Nodrail is the open control plane for AI agent development (R388). A rule

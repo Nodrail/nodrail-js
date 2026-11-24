@@ -23,7 +23,13 @@ const { version: expected } = JSON.parse(
 
 const shell = process.platform === "win32";
 const run = (command, args, cwd) =>
-  execFileSync(command, args, { cwd, encoding: "utf8", stdio: "pipe", shell });
+  execFileSync(command, args, {
+    cwd,
+    encoding: "utf8",
+    stdio: "pipe",
+    shell: shell && ["npm", "pnpm"].includes(command),
+  });
+const installedCli = "node_modules/@nodrail/cli/dist/nodrail.mjs";
 
 function fail(message) {
   console.error(`Package check failed: ${message}`);
@@ -77,9 +83,15 @@ export function packAndInstall(folder, packages) {
   return { run, fail, shell };
 }
 
+const fixtureEnv = (folder) => ({
+  PATH: process.env.PATH,
+  HOME: folder,
+  USERPROFILE: folder,
+});
+
 function checkCli(folder) {
   const bin = join("node_modules", ".bin", "nodrail");
-  const env = { PATH: process.env.PATH, HOME: folder };
+  const env = fixtureEnv(folder);
   const version = spawnSync(bin, ["--version"], {
     cwd: folder,
     encoding: "utf8",
@@ -117,26 +129,23 @@ try { await api.me(); throw new Error("no error"); } catch (error) {
 if (typeof main !== "function") throw new Error("main");
 `,
   );
-  run("node", ["use.mjs"], folder);
+  run(process.execPath, ["use.mjs"], folder);
 }
 
 /** `nodrail policy` answers exactly what the installed nodrail-policy does. */
 function checkPolicy(folder) {
   const rules = "node_modules/@nodrail/policy-engine/examples/rules";
   const both = (args, input = "") =>
-    ["nodrail-policy", "nodrail policy"].map((name) => {
-      const [bin, ...first] = name.split(" ");
-      const ran = spawnSync(
-        join("node_modules", ".bin", bin),
-        [...first, ...args],
-        {
-          cwd: folder,
-          encoding: "utf8",
-          env: { PATH: process.env.PATH, HOME: folder },
-          input,
-          shell,
-        },
-      );
+    [
+      ["node_modules/@nodrail/policy-engine/dist/cli.js"],
+      [installedCli, "policy"],
+    ].map((entry) => {
+      const ran = spawnSync(process.execPath, [...entry, ...args], {
+        cwd: folder,
+        encoding: "utf8",
+        env: fixtureEnv(folder),
+        input,
+      });
       return JSON.stringify([ran.status, ran.stdout, ran.stderr]);
     });
   const event = (command) =>
@@ -176,8 +185,9 @@ function checkProject(folder) {
   const project = join(folder, "project");
   mkdirSync(project);
   const bin = join(folder, "node_modules", ".bin", "nodrail");
+  const env = fixtureEnv(folder);
   const nodrail = (...args) =>
-    spawnSync(bin, args, { cwd: project, encoding: "utf8", shell });
+    spawnSync(bin, args, { cwd: project, encoding: "utf8", env, shell });
   const added = nodrail("add", "@nodrail/pr_policy.yaml");
   if (added.status !== 0 || !added.stdout.includes("configuration required"))
     fail(`nodrail add: ${added.stdout}${added.stderr}`);
@@ -207,9 +217,11 @@ function checkProject(folder) {
  */
 function checkExample(folder) {
   const bin = join(folder, "node_modules", ".bin", "nodrail");
+  const env = fixtureEnv(folder);
   const copied = spawnSync(bin, ["example", "support-desk", "desk"], {
     cwd: folder,
     encoding: "utf8",
+    env,
     shell,
   });
   if (copied.status !== 0)
@@ -217,6 +229,7 @@ function checkExample(folder) {
   const exported = spawnSync(bin, ["policy", "export", "--frozen"], {
     cwd: join(folder, "desk"),
     encoding: "utf8",
+    env,
     shell,
   });
   if (
@@ -261,7 +274,7 @@ function checkExampleSetup(folder, bin) {
       cwd: folder,
       encoding: "utf8",
       shell,
-      env: { ...process.env, PATH: path },
+      env: { ...fixtureEnv(folder), PATH: path },
     });
   const runtimes = shell ? ["claude-code"] : ["claude-code", "codex"];
   for (const runtime of runtimes) {
@@ -308,10 +321,9 @@ function checkExampleSetup(folder, bin) {
  * files blocks a tool call (2) but never a step (0).
  */
 function checkConnectHook(folder) {
-  const bin = join("node_modules", ".bin", "nodrail");
-  const env = { PATH: process.env.PATH, HOME: folder };
+  const env = fixtureEnv(folder);
   const hook = (event) =>
-    spawnSync(bin, ["connect", "hook"], {
+    spawnSync(process.execPath, [installedCli, "connect", "hook"], {
       cwd: folder,
       env,
       input: JSON.stringify({ hook_event_name: event }),

@@ -49,6 +49,10 @@ Runs a check and records what it observed:
 3. Reads the revision again. If it changed while the command ran, the subject is unknown (`null`): the result is about neither revision and never meets a requirement.
 4. Validates the result against the evidence's pinned contract and appends the event.
 
+Pass the executable and its arguments after `--`. Windows package-manager
+launchers such as `npm.cmd` also work. To use pipes or redirects inside the
+check, name the shell explicitly, as in the example below.
+
 | What the command did                                     | Recorded state                                         |
 | -------------------------------------------------------- | ------------------------------------------------------ |
 | Wrote a value that follows the contract                  | `valid`, with the value (kept on this machine only)    |

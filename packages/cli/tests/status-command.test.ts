@@ -15,7 +15,7 @@ import {
 
 const SECRET = "marker-status-not-for-output";
 
-describe.skipIf(windows)("nodrail status", () => {
+describe("nodrail status", () => {
   test("nothing set up: says so, exit 1", async () => {
     const p = await locked();
     const { code, err } = await p.run("status");
@@ -133,55 +133,58 @@ describe.skipIf(windows)("nodrail status", () => {
     );
   });
 
-  test("Codex: asks Codex which hooks run, and names the others", async () => {
-    const bin = codexTools();
-    const p = await locked(
-      {
-        ...RESOURCES,
-        "nodrail.yaml": RESOURCES["nodrail.yaml"].replace(
-          "runtime: claude-code",
-          "runtime: codex",
-        ),
-      },
-      bin,
-    );
-    await p.run("apply", "--yes");
-    const ours = appliedCodexHook(p.cwd)!;
-    writeFileSync(
-      join(bin, "hooks.json"),
-      JSON.stringify([
+  test.skipIf(windows)(
+    "Codex: asks Codex which hooks run, and names the others",
+    async () => {
+      const bin = codexTools();
+      const p = await locked(
         {
-          source: "project",
-          eventName: "preToolUse",
-          command: ours,
-          trustStatus: "trusted",
+          ...RESOURCES,
+          "nodrail.yaml": RESOURCES["nodrail.yaml"].replace(
+            "runtime: claude-code",
+            "runtime: codex",
+          ),
         },
-        {
-          source: "user",
-          eventName: "stop",
-          command: "afplay done.aiff",
-          trustStatus: "trusted",
-        },
-      ]),
-    );
-    const codexHome = join(p.home, "codex-home");
-    mkdirSync(codexHome);
-    p.env.CODEX_HOME = codexHome;
-    writeFileSync(
-      join(codexHome, "config.toml"),
-      `model = "x"\n\n[mcp_servers.docs]\ncommand = "d"\n\n[mcp_servers.old]\ncommand = "o"\nenabled = false\n\n[plugins."figma@curated"]\nenabled = true\n\n[plugins."off@curated"]\nenabled = false\n`,
-    );
-    const { code, out } = await p.run("status");
-    expect(code).toBe(0);
-    expect(out).toContain(`MCP server docs  (${codexHome}/config.toml)`);
-    expect(out).toContain(`plugin figma@curated  (${codexHome}/config.toml)`);
-    expect(out).not.toContain("MCP server old");
-    expect(out).not.toContain("off@curated");
-    expect(out).toContain("Codex: starts as lead");
-    expect(out).toContain(
-      "Policy hook: verified, Codex runs nodrail's hook here.",
-    );
-    expect(out).toContain("hook stop: afplay done.aiff  (user)");
-    expect(out).not.toContain("preToolUse: nodrail");
-  });
+        bin,
+      );
+      await p.run("apply", "--yes");
+      const ours = appliedCodexHook(p.cwd)!;
+      writeFileSync(
+        join(bin, "hooks.json"),
+        JSON.stringify([
+          {
+            source: "project",
+            eventName: "preToolUse",
+            command: ours,
+            trustStatus: "trusted",
+          },
+          {
+            source: "user",
+            eventName: "stop",
+            command: "afplay done.aiff",
+            trustStatus: "trusted",
+          },
+        ]),
+      );
+      const codexHome = join(p.home, "codex-home");
+      mkdirSync(codexHome);
+      p.env.CODEX_HOME = codexHome;
+      writeFileSync(
+        join(codexHome, "config.toml"),
+        `model = "x"\n\n[mcp_servers.docs]\ncommand = "d"\n\n[mcp_servers.old]\ncommand = "o"\nenabled = false\n\n[plugins."figma@curated"]\nenabled = true\n\n[plugins."off@curated"]\nenabled = false\n`,
+      );
+      const { code, out } = await p.run("status");
+      expect(code).toBe(0);
+      expect(out).toContain(`MCP server docs  (${codexHome}/config.toml)`);
+      expect(out).toContain(`plugin figma@curated  (${codexHome}/config.toml)`);
+      expect(out).not.toContain("MCP server old");
+      expect(out).not.toContain("off@curated");
+      expect(out).toContain("Codex: starts as lead");
+      expect(out).toContain(
+        "Policy hook: verified, Codex runs nodrail's hook here.",
+      );
+      expect(out).toContain("hook stop: afplay done.aiff  (user)");
+      expect(out).not.toContain("preToolUse: nodrail");
+    },
+  );
 });

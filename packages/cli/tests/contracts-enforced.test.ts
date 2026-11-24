@@ -7,14 +7,13 @@
 // read (R317).
 import { join } from "node:path";
 import { parse } from "yaml";
-import { describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import {
   fileOf,
   hookDocument,
   locked,
   planFor,
   RESOURCES,
-  windows,
 } from "./support/setup-project.ts";
 
 const api = "apiVersion: nodrail.com/v1alpha1";
@@ -119,9 +118,12 @@ describe("the effective policy", () => {
   });
 });
 
-describe.skipIf(windows)("the hook enforces briefs and inputs", () => {
+describe("the hook enforces briefs and inputs", () => {
+  afterEach(() => vi.unstubAllEnvs());
+
   test("a dispatch needs a valid brief, and a call conforming arguments; where reads both", async () => {
     const { p } = await setUp();
+    vi.stubEnv("NODRAIL_LEDGER", join(p.cwd, ".ledger"));
     const decide = async (tool: string, input: object) => {
       const { out, code } = await p.runWith(
         {

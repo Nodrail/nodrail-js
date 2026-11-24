@@ -1,5 +1,27 @@
 import { visible, type ActivityEvent, type Me, type Run } from "./api.ts";
 
+function windowsCommandWord(text: string): string {
+  if (/[\r\n]/.test(text)) return JSON.stringify(text);
+  if (text && !/[\s"]/.test(text)) return text;
+
+  // Windows doubles backslashes before a closing quote or an escaped quote.
+  const quoted = text.replace(/\\+$/, "$&$&").replace(/(\\*)"/g, '$1$1\\"');
+  return '"' + quoted + '"';
+}
+
+/** Command and arguments for display in a plan. */
+export function commandForDisplay(
+  words: string[],
+  platform = process.platform,
+) {
+  const word =
+    platform === "win32"
+      ? windowsCommandWord
+      : (text: string) =>
+          /^[A-Za-z0-9._/:=@%+,-]+$/.test(text) ? text : JSON.stringify(text);
+  return words.map(word).join(" ");
+}
+
 /** Columns padded to their widest cell; the last column is never padded. */
 export function table(cells: string[][]): string {
   const rows = cells.map((row) => row.map(visible));

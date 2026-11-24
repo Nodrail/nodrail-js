@@ -4,7 +4,7 @@
 import { describe, expect, test } from "vitest";
 import { fakeNodrail } from "../../client/tests/support/fake-nodrail.ts";
 import { CONNECT_FILE } from "../src/setup/claude-code.ts";
-import { locked, RESOURCES, windows } from "./support/setup-project.ts";
+import { locked, RESOURCES } from "./support/setup-project.ts";
 
 const ID = "6f1c2a8e-5b7d-4e0f-9a6c-1d2e3f405162";
 const URL_ = "https://nodrail.test";
@@ -108,7 +108,7 @@ const call = (cwd: string, tool: string, input: Record<string, unknown>) =>
     tool_input: input,
   });
 
-describe.skipIf(windows)("connected mode, end to end", () => {
+describe("connected mode, end to end", () => {
   test("apply publishes the lock and installs the connected hook", async () => {
     const { p, cloud } = await connected();
     const plan = await p.run("plan");
