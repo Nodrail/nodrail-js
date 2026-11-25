@@ -1,4 +1,4 @@
-import { ApiError } from "./api.ts";
+import { ApiError, visibleLines } from "./api.ts";
 import type { Env } from "./config.ts";
 
 /** Everything a command touches outside itself, so tests can stand in for it. */
@@ -13,6 +13,7 @@ export type Io = {
   /** The folder the command runs in: a project's commands work there. */
   cwd: string;
   fetch?: typeof fetch;
+  openBrowser?: (url: string) => void;
   /** Whether a person is at a terminal to answer questions. */
   interactive: boolean;
   ask(question: string, options?: { hidden?: boolean }): Promise<string>;
@@ -53,9 +54,14 @@ const explanations: Record<string, string> = {
 /** One line for the person, with the code and request id for support. */
 export function describeFailure(error: unknown) {
   if (error instanceof ApiError) {
-    const said = explanations[error.code] ?? "Nodrail could not do this.";
+    const said =
+      error.detail ?? explanations[error.code] ?? "Nodrail could not do this.";
     const id = error.requestId ? `, request ${error.requestId}` : "";
-    return `${said} (${error.code}${id})`;
+    const origin =
+      error.origin && (error.status === 401 || error.status === 403)
+        ? ` at ${error.origin}`
+        : "";
+    return visibleLines(`${said} (${error.code}${id})${origin}`);
   }
   if (error instanceof Error) return error.message;
   return String(error);

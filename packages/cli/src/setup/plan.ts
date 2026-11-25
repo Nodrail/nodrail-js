@@ -1,9 +1,12 @@
+import { hasLegacySetup, LEGACY_HINT } from "./legacy.ts";
+import { launcherCheck } from "./launcher.ts";
 import { HOST_NAMES } from "./state.ts";
 import type {
   ProjectSetup,
   SetupConnection,
 } from "@nodrail/policy-engine/yaml";
 import { frozenPolicy, setupOf } from "../commands/project.ts";
+import type { Preview } from "../api.ts";
 import type { Env } from "../config.ts";
 import { CliError } from "../io.ts";
 import { LOCK_FILE, MANIFEST_FILE } from "../project/lockfile.ts";
@@ -13,10 +16,14 @@ import {
   contractChanges,
 } from "../contracts/changes.ts";
 import type { CompiledContracts } from "../contracts/engine.ts";
-import { planProject, readProject } from "../project/project.ts";
+import {
+  planProject,
+  readProject,
+  type ProposedProject,
+} from "../project/project.ts";
 import { codexSetup, MIN_CODEX } from "./codex.ts";
 import { copilotHookChecks, copilotSetup, MIN_COPILOT } from "./copilot.ts";
-import { onPath, versionCheck } from "./tools.ts";
+import { versionCheck } from "./tools.ts";
 
 export { atLeast, findOnPath } from "./tools.ts";
 import {
@@ -91,6 +98,11 @@ export type SetupPlan = {
   connect: ProjectSetup["connect"];
   /** The project's stable id, which a published policy is tied to. */
   projectId: ProjectSetup["id"];
+  agents: ProjectSetup["agents"];
+  catalogRules: ReadonlySet<string>;
+  observeNames: boolean;
+  contracts: CompiledContracts | null;
+  remoteChanges?: Preview;
   state: SetupState | null;
   /** The reviewed revision the setup is made from, as the lock records it. */
   revision: Revision;
@@ -117,6 +129,8 @@ export function planSetup(input: {
   root: string;
   home: string;
   env: Env;
+  /** A reviewed manifest and lock still in memory. */
+  proposed?: ProposedProject;
   /** Planned by `apply` while it holds the project. */
   held?: boolean;
   /** The host `--runtime` names, when nodrail.yaml lists more than one. */
@@ -138,10 +152,13 @@ export function planSetup(input: {
     start: setup.start,
     checks,
     state: readState(root),
-    revision: lockedRevision(root),
+    revision: lockedRevision(root, input.proposed?.lock),
   };
-  const effective = policy.text ?? "";
-  const host = hostSetup(runtime, { ...input, ...policy, effective });
+  const host = hostSetup(runtime, {
+    ...input,
+    ...policy,
+    effective: policy.text ?? "",
+  });
   checks.push(...hostChecks(input, runtime, setup, host.check));
   checks.push(
     ...managedChecks(runtime, {
@@ -153,33 +170,23 @@ export function planSetup(input: {
   );
   const files = setupFiles(
     host.files,
-    setup.connect,
+    setup,
     base.revision,
     policy.text !== null,
   );
   const level5 = accountableHere(
     { ...input, decide: setup.connect?.decide },
     runtime,
-    effective,
+    policy.text ?? "",
     files,
   );
-  const steps = planFileSteps(root, base, files);
-  const merged: Record<string, Record<string, unknown>> = {};
-  if (host.settings)
-    for (const { step, value } of claudeSteps(
-      root,
-      hostState(base.state, runtime)?.settings,
-      host.settings,
-    )) {
-      steps.push(step);
-      if (value) merged[step.path] = value;
-    }
+  const { steps, merged } = reviewFiles(root, base, files, host.settings);
   return {
     ...base,
     steps,
     problems: [...host.problems, ...level5.problems],
     notes: [
-      ...notesFor(input.home, root, setup, host.skipped),
+      ...notesFor(input, setup, host.skipped),
       ...(runtime === "claude-code" ? claudePluginNote(setup) : []),
       ...stateNotes({ ...base, runtime }, steps),
       ...goneDataNotes(hostState(base.state, runtime)?.data, setup),
@@ -191,22 +198,46 @@ export function planSetup(input: {
     telemetry: setup.telemetry,
     connect: setup.connect,
     projectId: setup.id,
+    agents: setup.agents,
+    catalogRules: policy.catalogRules,
+    observeNames: setup.observe.names,
+    contracts: policy.contracts,
     claudePlugins: pluginNames(host.settings),
     plugins: setup.plugins,
     accountable: level5,
   };
 }
 
+function reviewFiles(
+  root: string,
+  base: Pick<SetupPlan, "state" | "runtime">,
+  files: DesiredFile[],
+  settings: ReturnType<typeof hostSetup>["settings"],
+) {
+  const steps = planFileSteps(root, base, files);
+  const merged: Record<string, Record<string, unknown>> = {};
+  if (settings)
+    for (const { step, value } of claudeSteps(
+      root,
+      hostState(base.state, base.runtime)?.settings,
+      settings,
+    )) {
+      steps.push(step);
+      if (value) merged[step.path] = value;
+    }
+  return { steps, merged };
+}
+
 function setupFiles(
   files: DesiredFile[],
-  connect: ProjectSetup["connect"],
+  { connect, id }: Pick<ProjectSetup, "connect" | "id">,
   revision: Revision,
   locked: boolean,
 ) {
   // Without a locked policy there is none to write.
   if (!locked)
     return files.filter((file) => !file.path.startsWith(".nodrail/"));
-  const connection = connectFile(connect, revision);
+  const connection = connectFile(connect, revision, id ?? undefined);
   return connection ? [...files, connection].sort(byPath) : files;
 }
 
@@ -263,7 +294,7 @@ function hostChecks(
 ) {
   return [
     host,
-    onPath("nodrail", input.env, "the policy hook runs it"),
+    launcherCheck(input.env),
     ...(runtime === "copilot" ? copilotHookChecks(input) : []),
     ...(runtime === "codex"
       ? codexInstallChecks({
@@ -315,8 +346,7 @@ function stateNotes(
 
 /** What the plan says beside its steps: who is left out, and telemetry. */
 function notesFor(
-  home: string,
-  root: string,
+  { root, home, env }: { root: string; home: string; env: Env },
   setup: ProjectSetup,
   skipped: string[],
 ) {
@@ -329,6 +359,7 @@ function notesFor(
     `apply records what it writes in ${STATE_FILE}.`,
     ...(telemetry ? [telemetry] : []),
     ...connectNotes(setup),
+    ...(hasLegacySetup(root, home, env) ? [LEGACY_HINT] : []),
   ];
 }
 
@@ -360,10 +391,16 @@ export function chooseRuntime(
 
 /** The locked policy, or the setup alone with a failed check saying why. */
 function lockedPolicy(
-  input: { root: string; home: string; held?: boolean },
+  input: {
+    root: string;
+    home: string;
+    held?: boolean;
+    proposed?: ProposedProject;
+  },
   checks: Check[],
 ): {
   text: string | null;
+  catalogRules: ReadonlySet<string>;
   setup: ProjectSetup;
   inputs: string[];
   contracts: CompiledContracts | null;
@@ -381,7 +418,7 @@ function lockedPolicy(
     return { ...frozen, contractNotes: bindingNotes(frozen) };
   } catch (error) {
     if (!(error instanceof CliError)) throw error;
-    const project = readProject(input.root);
+    const project = input.proposed ?? readProject(input.root);
     if (project.manifest === null) throw error;
     checks.push({ name: "policy", ok: false, detail: error.message });
     const plan = planProject({

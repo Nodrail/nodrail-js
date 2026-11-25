@@ -84,7 +84,7 @@ describe("nodrail plan", () => {
       "+ .nodrail/protected.txt",
       "+ .claude/settings.json",
       "Agent loner isn't on team release; it isn't set up.",
-      "7 changes. Nothing was changed; `nodrail apply` makes them.",
+      "Setup: 7 setup changes on this machine.",
     ])
       expect(out).toContain(line);
   });
@@ -439,7 +439,7 @@ describe("nodrail apply", () => {
     expect((await p.run("policy", "lock")).code).toBe(0);
     const { code, out } = await p.run("apply", "--yes");
     expect(code).toBe(0);
-    expect(out).toContain("Applied 1 change.");
+    expect(out).toContain("Applied 1 setup change on this machine.");
     expect(out).toContain("from their next tool call");
     expect(out).not.toContain("start a new one");
   });
@@ -450,7 +450,7 @@ describe("nodrail apply", () => {
     const first = await p.run("apply", "--yes");
     expect(first.err).toBe("");
     expect(first.code).toBe(0);
-    expect(first.out).toContain("Applied 7 changes.");
+    expect(first.out).toContain("Applied 7 setup changes on this machine.");
     expect(first.out).toContain(
       "Run `claude` in this folder: it starts as lead",
     );
@@ -631,9 +631,19 @@ const CODEX = {
 };
 
 describe.skipIf(windows)("Codex", () => {
-  async function codexProject() {
+  async function codexProject(watch = false) {
     const bin = codexTools();
-    const p = await locked(CODEX, bin);
+    const p = await locked(
+      watch
+        ? {
+            ...CODEX,
+            "nodrail.yaml":
+              CODEX["nodrail.yaml"] +
+              "\nconnect: { decide: local, enforce: watch, workspace: fixture, environment: development }\n",
+          }
+        : CODEX,
+      bin,
+    );
     /** What Codex lists: nodrail's hook with this trust, or no hook at all. */
     const trust = (status: string | null) =>
       writeFileSync(
@@ -645,7 +655,7 @@ describe.skipIf(windows)("Codex", () => {
                 {
                   source: "project",
                   eventName: "preToolUse",
-                  command: codexHookCommand(p.cwd, "lead"),
+                  command: codexHookCommand(p.cwd, "lead", p.plan()),
                   trustStatus: status,
                 },
               ],
@@ -693,7 +703,7 @@ enabled = true
     const { code, out } = await p.run("plan");
     expect(code).toBe(0);
     expect(out).toContain(
-      "Codex won't run the policy yet: Codex doesn't load this folder's hooks until you trust the folder",
+      "the policy hook is missing from .codex/hooks.json; run nodrail apply",
     );
   });
 
@@ -725,18 +735,39 @@ enabled = true
       "nodrail's hook is modified. Open codex here, run /hooks and trust it",
     ],
   ])(
-    "apply writes the files, but isn't done while Codex's trust is %s",
+    "apply writes the files and explains how to activate Codex when trust is %s",
     async (status, detail) => {
       const p = await codexProject();
       p.trust(status);
+      expect((await p.run("plan")).code).toBe(0);
       const result = await p.run("apply", "--yes");
-      expect(result.code).toBe(1);
-      expect(result.out).toContain("Applied 7 changes.");
-      expect(result.err).toContain(`Codex won't run the policy yet:`);
-      expect(result.err).toContain(detail);
+      expect(result.code).toBe(0);
+      expect(result.out).toContain("Applied 7 setup changes on this machine.");
+      expect(result.out).toContain("Codex won't run the policy yet:");
+      expect(result.out).toContain(detail);
       expect(existsSync(join(p.cwd, ".codex/hooks.json"))).toBe(true);
+      expect((await p.run("plan", "--require-active")).code).toBe(1);
     },
   );
+
+  test("a trusted Codex hook can apply in watch mode without enforcing", async () => {
+    const p = await codexProject(true);
+    p.trust("trusted");
+    expect((await p.run("plan")).code).toBe(0);
+    const applied = await p.run("apply", "--json", "--yes");
+    expect(applied.code).toBe(0);
+    expect(JSON.parse(applied.out)).toMatchObject({
+      mode: "watch",
+      activation: { state: "verified" },
+    });
+    const required = await p.run("plan", "--require-active", "--json");
+    expect(required.code).toBe(1);
+    expect(required.err).toContain("watch mode");
+    expect(JSON.parse(required.out)).toMatchObject({
+      mode: "watch",
+      activation: { state: "verified" },
+    });
+  });
 
   test("once Codex trusts the folder and the hook, apply is done", async () => {
     const p = await codexProject();

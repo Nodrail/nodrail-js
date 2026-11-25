@@ -12,6 +12,7 @@ import { describeArguments, describeToolCall } from "../src/actions";
 import { classifyArguments, classifyCommand } from "../src/commands";
 import { decideToolCall } from "../src/local-hook";
 import { declaredGateId, declaredGates } from "../src/policies";
+import { touchedSetup } from "../src/rules-guard";
 import { simulate } from "../src/simulator";
 import { toDescriptor } from "../src/local-hook";
 import { compilePolicies, starterPacks, type CompileResult } from "../src/yaml";
@@ -23,6 +24,15 @@ const documentOf = (result: CompileResult) => {
   if (!result.ok) throw new Error(JSON.stringify(result.issues));
   return result.document;
 };
+
+test("the setup guard recognizes a direct Node invocation of the CLI bundle", () => {
+  expect(
+    touchedSetup("node ./tools/dist/nodrail.mjs status", process.cwd(), {
+      paths: [],
+      root: process.cwd(),
+    }),
+  ).toBe("./tools/dist/nodrail.mjs");
+});
 
 const now = new Date("2026-11-09T12:00:00.000Z");
 

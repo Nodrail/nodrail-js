@@ -1,3 +1,4 @@
+import { launcher, launchShell, shellArg as quoted } from "./launcher.ts";
 import { connectRead } from "./connect.ts";
 import { evidenceRead } from "./accountable.ts";
 import { observeCommand, usesLimits } from "./claude-code.ts";
@@ -38,9 +39,6 @@ const DENY = JSON.stringify({
   },
 });
 
-/** One argument for the shell Codex runs hooks with, quoted. */
-const quoted = (text: string) => `'${text.replace(/'/g, `'\\''`)}'`;
-
 /** A TOML basic string. JSON's escapes are all valid TOML ones. */
 const tomlString = (text: string) => JSON.stringify(text);
 
@@ -69,7 +67,7 @@ export function codexHookCommand(
   const evidence = setup.connect
     ? connectRead(setup, path)
     : evidenceRead({ root, ...policyText }, path);
-  return `nodrail policy hook ${quoted(policy)} --protect-list ${quoted(list)}${reads}${evidence} --host codex --agent ${entry} || printf '%s' ${quoted(DENY)}`;
+  return `${launchShell} policy hook ${quoted(policy)} --protect-list ${quoted(list)}${reads}${evidence} --host codex --agent ${entry} || printf '%s' ${quoted(DENY)}`;
 }
 
 /**
@@ -187,8 +185,8 @@ function configFile(
     lines.push(
       "",
       `[mcp_servers.${tomlString(name)}]`,
-      `command = "nodrail"`,
-      `args = ${JSON.stringify(runnerArgs(file, name))}`,
+      `command = ${tomlString(launcher.command)}`,
+      `args = ${JSON.stringify([...launcher.args, ...runnerArgs(file, name)])}`,
     );
     if (envNames(spec).length > 0)
       lines.push(`env_vars = ${JSON.stringify(envNames(spec))}`);

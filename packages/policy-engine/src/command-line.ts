@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { readFile, readdir, stat } from "node:fs/promises";
 import { extname, join } from "node:path";
-import { parseArgs } from "node:util";
+import { parsePolicyArgs, type Values } from "./policy-cli-args.ts";
 import { parse } from "yaml";
 import { version } from "../package.json";
 import { z } from "zod";
@@ -20,11 +20,13 @@ export * from "./telemetry.ts";
 // Decision reporting to the control plane, for `nodrail` to install.
 export { decisionSink, type DecisionSink } from "./decision-report.ts";
 export { reportFile } from "./decision-destination.ts";
+export { readHookConnection } from "./hook-connection.ts";
+export { hookCredential, controlPlaneOrigin } from "./hook-credential.ts";
 export { sendDecisionQueue } from "./decision-sender.ts";
 export type { SpanRecord } from "./otlp.ts";
 export { machineId } from "./reporting-spans.ts";
 import { caseRun, toRunContext } from "./case-runs.ts";
-import { runsCommand } from "./runs-cli.ts";
+import { checkRunsArgs, runsCommand } from "./runs-cli.ts";
 import type { ActionDescriptor } from "./protocol.ts";
 import { compilePolicies } from "./compile.ts";
 import { type PolicyIssue, type PolicySource } from "./rules-file.ts";
@@ -197,38 +199,6 @@ export const processIo: Io = {
 
 let io: Io = processIo;
 
-const options = {
-  tool: { type: "string" },
-  operation: { type: "string" },
-  kind: { type: "string" },
-  resource: { type: "string" },
-  params: { type: "string" },
-  agent: { type: "string" },
-  installation: { type: "string" },
-  now: { type: "string" },
-  cases: { type: "string" },
-  command: { type: "string" },
-  unmatched: { type: "string" },
-  "protect-list": { type: "string" },
-  connections: { type: "string" },
-  telemetry: { type: "string" },
-  report: { type: "string" },
-  connect: { type: "string" },
-  "legacy-connect": { type: "boolean" },
-  evidence: { type: "string" },
-  host: { type: "string" },
-  help: { type: "boolean", short: "h" },
-  version: { type: "boolean", short: "v" },
-} as const;
-
-type Values = ReturnType<
-  typeof parseArgs<{
-    args: string[];
-    allowPositionals: true;
-    options: typeof options;
-  }>
->["values"];
-
 /** One command, with the rules it was given already compiled. */
 type Run = {
   command: string;
@@ -247,7 +217,7 @@ const identityOf = (values: Values) => ({
   installation: values.installation,
 });
 
-function evalCommand({ values, document, now }: Run) {
+function evalCall(values: Values) {
   const { tool, operation, kind, resource } = values;
   let call: Call | null = null;
   if (values.command) call = { command: values.command, ...identityOf(values) };
@@ -262,21 +232,18 @@ function evalCommand({ values, document, now }: Run) {
         : {},
       ...identityOf(values),
     };
-  if (!call) {
-    io.error(usage);
-    return 2;
-  }
-  const result = simulate({ document, descriptor: descriptorFor(call), now });
+  if (!call) throw new Error(usage);
+  return descriptorFor(call);
+}
+
+function evalCommand({ values, document, now }: Run) {
+  const result = simulate({ document, descriptor: evalCall(values), now });
   io.log(JSON.stringify(result, null, 2));
   return 0;
 }
 
 async function testCommand({ values, document, now }: Run) {
-  if (!values.cases) {
-    io.error(usage);
-    return 2;
-  }
-  const cases = caseFile.parse(parse(await readFile(values.cases, "utf8")));
+  const cases = caseFile.parse(parse(await readFile(values.cases!, "utf8")));
   let failed = 0;
   for (const item of cases) {
     const { outcome, matchedRuleId } = simulate({
@@ -300,10 +267,6 @@ async function testCommand({ values, document, now }: Run) {
 
 /** check and exec: only an allow lets the program run. */
 function gateCommand({ command, values, program, document, now }: Run) {
-  if (!program.length) {
-    io.error(usage);
-    return 2;
-  }
   const { outcome, explanation } = simulate({
     document,
     descriptor: toDescriptor(describeArguments(program), identityOf(values)),
@@ -367,21 +330,49 @@ function printPack(name: string | undefined) {
   return 0;
 }
 
+function checkPolicyOperands(
+  command: string,
+  paths: string[],
+  values: Values,
+  program: string[],
+) {
+  if (command === "init") {
+    if (!Object.hasOwn(starterPacks, paths[0] ?? "") || paths.length !== 1)
+      throw new Error(`Packs: ${Object.keys(starterPacks).join(", ")}`);
+    return;
+  }
+  if (command === "runs") {
+    checkRunsArgs(paths);
+    return;
+  }
+  if (command === "hook") return;
+  if (!commands.has(command) || !paths.length) throw new Error(usage);
+  if (command === "test" && !values.cases) throw new Error(usage);
+  if (command === "eval") evalCall(values);
+  if ((command === "check" || command === "exec") && !program.length)
+    throw new Error(usage);
+}
+
+export function checkPolicyArgs(argv: string[]) {
+  const {
+    values,
+    positionals: [command = "", ...paths],
+    program,
+  } = parsePolicyArgs(argv);
+  if (!values.help && !values.version)
+    checkPolicyOperands(command, paths, values, program);
+  return { values, command, paths, program };
+}
+
 /** Runs one nodrail-policy command and returns its exit code. */
 export async function runCli(
   argv: string[],
   output: Io = processIo,
 ): Promise<number> {
   io = output;
-  const split = argv.indexOf("--");
-  const { values, positionals } = parseArgs({
-    args: split === -1 ? argv : argv.slice(0, split),
-    allowPositionals: true,
-    options,
-  });
+  const { values, command, paths, program } = checkPolicyArgs(argv);
   if (values.help) return (io.log(usage), 0);
   if (values.version) return (io.log(version), 0);
-  const [command = "", ...paths] = positionals;
   if (command === "init") return printPack(paths[0]);
   if (command === "runs") return runsCommand(paths, io);
   if (command === "hook") {
@@ -390,17 +381,13 @@ export async function runCli(
       paths.length ? await compileOrReport(paths, true) : null,
     );
   }
-  const handler = commands.get(command);
-  if (!handler || !paths.length) {
-    io.error(usage);
-    return 2;
-  }
+  const handler = commands.get(command)!;
   const compiled = await compileOrReport(paths);
   if (!compiled) return 1;
   return handler({
     command,
     values,
-    program: split === -1 ? [] : argv.slice(split + 1),
+    program,
     document: compiled.document,
     count: compiled.count,
     now: new Date(values.now ?? Date.now()),
@@ -435,3 +422,21 @@ export async function runPolicyCommandLine(
     return argv[0] === "hook" ? hookFailure() : 2;
   }
 }
+
+export {
+  readHostCredential,
+  removeHostCredential,
+  writeHostCredential,
+} from "./host-credentials.ts";
+
+export { canonicalOrigin } from "./control-plane-origin.ts";
+export { evidencePins } from "./evidence-pins.ts";
+export { recordAppliedHook, removeAppliedHook } from "./applied-hook.ts";
+export { POLICY_CHECK_FILE } from "./hook-policy-status.ts";
+
+export { acquireLocalLock, LocalLockBusy, processAlive } from "./local-lock.ts";
+export {
+  readSecretFile,
+  removeSecretFile,
+  writeSecretFile,
+} from "./secret-store.ts";

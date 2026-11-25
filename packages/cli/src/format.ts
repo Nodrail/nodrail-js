@@ -102,9 +102,11 @@ export function runsTable(items: Run[]) {
 }
 
 export function whoami(me: Me, url: string) {
-  const can = Object.entries(me.can)
-    .filter(([, allowed]) => allowed)
-    .map(([name]) => name.replace("_", ":"));
+  const can =
+    me.effective_scopes ??
+    Object.entries(me.can)
+      .filter(([, allowed]) => allowed)
+      .map(([name]) => name.replace("_", ":"));
   return [
     `${visible(me.person.name)} in ${visible(me.workspace.name)} (${me.workspace.slug}) as ${me.role}`,
     `Token        ${visible(me.token.name)} (${me.token.prefix}…)`,

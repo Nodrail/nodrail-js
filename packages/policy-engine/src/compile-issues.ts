@@ -1,4 +1,4 @@
-import type { Compiled } from "./compile-runs.ts";
+import type { Compiled, Compiling } from "./compile-runs.ts";
 import { pick, upward, type Path } from "./positions.ts";
 import type { Collector } from "./rules-file.ts";
 
@@ -63,4 +63,13 @@ export function reportSchemaIssues(
       `${item ? `${sectionLabel[section]} "${item.compiled.name}"` : "Rules"}${field ? ` ${field}` : ""}: ${issue.message}`,
     );
   }
+}
+
+export function warnUnused({ state, used, collector }: Compiling) {
+  for (const [name, list] of state.lists)
+    if (!used.lists.has(name))
+      collector.warn(list, `List "${name}" is not used.`);
+  for (const [name, macro] of state.macros)
+    if (!used.macros.has(name))
+      collector.warn(macro, `Macro "${name}" is not used.`);
 }

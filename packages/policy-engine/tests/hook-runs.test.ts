@@ -207,10 +207,13 @@ describe("runKey", () => {
       "HANDBACK_TOOL",
       "MAX_RECEIPT_TEXT",
       "agentName",
+      "callerCandidate",
+      "deferToAppliedHook",
       "ledgerDirectory",
       "nodrailDirectory",
       "receiptBlock",
       "receiptText",
+      "resolveHookCaller",
       "runKey",
     ]);
   });

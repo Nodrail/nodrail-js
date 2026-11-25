@@ -94,12 +94,22 @@ export async function pushRules(command: Command, file?: string) {
   );
 }
 
-export async function rules(command: Command) {
-  const [action, file, extra] = command.args;
+export function parseRulesArgs(args: string[]) {
+  const [action, file, extra] = args;
   if (extra !== undefined) throw new UsageError(`Unexpected "${extra}".`);
-  if (action === "pull") return pullRules(command, file);
-  if (action === "push") return pushRules(command, file);
+  if (action === "pull") return { action, file } as const;
+  if (action === "push") {
+    if (!file) throw new UsageError("Missing the rules file to push.");
+    return { action, file } as const;
+  }
   throw new UsageError(
     "Use `nodrail rules pull [file]` or `nodrail rules push <file>`.",
   );
+}
+
+export async function rules(command: Command) {
+  const { action, file } = parseRulesArgs(command.args);
+  return action === "pull"
+    ? pullRules(command, file)
+    : pushRules(command, file);
 }

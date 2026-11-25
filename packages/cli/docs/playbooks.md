@@ -552,8 +552,23 @@ Claude Code and Codex can export their own telemetry too, which this doesn't swi
 
 ### Connect to Nodrail
 
-Add a project `id` (a UUID) and name the control plane and policy source
-in `nodrail.yaml`:
+In the console, open **Agents → Connect a project** and copy the command for
+your environment. Run it from your project folder, review the plan, then apply.
+
+```sh
+nodrail connect https://app.nodrail.com --workspace acme --environment development
+nodrail apply
+```
+
+`connect` adds a project UUID if needed, writes the destination, opens browser
+sign-in if needed and locks the project before planning. Use `nodrail plan
+--details` to expand the plan. Apply publishes policy changes and enrolls this
+machine automatically. Repeat `apply` on each machine. Nodrail stores each
+machine credential in `~/.nodrail/hosts/` for the control plane, workspace,
+environment and project. Run the agent and open **Activity → Runs**.
+
+To configure the connection by hand, keep the existing project UUID or add
+one as the top-level `id`, then add this block to `nodrail.yaml`:
 
 ```yaml
 connect:
@@ -562,23 +577,26 @@ connect:
   environment: development
   decide: cloud
   enforce: on
-  credential: { fromEnv: NODRAIL_CREDENTIAL }
 ```
 
-With `decide: cloud`, `plan` checks the host credential's workspace and
-environment. It uses your management token to compare the live policy
-with the lock and show what `apply` would publish. `apply` needs that
-comparison before it installs the hook. Each publication names the
-project and its lock so `plan` can detect drift. See [the CLI reference](cli.md).
+Run `nodrail login --url https://app.nodrail.com`, `nodrail policy lock` and
+`nodrail plan` before applying.
+
+The first machine enrollment claims the project ID in the workspace for the enrolling person.
+A policy manager applying another person's project needs a workspace admin
+to grant `projects:apply` for that ID.
+Existing console agents and other projects' agents need an explicit admin
+binding before you can declare them. An environment serves the live policy
+of one project. Switching the owner requires `--replace-live` even when the
+rules are identical. Review the previous owner and affected enrolled hosts
+in `nodrail plan --replace-live` before running `nodrail apply --replace-live`.
 
 On Claude Code, Codex and Copilot, `apply` installs `nodrail policy hook`
-with `--connect .nodrail/connect.json`. That file pins the digest from
-the lock and points to the host credential by reference. The hook verifies
-the destination and credential reference against the locked manifest before
-authenticating. Set the named environment variable where the host runs. The hook conditionally fetches
-the policy, checks its SHA-256 and decides locally. Evidence reads use the
-same credential. Decisions, reported steps and tool outcomes are queued
-for delivery to the control plane.
+with `--connect .nodrail/connect.json`. The hook verifies the connection
+against the lock before using its enrollment credential. It fetches the
+policy, checks its SHA-256 and decides locally. Evidence reads and reporting
+use the machine credential. Apply retains the scopes needed by older pins
+of this project that the environment still accepts.
 
 During an outage the hook uses a verified cached copy whose digest matches
 the lock. A missing cache, a mismatched live policy or a rejected credential
@@ -587,11 +605,25 @@ the hook records the evaluation failure locally under
 `~/.nodrail/watch-audit/` and lets the host handle ordinary calls. The setup
 guard still protects hook-owned files in watch mode. If the connection
 configuration cannot be verified against the repository lock, the hook
-refuses the call.
+refuses the call. Use `nodrail status` to read the result of the most recent
+connected policy check.
 
 `decide: local` uses the repository policy and skips control-plane
 publication, policy pulls, evidence reads and decision reporting.
 With `enforce: watch`, inspect the local record with `nodrail policy runs`.
+
+#### CI and unattended hosts
+
+When CI provisions an agent installation credential with `actions:read-own`,
+add an explicit secret reference under `connect:`:
+
+```yaml
+  credential: { fromEnv: NODRAIL_CREDENTIAL }
+```
+
+Provide `NODRAIL_CREDENTIAL` through the CI secret store. Set `NODRAIL_URL`
+to the same control-plane origin so preflight can check the credential.
+For noninteractive management sign-in, use `nodrail login --token-stdin`.
 
 ### Tested versions (proposed)
 

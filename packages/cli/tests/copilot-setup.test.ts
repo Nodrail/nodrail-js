@@ -72,12 +72,12 @@ describe.skipIf(windows)("Copilot as a runtime", () => {
     expect(untrusted.code).toBe(1);
     expect(untrusted.out).toContain("Copilot: starts as lead");
     expect(untrusted.out).toContain(
-      "Policy hook: inactive, Copilot runs the project's hooks only in a trusted folder",
+      "Hook status: Copilot runs the project's hooks only in a trusted folder",
     );
     trust();
     const trusted = await p.run("status");
     expect(trusted.code).toBe(0);
-    expect(trusted.out).toContain("Policy hook: configured");
+    expect(trusted.out).toContain("Hook configured:");
     expect(trusted.out).toContain("Observation: at each session start.");
   });
 
@@ -92,6 +92,20 @@ describe.skipIf(windows)("Copilot as a runtime", () => {
     expect(plan.out).toContain(
       "sets disableAllHooks: Copilot would run no hook",
     );
+  });
+
+  test("require-active needs the current hook even in a trusted folder", async () => {
+    const { p, trust } = await copilotProject();
+    trust();
+    const absent = await p.run("plan", "--require-active");
+    expect(absent.code).toBe(1);
+    expect(absent.out).toContain(
+      "the policy hook is missing from .github/hooks/nodrail.json",
+    );
+    expect((await p.run("apply", "--yes")).code).toBe(0);
+    expect((await p.run("plan", "--require-active")).code).toBe(0);
+    p.write(COPILOT_HOOKS, '{"version":1,"hooks":{}}');
+    expect((await p.run("plan", "--require-active")).code).toBe(1);
   });
 
   test("status names what nodrail doesn't manage; destroy takes out what apply wrote", async () => {

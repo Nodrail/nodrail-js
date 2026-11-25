@@ -10,8 +10,7 @@ vulnerabilities privately, as described in [SECURITY.md](SECURITY.md).
 
 ## Quick start
 
-You already have an agent with tools. Adding Nodrail is two lines of code and one
-environment variable; the tools, the agent and the framework stay as they are.
+Use Node.js 22 or later. Start with a standalone tool to check your connection, then wrap the tools you already pass to your agent.
 
 ### 1. Get a credential
 
@@ -29,9 +28,19 @@ Keep the credential where your other API keys live: your `.env` file in
 development, and your host's secret settings in production (Vercel, Railway, AWS
 Secrets Manager, a Kubernetes secret, a CI secret).
 
-```sh
+For a local self-hosted server on the default port, put both settings in your
+untracked `.env` file and substitute your own installation credential. For
+another deployment, use its origin, including `https://app.nodrail.com` for Cloud.
+
+```dotenv
+NODRAIL_URL=http://localhost:3000
 NODRAIL_CREDENTIAL=ndr_...
 ```
+
+For a saved installation credential, put its issuing origin in the adjacent
+`url` file under `~/.nodrail/` (or `NODRAIL_HOME`). Existing installations
+with only a `credential` file connect to Nodrail Cloud. A URL supplied to the
+SDK may use an existing credential only when it matches the credential’s origin.
 
 ### 3. Wrap the tools you already pass to your agent
 
@@ -85,9 +94,53 @@ Nodrail, without a deploy.
 
 ### Try both
 
-Ask your agent to use a tool with no rule yet: the call is denied, and the
-decision appears in Nodrail under **Activity**. Then, under **Policies**, add a
-rule that allows that tool, and call it again.
+In a fresh test workspace, save this as `app.mjs`. Both SDK entry points
+request a decision for the same harmless tool.
+
+```js
+import { createNodrail, guard, NodrailBlockedError } from "@nodrail/client";
+
+function handbook_lookup() {
+  return "Start with the public collection.";
+}
+
+const tools = guard({ handbook_lookup });
+console.log(await tools.handbook_lookup());
+
+const nodrail = createNodrail();
+try {
+  const result = await nodrail.run(
+    {
+      tool: "handbook_lookup",
+      operation: "call",
+      resource: { kind: "tool", id: "handbook_lookup" },
+      params: {},
+    },
+    handbook_lookup,
+  );
+  console.log(result);
+} catch (error) {
+  if (!(error instanceof NodrailBlockedError)) throw error;
+  console.log(error.message);
+}
+```
+
+```sh
+node --env-file=.env app.mjs
+```
+
+Both calls are denied in the empty policy and appear in **Activity**. Under
+**Policies**, add this rule in the installation's environment and publish.
+
+```yaml
+- rule: Read the demo handbook
+  tool: handbook_lookup
+  operation: call
+  resource: { kind: tool, match: exact, value: handbook_lookup }
+  effect: allow
+```
+
+Run the same Node command again. Both results now contain the handbook text.
 
 ### In development and tests
 
@@ -264,11 +317,11 @@ decided as before, and any gate they match denies them.
 
 ### Where the connection comes from
 
-Nearest first: options you pass, then `NODRAIL_URL` and `NODRAIL_CREDENTIAL`,
-then the file `credential` in `NODRAIL_HOME` (by default `~/.nodrail`). The URL
-defaults to `https://app.nodrail.com`. Only the credential is required. The
-address must use `https`; plain `http` is accepted only for this machine
-(`localhost`, `127.0.0.1`, `::1`), so the credential is never sent in the clear.
+Supply `url` and `credential` together in SDK options or set
+`NODRAIL_URL` and `NODRAIL_CREDENTIAL` together. With no explicit settings,
+the SDK uses the Cloud credential file in `NODRAIL_HOME` (by default
+`~/.nodrail`). Addresses use `https`. Loopback addresses (`localhost`,
+`127.0.0.1`, `::1`) also accept `http`.
 
 With no credential nothing throws at startup: each guarded call is blocked and
 says what is missing, and the next call looks again. So an application that loads
@@ -283,7 +336,7 @@ The agent reads a sentence saying why, and `NodrailBlockedError.code` (or
 | -------------------------------- | ------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
 | `DENIED`                         | A rule denies it, no rule allows it, or a gate or budget isn't met              | Meet what the reason says is missing and try again, or change the rule if it should be allowed |
 | `EXPIRED`, `INVALIDATED`         | The request timed out, or something changed                                     | Try again for a new decision                                                                   |
-| `NOT_CONFIGURED`                 | No credential found                                                             | Set `NODRAIL_CREDENTIAL`                                                                       |
+| `NOT_CONFIGURED`                 | No credential found                                                             | Pair `NODRAIL_URL` with `NODRAIL_CREDENTIAL`                                                                       |
 | `UNAUTHENTICATED`                | The credential was refused                                                      | Check it, and that `NODRAIL_URL` points at your Nodrail                                        |
 | `RATE_LIMITED`, `QUOTA_EXCEEDED` | Too many calls, or the month's allowance is used                                | Wait, or raise the plan                                                                        |
 | `UNAVAILABLE`                    | Nodrail couldn't be reached                                                     | Check the network; nothing ran                                                                 |
@@ -435,3 +488,9 @@ and `github` can never share a rule.
 - Each installation can make 600 calls a minute.
 - A workspace has a monthly allowance of agent actions. Past it, new actions are
   blocked. Checks never stop running and nothing becomes allowed.
+
+## Applied projects
+
+The standalone Claude Code plugin steps aside when `nodrail apply` has recorded the verified project hook in the user's home directory and the installed settings and policy files still match. Start a new session after installing a project hook. Set `NODRAIL_REQUIRE_STANDALONE=1` to require standalone authorization as well.
+
+Set `NODRAIL_URL` and `NODRAIL_CREDENTIAL` together, or set both values in the Claude Code plugin options. Incomplete or conflicting pairs block governed calls. A saved credential file uses the Cloud origin.

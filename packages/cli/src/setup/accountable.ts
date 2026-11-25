@@ -215,20 +215,8 @@ export const evidenceText = (line: EvidenceLine) =>
 /** What plan shows of numeric budgets and evidence requirements. */
 export type Accountable = { budgets: BudgetLine[]; evidence: EvidenceLine[] };
 
-/**
- * Each numeric budget and evidence requirement of the effective policy, as
- * this local setup enforces them. `guard`: whether the setup guard (the
- * protect list in the hook, with hooks on) is active for this host.
- */
-export function accountablePlan(input: {
-  effective: string;
-  guard: { active: boolean; detail: string };
-  /** Whether the hook gets `--evidence`, so Cloud can be asked. */
-  cloud: boolean;
-  connected?: "cloud" | "local";
-}) {
-  const document = effectiveDocument(input.effective);
-  const budgets: BudgetLine[] = limitsIn(document).map((budget) => ({
+function planBudget(budget: NumericBudget, connected: boolean): BudgetLine {
+  return {
     id: budget.id,
     name: budget.name,
     label: BUDGET_LABELS[budget.label],
@@ -244,8 +232,26 @@ export function accountablePlan(input: {
         : budget.source === "admission"
           ? `the local hook reserves before each call (${windowOf(budget)}), settled on PostToolUse`
           : `the local hook stops further work at the limit (${windowOf(budget)}); a step without a reading is unknown and holds`,
-    failure: budget.across === "environment" ? SHARED : null,
-  }));
+    failure: budget.across === "environment" && !connected ? SHARED : null,
+  };
+}
+
+/**
+ * Each numeric budget and evidence requirement of the effective policy, as
+ * this local setup enforces them. `guard`: whether the setup guard (the
+ * protect list in the hook, with hooks on) is active for this host.
+ */
+export function accountablePlan(input: {
+  effective: string;
+  guard: { active: boolean; detail: string };
+  /** Whether the hook gets `--evidence`, so Cloud can be asked. */
+  cloud: boolean;
+  connected?: "cloud" | "local";
+}) {
+  const document = effectiveDocument(input.effective);
+  const budgets = limitsIn(document).map((budget) =>
+    planBudget(budget, input.connected === "cloud"),
+  );
   const evidence: EvidenceLine[] = evidenceNeeds(document).map(
     ({ gate, index, need, producers }) => {
       const local = readsLocal(need, producers);

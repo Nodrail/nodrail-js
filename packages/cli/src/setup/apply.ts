@@ -1,3 +1,5 @@
+import { recordAppliedHook } from "@nodrail/policy-engine/command-line";
+import { SETTINGS_FILE } from "./claude-code.ts";
 import type { Env } from "../config.ts";
 import { CliError } from "../io.ts";
 import { onDisk, journalWriter, replayReviewed } from "../project/journal.ts";
@@ -139,20 +141,23 @@ export function applySetup(
   reviewed: SetupPlan,
   again = "`nodrail apply`",
 ) {
-  const left = holdProject(place, (folder) =>
-    replayReviewed(
+  holdProject(place, (folder) => {
+    const left = replayReviewed(
       folder,
       place.root,
       { reviewed, now: planSetup({ ...place, held: true }), same, again },
       (plan) => journalFor(place.root, plan),
-    ),
-  );
-  if (left.length > 0)
-    throw new CliError(
-      [
-        "These changed while applying and were left as they are:",
-        ...left.map((path) => `  ${path}`),
-        `Run ${again.replace("nodrail apply", "nodrail plan")} to see where things stand.`,
-      ].join("\n"),
     );
+    if (left.length > 0)
+      throw new CliError(
+        [
+          "These changed while applying and were left as they are:",
+          ...left.map((path) => `  ${path}`),
+          `Run ${again.replace("nodrail apply", "nodrail plan")} to see where things stand.`,
+        ].join("\n"),
+      );
+    const settings = reviewed.merged[SETTINGS_FILE];
+    if (reviewed.runtime === "claude-code" && settings)
+      recordAppliedHook(place.home, place.root, settings);
+  });
 }

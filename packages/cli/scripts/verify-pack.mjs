@@ -226,8 +226,36 @@ function checkExample(folder) {
   });
   if (copied.status !== 0)
     fail(`nodrail example: ${copied.stdout}${copied.stderr}`);
+  const desk = join(folder, "desk");
+  run("git", ["init", "-q"], desk);
+  const generated = [
+    ".claude/settings.json",
+    ".claude/settings.local.json",
+    ".claude/hooks/check",
+    ".codex/hooks.json",
+    ".agents/skills/cite-sources/SKILL.md",
+    ".github/hooks/nodrail.json",
+    ".nodrail/setup-state.json",
+    ".mcp.json",
+  ];
+  const ignored = run("git", ["check-ignore", ...generated], desk);
+  if (ignored.trim().split(/\r?\n/).length !== generated.length)
+    fail(`the example's ignore rules missed generated host files: ${ignored}`);
+  const commit = run(
+    "git",
+    ["ls-files", "--others", "--exclude-standard"],
+    desk,
+  );
+  for (const file of [
+    ".gitignore",
+    "nodrail.yaml",
+    "nodrail.lock.yaml",
+    "policies/desk.yaml",
+  ])
+    if (!commit.trim().split(/\r?\n/).includes(file))
+      fail(`the example's source checkout is missing ${file}`);
   const exported = spawnSync(bin, ["policy", "export", "--frozen"], {
-    cwd: join(folder, "desk"),
+    cwd: desk,
     encoding: "utf8",
     shell,
     env: testEnv(folder),
@@ -237,7 +265,7 @@ function checkExample(folder) {
     !exported.stdout.includes("Marketing never publishes")
   )
     fail(`the example's policy: ${exported.stdout}${exported.stderr}`);
-  checkExampleSetup(folder, bin);
+  checkExampleSetup(folder);
 }
 
 /**
@@ -256,6 +284,7 @@ function fakeHosts(folder) {
         });
   fake("claude", "2.1.328 (Claude Code)");
   if (!shell) fake("codex", "codex-cli 0.170.0");
+  if (!shell) fake("copilot", "1.0.114");
   return hosts;
 }
 
@@ -264,24 +293,26 @@ function fakeHosts(folder) {
  * on each host starts nothing; apply starts the packaged connectors once
  * and writes the setup; a second apply has nothing to change.
  */
-function checkExampleSetup(folder, bin) {
+function checkExampleSetup(folder) {
   const desk = join(folder, "desk");
-  const path = [fakeHosts(folder), dirname(bin), process.env.PATH].join(
-    process.platform === "win32" ? ";" : ":",
-  );
+  // No global or package-bin PATH. Hosts and their MCP wrappers must use the
+  // same Node and CLI entry that set up the example.
+  const path = fakeHosts(folder);
   const nodrail = (...args) =>
-    spawnSync(bin, args, {
+    spawnSync(process.execPath, [installedCli, ...args], {
       cwd: folder,
       encoding: "utf8",
-      shell,
       env: testEnv(folder, path),
     });
-  const runtimes = shell ? ["claude-code"] : ["claude-code", "codex"];
+  const runtimes = shell
+    ? ["claude-code"]
+    : ["claude-code", "codex", "copilot"];
   for (const runtime of runtimes) {
     const plan = nodrail("plan", "./desk", "--runtime", runtime);
     if (
       plan.status !== 0 ||
-      !plan.stdout.includes("✓ workspace: matches nodrail.lock.yaml")
+      !plan.stdout.includes("✓ workspace: matches nodrail.lock.yaml") ||
+      !plan.stdout.includes("connections declared as command: nodrail use")
     )
       fail(`nodrail plan --runtime ${runtime}: ${plan.stdout}${plan.stderr}`);
   }
@@ -302,9 +333,21 @@ function checkExampleSetup(folder, bin) {
     !applied.stdout.includes("✓ connection outbox: offers publish")
   )
     fail(`nodrail apply: ${applied.stdout}${applied.stderr}`);
+  const protectedPaths = readFileSync(
+    join(desk, ".nodrail/protected.txt"),
+    "utf8",
+  )
+    .replaceAll("\\", "/")
+    .split("\n");
+  if (!protectedPaths.some((path) => path.endsWith("/dist/nodrail.mjs")))
+    fail("apply did not protect the CLI entry used by generated hooks");
   const again = nodrail("apply", "./desk", "--runtime", "claude-code", "--yes");
   if (again.status !== 0 || !again.stdout.includes("Nothing to change."))
     fail(`nodrail apply, again: ${again.stdout}${again.stderr}`);
+  checkExampleActivation(nodrail);
+}
+
+function checkExampleActivation(nodrail) {
   const active = nodrail(
     "plan",
     "./desk",
@@ -312,7 +355,11 @@ function checkExampleSetup(folder, bin) {
     "claude-code",
     "--require-active",
   );
-  if (active.status !== 0 || !active.stdout.includes("Policy hook: configured"))
+  if (
+    active.status !== 0 ||
+    !active.stdout.includes("Hook configured:") ||
+    active.stdout.includes("Hook active:")
+  )
     fail(`nodrail plan --require-active: ${active.stdout}${active.stderr}`);
 }
 

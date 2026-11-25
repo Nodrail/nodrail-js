@@ -1,2 +1,4 @@
-/** This nodrail's version; the package's, checked when it is packed. */
-export const VERSION = "0.6.0";
+import manifest from "../package.json" with { type: "json" };
+
+/** Follow the package version selected by the release PR. */
+export const VERSION = manifest.version;

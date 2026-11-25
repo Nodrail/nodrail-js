@@ -1,5 +1,54 @@
 # Changelog
 
+## Unreleased
+
+- Run Windows host and connector batch launchers even when PATH omits Windows system tools.
+
+- Verify browser sign-in launch commands for Windows, macOS and Linux on every test host.
+
+- Confirm browser CLI sign-in without prompting for workspace creation when the selected workspace is unavailable.
+- Ship the support-desk example with ignore rules for generated host files and document how to verify Claude Code at runtime.
+
+- Run connect preflight before updating project files. Protect local credentials with Windows DPAPI or private POSIX permissions, migrate older files on read, and fence credential publication against expired writers.
+
+- Validate connect destinations before writing, distinguish hook configuration from host-confirmed activation, and provide teammate setup and teardown instructions. Destroy can reconcile an interrupted enrollment through personal CLI sign-in.
+
+- Report hook activation and pending policy revisions separately. Use the same machine setup totals in plan and apply.
+
+- Recover interrupted enrollments during destroy, preserve rotated credentials, and require explicit review before connecting a project with unlocked edits. Connect preserves file permissions.
+
+- Add `nodrail connect` for browser sign-in, configuration and planning. Summarize connected plans and link applied projects to Activity → Runs.
+- Apply host-only changes such as watch mode without publishing another version of the same policy.
+
+- Keep applied enrollment bindings outside the project and retry an incomplete disconnect without losing the credential. Group removed catalog rules in concise plans.
+
+- Show the next policy version and its published rule counts in connected plans. Expand catalog changes with `--details`.
+- Send the first Inventory observation at apply time. On destroy, revoke and remove the enrolled credential and provide server-side cleanup instructions if it could not be revoked.
+- Only show the legacy migration notice for detected legacy configuration.
+
+## 0.7.0
+
+Uses `@nodrail/policy-engine` 0.9.0, published with it. `nodrail login` opens
+the browser once; `nodrail apply` registers declared agents and enrolls this
+machine, so no credential is copied by hand.
+
+- CLI 0.7.0 supports the console’s generated project setup for Claude Code, Codex and Copilot.
+
+- Show takeover impact, refresh stale machine enrollment and publish locked contract and evidence bindings on apply.
+
+- Sign in with the browser, then plan and apply agents, policy and machine enrollment from a locked project.
+- Generate project IDs for copied examples and show control-plane additions and removals before confirmation.
+
+- Apply writes a private record so the Claude Code plugin can step aside for the verified project hook. Credential preflight checks the configured issuer before sending a bearer.
+
+- Connected observations write to Inventory with the machine credential. Additional OTLP export remains optional.
+- Allow Codex setup to complete while reporting hook trust and watch mode separately. Share command argument validation with the public docs checks.
+
+- Generate host hooks and MCP connections with the running CLI's absolute Node and entry paths, including connections declared as command: nodrail.
+- Require a current, enforcing hook for plan --require-active. Add Copilot to the support desk.
+- Show source drift and the connected hook's last policy check in status. Name session restart and live-policy behavior after destroy.
+- Document the cutover from standalone plugins and CLI 0.4/0.5. Render Insights from the server's decision counters without relying on timing fields.
+
 ## 0.6.0
 
 Uses `@nodrail/policy-engine` 0.8.0, published with it. 0.5.0 was never

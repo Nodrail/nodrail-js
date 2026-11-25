@@ -11,9 +11,7 @@ const connected = (block: string) =>
 
 describe("connect: in plan and apply", () => {
   test("decide: local says so, and apply goes ahead as before", async () => {
-    const p = await connected(
-      "  workspace: acme\n  environment: development\n  decide: local\n",
-    );
+    const p = await connected("  decide: local\n");
     const plan = await p.run("plan");
     expect(plan.code).toBe(0);
     expect(plan.out).toContain(
@@ -26,15 +24,18 @@ describe("connect: in plan and apply", () => {
     const p = await connected(
       "  url: http://localhost:3201\n  workspace: acme\n  environment: development\n  decide: cloud\n  credential: { fromEnv: NODRAIL_CREDENTIAL }\n",
     );
+    p.env.NODRAIL_URL = "http://localhost:3201";
     p.env.NODRAIL_CREDENTIAL = "ndr_000000000000_" + "A".repeat(43);
     const plan = await p.run("plan");
     expect(plan.code).toBe(1);
-    expect(plan.out).toContain("Decisions go to Runs and Activity.");
+    expect((await p.run("plan", "--details")).out).toContain(
+      "See decisions in Activity and grouped runs in Activity → Runs.",
+    );
     expect(plan.out).not.toMatch(/Approvals|Reviews/);
-    expect(plan.out).toContain("add `id: <uuid>` to nodrail.yaml");
+    expect(plan.out).toMatch(/Add id: [a-f0-9-]+ to nodrail.yaml/);
     // Offline here: the credential is set but couldn't be checked.
     expect(plan.out).toContain(
-      "credential NODRAIL_CREDENTIAL: set, not checked: http://localhost:3201 didn't answer",
+      "http://localhost:3201 did not answer. Check the connection and run nodrail plan again.",
     );
     expect(plan.out).not.toContain("AAAA");
     const apply = await p.run("apply", "--yes");
@@ -81,7 +82,10 @@ describe("the credential check", () => {
       credential: { fromEnv: "NODRAIL_CREDENTIAL" },
     },
   };
-  const env = { NODRAIL_CREDENTIAL: "ndr_secret_value" };
+  const env = {
+    NODRAIL_CREDENTIAL: "ndr_secret_value",
+    NODRAIL_URL: setup.connect.url,
+  };
   const answering = (status: number, body: unknown = {}) => {
     const seen: { url: string; authorization: string | null }[] = [];
     const fetcher = (async (url: string, init: RequestInit) => {
@@ -93,6 +97,20 @@ describe("the credential check", () => {
     }) as unknown as typeof fetch;
     return { seen, fetcher };
   };
+
+  test("a manifest cannot send an environment credential to another origin", async () => {
+    const { seen, fetcher } = answering(200);
+    const [check] = await credentialChecks(
+      setup,
+      { ...env, NODRAIL_URL: "https://issuer.test" },
+      fetcher,
+    );
+    expect(check).toMatchObject({
+      ok: false,
+      detail: expect.stringContaining("Pair NODRAIL_URL"),
+    });
+    expect(seen).toEqual([]);
+  });
 
   test("accepted, for the workspace and environment connect: names", async () => {
     const { seen, fetcher } = answering(200, {
@@ -115,6 +133,17 @@ describe("the credential check", () => {
     ]);
   });
 
+  test("holds a runtime secret back from a different origin", async () => {
+    const { seen, fetcher } = answering(200);
+    const checks = await credentialChecks(
+      setup,
+      { ...env, NODRAIL_URL: "https://other.example" },
+      fetcher,
+    );
+    expect(checks[0]).toMatchObject({ ok: false });
+    expect(seen).toEqual([]);
+  });
+
   test("another environment's credential fails, naming both", async () => {
     const { fetcher } = answering(200, {
       workspace: "acme",
@@ -131,17 +160,21 @@ describe("the credential check", () => {
     expect(refused[0]).toMatchObject({ ok: false });
     expect(refused[0]!.detail).toMatch(/^refused by https:\/\/nodrail.example/);
 
-    const missing = await credentialChecks(setup, {}, answering(200).fetcher);
+    const missing = await credentialChecks(
+      setup,
+      { NODRAIL_URL: env.NODRAIL_URL },
+      answering(200).fetcher,
+    );
     expect(missing[0]).toMatchObject({ ok: false });
     expect(missing[0]!.detail).toMatch(/^NODRAIL_CREDENTIAL isn't set/);
 
     const offline = await credentialChecks(setup, env, (async () => {
       throw new Error("connect ECONNREFUSED");
     }) as unknown as typeof fetch);
-    expect(offline[0]).toMatchObject({ ok: true, unverified: true });
+    expect(offline[0]).toMatchObject({ ok: false });
 
     const older = await credentialChecks(setup, env, answering(404).fetcher);
-    expect(older[0]).toMatchObject({ ok: true, unverified: true });
+    expect(older[0]).toMatchObject({ ok: false });
     expect(older[0]!.detail).toContain("can't say whose credential this is");
   });
 

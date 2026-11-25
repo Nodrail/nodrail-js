@@ -65,6 +65,7 @@ export type CompileResult =
       ok: true;
       document: PolicyDocument;
       rules: CompiledRule[];
+      gates: CompiledRule[];
       warnings: PolicyIssue[];
     }
   | { ok: false; issues: PolicyIssue[]; warnings: PolicyIssue[] };

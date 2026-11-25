@@ -7,7 +7,8 @@ import { compilePolicies } from "./compile.ts";
 import type { HookConnection } from "./hook-connection.ts";
 import type { RemoteConfig } from "./evidence-remote.ts";
 import type { PolicyDocument } from "./policies.ts";
-import { secretName, secretValue } from "./secret-refs.ts";
+import { controlPlaneOrigin, hookCredential } from "./hook-credential.ts";
+import { policyRefusal } from "./hook-policy-error.ts";
 import { spoolFolder } from "./telemetry.ts";
 
 const digest = z.string().regex(/^[0-9a-f]{64}$/);
@@ -15,11 +16,14 @@ const hash = (value: string) =>
   createHash("sha256").update(value).digest("hex");
 
 const source = z.object({ digest, text: z.string() });
-const livePolicy = z.object({ source: source.nullable() });
+const livePolicy = z.object({
+  source: source.nullable(),
+  denial_reason: z.string().min(1).max(1000).optional(),
+});
 const cachedPolicy = z.object({
   scope: digest,
   etag: z.unknown(),
-  validator_mac: z.unknown(),
+  validator_mac: z.unknown().optional(),
   source,
 });
 
@@ -45,12 +49,7 @@ async function readCache(
 ) {
   try {
     const cache = cachedPolicy.parse(JSON.parse(await readFile(file, "utf8")));
-    if (
-      cache.scope !== scope ||
-      cache.source.digest !== pin ||
-      hash(cache.source.text) !== pin
-    )
-      return null;
+    if (cache.scope !== scope || !matchesPin(cache.source, pin)) return null;
     const tag = entityTag.safeParse(cache.etag);
     const etag =
       tag.success &&
@@ -86,16 +85,21 @@ function readJson(text: string): unknown {
   }
 }
 
-type Pull = { source: Source; etag: string | null; save: boolean };
+type Pull = {
+  source: Source;
+  etag: string | null;
+  save: boolean;
+  offline?: true;
+};
 
 async function pullPolicy(
   config: RemoteConfig,
   cache: Cached | null,
   fetcher: typeof fetch,
-): Promise<Pull | string> {
-  const offline = () =>
+): Promise<Pull | string | { refusal: string }> {
+  const offline = (): Pull | string =>
     cache
-      ? { source: cache.source, etag: cache.etag, save: false }
+      ? { source: cache.source, etag: cache.etag, save: false, offline: true }
       : "the control plane is unreachable and no cached policy matches the lock";
   let response: Response;
   try {
@@ -114,15 +118,25 @@ async function pullPolicy(
     return { source: cache.source, etag: cache.etag, save: false };
   if ([408, 429].includes(response.status) || response.status >= 500)
     return offline();
-  if (!response.ok) return `policy fetch returned HTTP ${response.status}`;
+  if (!response.ok)
+    return {
+      refusal:
+        (await policyRefusal(response)) ??
+        `policy fetch returned HTTP ${response.status}`,
+    };
   const payload = await response.text().catch(() => undefined);
   if (payload === undefined) return offline();
+  return readLivePolicy(payload, response.headers.get("etag"));
+}
+
+function readLivePolicy(payload: string, etag: string | null) {
   const parsed = livePolicy.safeParse(readJson(payload));
   if (!parsed.success) return "the control plane returned an invalid policy";
+  if (parsed.data.denial_reason) return { refusal: parsed.data.denial_reason };
   if (!parsed.data.source) return "the live policy has no published source";
   return {
     source: parsed.data.source,
-    etag: entityTag.safeParse(response.headers.get("etag")).data ?? null,
+    etag: entityTag.safeParse(etag).data ?? null,
     save: true,
   };
 }
@@ -132,6 +146,8 @@ export type HookPolicy = {
   digest?: string;
   evidence: RemoteConfig | null;
   watch: boolean;
+  warning?: string;
+  state?: "live" | "cached";
 };
 
 /** Resolve the setup's policy before any call reaches the evaluator. */
@@ -147,14 +163,12 @@ export async function loadHookPolicy(
 
   let token: string;
   try {
-    token = secretValue(settings.credential, env);
-  } catch {
-    return blocked(
-      `${secretName(settings.credential)} isn't set; the connected hook needs its credential`,
-    );
+    token = await hookCredential(settings, env, io.home);
+  } catch (error) {
+    return blocked((error as Error).message);
   }
   const fetcher = io.fetch ?? fetch;
-  const url = settings.url.replace(/\/+$/, "");
+  const url = controlPlaneOrigin(settings.url);
   const evidence = {
     url,
     token,
@@ -162,19 +176,46 @@ export async function loadHookPolicy(
     runtime: true,
     fetch: fetcher,
   };
-  const pin = settings.policy_digest;
-  const scope = hash(`${url}\n${token}\n${settings.workspace_revision}`);
+  const { policy_digest: pin } = settings;
+  const cached = await loadPinnedSource(file, pin, evidence, io.home);
+  if (typeof cached === "string") return blocked(cached);
+  const { source, warning, state } = cached;
+  if (!source) return { digest: pin, evidence, watch, warning, state };
+  const compiled = compilePolicies([{ name: file, text: source.text }]);
+  if (!compiled.ok) return blocked("the verified policy can't be compiled");
+  return {
+    document: compiled.document,
+    digest: pin,
+    evidence,
+    watch,
+    warning,
+    state,
+  };
+}
+
+const matchesPin = (source: Source, pin: string) =>
+  source.digest === pin && hash(source.text) === pin;
+
+async function loadPinnedSource(
+  file: string,
+  pin: string,
+  evidence: RemoteConfig,
+  home = homedir(),
+) {
+  const { url, token, workspaceRevision } = evidence;
+  const scope = hash(`${url}\n${token}\n${workspaceRevision}`);
   // Policy refreshes cannot change the work revision that evidence covers.
-  const folder = spoolFolder(io.home ?? homedir(), file, "policies");
+  const folder = spoolFolder(home, file, "policies");
   const cacheFile = join(folder, "live.json");
   const cache = await readCache(cacheFile, scope, pin, token);
-  const pulled = await pullPolicy(evidence, cache, fetcher);
-  if (typeof pulled === "string") return blocked(pulled);
-  if (pulled.source.digest !== pin || hash(pulled.source.text) !== pin)
-    return blocked("the live policy digest doesn't match the lock");
-  const compiled = compilePolicies([{ name: file, text: pulled.source.text }]);
-  if (!compiled.ok) return blocked("the verified policy can't be compiled");
-  if (pulled.save)
+  const pulled = await pullPolicy(evidence, cache, evidence.fetch ?? fetch);
+  if (typeof pulled !== "string" && "refusal" in pulled) return pulled.refusal;
+  const matches = typeof pulled !== "string" && matchesPin(pulled.source, pin);
+  const source = matches ? pulled.source : cache?.source;
+  const warning = matches
+    ? undefined
+    : `Nodrail: using locked policy ${pin}; ${typeof pulled === "string" ? pulled : "live policy differs from the lock"}. Run nodrail plan to review rollout.\n`;
+  if (matches && pulled.save)
     await saveCache(cacheFile, {
       scope,
       etag: pulled.etag,
@@ -183,5 +224,6 @@ export async function loadHookPolicy(
         : undefined,
       source: pulled.source,
     });
-  return { document: compiled.document, digest: pin, evidence, watch };
+  const state = matches && !pulled.offline ? "live" : "cached";
+  return { source, warning, state } as const;
 }

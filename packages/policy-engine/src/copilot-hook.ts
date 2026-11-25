@@ -144,6 +144,9 @@ export function copilotEvents(
     toolArgs?: unknown;
     sessionId?: unknown;
     toolCallId?: unknown;
+    agentId?: unknown;
+    agentType?: unknown;
+    agentName?: unknown;
   };
   try {
     event = JSON.parse(stdin) as typeof event;
@@ -159,6 +162,8 @@ export function copilotEvents(
     hook_event_name: "PreToolUse",
     cwd,
     session_id: event.sessionId,
+    agent_id: event.agentId,
+    agent_type: event.agentType ?? event.agentName,
     tool_use_id: event.toolCallId,
   };
   const as = (translated: Translated) =>
@@ -271,6 +276,8 @@ export function copilotFromClaude(stdin: string) {
       sessionId: event.session_id,
       cwd: event.cwd,
       toolCallId: event.tool_use_id,
+      agentId: event.agent_id,
+      agentType: event.agent_type,
       toolName: event.tool_name,
       toolArgs: event.tool_input,
     });
@@ -330,6 +337,8 @@ export function copilotSettleEvent(stdin: string): string | null {
     hook_event_name:
       result.resultType === "success" ? "PostToolUse" : "PostToolUseFailure",
     session_id: said.sessionId,
+    agent_id: said.agentId,
+    agent_type: said.agentType ?? said.agentName,
     cwd: said.cwd,
     tool_use_id: said.toolCallId,
     tool_name: text(said.toolName),

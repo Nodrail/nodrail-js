@@ -5,24 +5,14 @@ import { receiptBlock } from "./receipt-block.ts";
 import { headerNaming, readHeaderBlock } from "./shapes/receipt-header.ts";
 
 export { agentName } from "./names.ts";
+export { callerCandidate, resolveHookCaller } from "./hook-caller.ts";
 export { MAX_RECEIPT_TEXT, receiptBlock } from "./receipt-block.ts";
 export { ledgerDirectory, nodrailDirectory, runKey } from "./run-key.ts";
 
 /** The tool a Claude Code subagent ends with in `auto` permission mode. */
 export const HANDBACK_TOOL = "SubagentHandback";
 
-/**
- * How a hand-back is named to the rules: `claude-code subagenthandback`.
- * It delivers the subagent's final report to its caller, as a stop does,
- * and acts on nothing else, so when no rule covers it it goes ahead: a rule
- * may still deny it or send it to a person, and a receipt contract refuses
- * an invalid receipt. Blocking it by default would strand every subagent
- * that ends this way.
- */
-export const HANDBACK_ACTION = {
-  tool: "claude-code",
-  operation: "subagenthandback",
-} as const;
+export { HANDBACK_ACTION } from "./protocol.ts";
 
 /**
  * The receipt that ends a message, as written, for a hook that sends it on
@@ -38,3 +28,5 @@ export function receiptText(message: string, agent: string): string | null {
   if (fenced !== null) return fenced;
   return readHeaderBlock(message, headerNaming(agent))?.text ?? null;
 }
+
+export { deferToAppliedHook } from "./applied-hook.ts";

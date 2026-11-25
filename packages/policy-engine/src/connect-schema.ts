@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { canonicalOrigin } from "./control-plane-origin.ts";
 import { secretRef } from "./connections.ts";
 
 /**
@@ -18,23 +19,24 @@ const slug = z
 
 /** Nodrail's address: https, or http to localhost only. */
 export const controlPlaneUrl = z
-  .url({ protocol: /^https?$/ })
+  .string()
   .max(2000)
-  .refine(
-    (url) =>
-      url.startsWith("https://") ||
-      /^http:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?(\/|$)/.test(url),
-    "Use https, or http only to localhost: the credential travels with each call",
-  );
+  .superRefine((value, context) => {
+    try {
+      canonicalOrigin(value);
+    } catch (error) {
+      context.addIssue({ code: "custom", message: (error as Error).message });
+    }
+  });
 
 export const connectField = z
   .object({
     /** Nodrail's address; Cloud when left out. */
     url: controlPlaneUrl.optional(),
     /** The workspace's slug. */
-    workspace: slug,
+    workspace: slug.optional(),
     /** The environment's slug, such as development or production. */
-    environment: slug,
+    environment: slug.optional(),
     /**
      * The policy source for the host engine: `cloud` fetches the locked
      * policy and reports decisions; `local` uses the repository policy.
@@ -44,11 +46,17 @@ export const connectField = z
     enforce: z.enum(["on", "watch"]).default("on"),
     /** The agent credential (`ndr_…`), by reference; never written anywhere. */
     credential: secretRef.optional(),
+    /** Include the redacted descriptor and policy explanation in decision reports. */
+    report_arguments: z.boolean().optional(),
   })
   .strict()
-  .refine((connect) => connect.decide !== "cloud" || connect.credential, {
+  .refine((connect) => connect.decide !== "cloud" || connect.workspace, {
+    message: "decide: cloud needs the workspace slug from your Nodrail console",
+    path: ["workspace"],
+  })
+  .refine((connect) => connect.decide !== "cloud" || connect.environment, {
     message:
-      "decide: cloud needs a credential, such as { fromEnv: NODRAIL_CREDENTIAL }",
-    path: ["credential"],
+      "decide: cloud needs the environment slug from your Nodrail console",
+    path: ["environment"],
   });
 export type Connect = z.infer<typeof connectField>;

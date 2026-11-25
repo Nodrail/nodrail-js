@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { resolve } from "node:path";
 import type { Command } from "../context.ts";
+import { sendHostObservation } from "../setup/host-observation.ts";
 import { UsageError } from "../io.ts";
 import {
   hostStatuses,
@@ -48,6 +49,7 @@ export async function observe(command: Command) {
       ...(io.self ?? [process.argv[1] ?? ""]),
       "policy",
     ]);
+    await sendHostObservation(io, root, record);
   } catch {
     // Observing never fails a session: the next start tries again.
   }

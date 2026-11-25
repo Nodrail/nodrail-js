@@ -23,13 +23,17 @@ import {
   decisionDestination,
   decisionFolder,
 } from "../src/decision-destination";
+import { deny } from "../src/actions";
 import { sendDecisionQueue } from "../src/decision-sender";
 import type { Observed } from "../src/hook-telemetry";
 import { compilePolicies } from "../src/yaml";
 import { enqueue, readStatus } from "../src/telemetry";
 import { cli, homeAt, self } from "./run-cli.ts";
 
-const env = { NODRAIL_CREDENTIAL: "ndr_000000000000_secret" };
+const env = {
+  NODRAIL_CREDENTIAL: "ndr_000000000000_secret",
+  NODRAIL_URL: "http://127.0.0.1:9",
+};
 
 const folderFor = (home: string, file: string) =>
   decisionFolder(home, file, decisionDestination(file, env).binding);
@@ -136,6 +140,61 @@ describe("what the hook queues", () => {
     expect(outcomeOf(pre("t"), "claude-code")).toBeNull();
   });
 
+  test.each([undefined, "2", -1, 1.5, Infinity])(
+    "Copilot keeps the base idempotency key for an invalid part index %s",
+    (index) => {
+      const base = callKey("copilot", { tool_use_id: "call" });
+      expect(
+        callKey("copilot", { nodrail_call_part: { id: "call", index } }),
+      ).toBe(base);
+      expect(
+        callKey("copilot", { nodrail_call_part: { id: "call", index: 0 } }),
+      ).toBe(`${base}#0`);
+    },
+  );
+
+  test.each([
+    ["echo nodrail-check-0123456789abcdef", "nodrail-check-0123456789abcdef"],
+    ["echo nodrail-check-0123456789abcdef\n", undefined],
+    ["echo nodrail-check-0123456789abcdef && pwd", undefined],
+    [null, undefined],
+  ])("only reports an exact project check command (%s)", (command, token) => {
+    const observed: Observed = {
+      judged: {
+        result: deny("paused"),
+        action: {
+          tool: "shell",
+          operation: "command.run",
+          resource: { kind: "command", id: "echo" },
+          params: { command: "private arguments" },
+        },
+        decision: null,
+        refusal: "paused",
+      },
+      event: { tool_input: { command } },
+      pausedAgents: ["worker"],
+      admission: { id: "receipt", call: "host:call" },
+      agent: "worker",
+      run: "run",
+    };
+    const item = decisionItem(observed, {
+      host: "claude-code",
+      document: compiled(),
+      includeArguments: true,
+      policyDigest: null,
+    });
+    expect(item?.check_token).toBe(token);
+    expect(item).toMatchObject({
+      idempotency_key: "host:call",
+      admission_id: "receipt",
+      paused_agents: ["worker"],
+      run: { key: "run" },
+      params: {},
+      resource: { id: "redacted" },
+    });
+    expect(JSON.stringify(item)).not.toContain("private arguments");
+  });
+
   test("a decision names the action, what the host was told, the rule and the policy", () => {
     const document = compiled();
     const observed: Observed = {
@@ -153,6 +212,7 @@ describe("what the hook queues", () => {
       host: "claude-code",
       document,
       policyDigest: "c".repeat(64),
+      includeArguments: true,
       now: new Date("2026-11-22T10:00:00Z"),
     });
     expect(item).toEqual({
@@ -161,6 +221,7 @@ describe("what the hook queues", () => {
       operation: "file.write",
       resource: { kind: "file", id: "src/a.ts" },
       params: {},
+      agent: "dev",
       verdict: "allow",
       rule: { id: document.rules[0]!.id, name: "Edit sources" },
       reason: "Allowed.",
@@ -177,12 +238,41 @@ describe("what the hook queues", () => {
     ).toBeNull();
   });
 
+  test("records a watch deny without resource identifiers, arguments or explanations", () => {
+    const observed: Observed = {
+      judged: {
+        ...allowedWrite("private/a.ts", { query: "private term" }, null),
+        refusal: "private term was refused",
+        result: deny("private term was refused"),
+      },
+      watch: true,
+      event: null,
+      agent: "support",
+      run: null,
+      step: null,
+    };
+    const item = decisionItem(observed, {
+      host: "claude-code",
+      document: compiled(),
+      policyDigest: null,
+    });
+    expect(item).toMatchObject({
+      agent: "support",
+      verdict: "would_deny",
+      resource: { id: "redacted" },
+      params: {},
+    });
+    expect(JSON.stringify(item)).not.toContain("private");
+    expect(item).not.toHaveProperty("reason");
+  });
+
   test("the hook's answer is the same with and without the sink, and never waits", async () => {
     const { rules, file } = project();
     const home = fresh("nodrail-home-");
     const restore = homeAt(home);
     const previous = process.env.NODRAIL_CREDENTIAL;
     process.env.NODRAIL_CREDENTIAL = env.NODRAIL_CREDENTIAL;
+    process.env.NODRAIL_URL = env.NODRAIL_URL;
     try {
       const without = await cli(["hook", rules], pre("toolu_1"));
       const started = Date.now();
@@ -226,11 +316,12 @@ describe("what the hook queues", () => {
       restore();
       if (previous === undefined) delete process.env.NODRAIL_CREDENTIAL;
       else process.env.NODRAIL_CREDENTIAL = previous;
+      delete process.env.NODRAIL_URL;
     }
   });
 
   test("sends a recorded step and its receipt before the decisions that follow", async () => {
-    const { file, dir } = project("https://nodrail.example");
+    const { file, dir } = project();
     const folder = folderFor(dir, file);
     mkdirSync(folder, { recursive: true });
     writeFileSync(join(folder, "sending"), "1");
@@ -272,6 +363,7 @@ describe("what the hook queues", () => {
     expect(plane.seen[0]!.body).toEqual({
       run: { key: "run-1" },
       step: { id: "s1", agent: "qa" },
+      agent: "qa",
       event: "finished",
       via: "stop",
       receipt: { text: receipt },
@@ -295,6 +387,7 @@ describe("what the hook queues", () => {
     const sink = decisionSink({
       file,
       env,
+      includeArguments: true,
       host: "claude-code",
       document,
       self: ["/nonexistent"],
@@ -351,7 +444,7 @@ function controlPlane(options: { failFirst?: number; refuse?: string[] } = {}) {
 }
 
 function queueFolder(entries: object[]) {
-  const { dir, file } = project("https://nodrail.example");
+  const { dir, file } = project();
   const folder = folderFor(dir, file);
   for (const entry of entries) enqueue(folder, entry);
   return { folder, file };
@@ -517,12 +610,14 @@ describe("the sender", () => {
       );
       const currentEnv = Object.keys(changed).length
         ? env
-        : { NODRAIL_CREDENTIAL: "new-token" };
+        : { ...env, NODRAIL_CREDENTIAL: "new-token" };
       await sendDecisionQueue(folder, file, currentEnv, plane.send);
       expect(plane.seen).toHaveLength(1);
       expect(queued(folder)).toHaveLength(3);
       expect(readStatus(folder)?.error).toContain(
-        "another or unbound destination",
+        "url" in changed
+          ? "Pair NODRAIL_URL"
+          : "another or unbound destination",
       );
     },
   );
@@ -578,7 +673,12 @@ describe("the sender", () => {
 
   test("a credential that isn't set degrades sending and keeps the queue", async () => {
     const { folder, file } = queueFolder([item("k:1")]);
-    await sendDecisionQueue(folder, file, {}, controlPlane().send);
+    await sendDecisionQueue(
+      folder,
+      file,
+      { NODRAIL_URL: env.NODRAIL_URL },
+      controlPlane().send,
+    );
     expect(readStatus(folder)).toMatchObject({
       state: "degraded",
       error: "NODRAIL_CREDENTIAL isn't set",
@@ -634,6 +734,7 @@ describe("end to end, detached", () => {
     const home = fresh("nodrail-home-");
     const restore = homeAt(home);
     process.env.NODRAIL_CREDENTIAL = "ndr_000000000000_secret";
+    process.env.NODRAIL_URL = url;
     try {
       const result = await cli(
         ["hook", rules, "--report", file],
@@ -643,8 +744,13 @@ describe("end to end, detached", () => {
     } finally {
       restore();
       delete process.env.NODRAIL_CREDENTIAL;
+      delete process.env.NODRAIL_URL;
     }
-    for (let wait = 0; wait < 100 && got.length === 0; wait++)
+    // The sender is a detached process: on a busy Windows runner it can take
+    // well over ten seconds to start, so wait until shortly before the
+    // test's own deadline rather than a fixed count.
+    const deadline = Date.now() + 25_000;
+    while (got.length === 0 && Date.now() < deadline)
       await new Promise((done) => setTimeout(done, 100));
     expect(got[0]).toMatchObject({
       url: "/api/v1/runtime/decisions",
@@ -652,5 +758,5 @@ describe("end to end, detached", () => {
       body: { decisions: [{ verdict: "allow", tool: "files" }] },
     });
     expect(existsSync(self[2]!)).toBe(true);
-  }, 20_000);
+  }, 30_000);
 });

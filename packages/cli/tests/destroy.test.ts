@@ -48,6 +48,8 @@ describe("nodrail destroy", () => {
       /! \.claude\/agents\/publisher\.md\s+edited since nodrail wrote it: kept, yours now/,
     );
     expect(out).toMatch(/~ \.claude\/settings\.json/);
+    expect(out).toContain("Restart open sessions");
+    expect(out).toContain("published to the control plane stays live");
     expect(out).toContain(
       "Kept: nodrail.yaml, nodrail.lock.yaml and the files they name.",
     );

@@ -58,25 +58,42 @@ It decides; it doesn't enforce. A hook or your own code has to act on the answer
 
 ## Documentation
 
-| Guide                                            |                                                |
-| ------------------------------------------------ | ---------------------------------------------- |
-| [Write and test rules locally](docs/getting-started.md) | Write rules and connect Claude Code |
-| [Rules](docs/rules.md)                           | Everything a rule file can contain             |
-| [Runs, gates and budgets (preview)](docs/runs.md)          | Rules about what already happened in a run     |
-| [Commands and tools](docs/commands-and-tools.md) | How each kind of call is described and matched |
-| [CLI reference (nodrail-policy)](docs/cli.md)    | Every `nodrail-policy` command                 |
-| [CLI reference (nodrail)](https://nodrail.com/docs/cli) | `nodrail`: projects, plan and apply, the control plane|
-| [Integrate your own harness](docs/library.md)    | Use the engine from TypeScript                 |
-| [Security model](docs/security-model.md)         | What is and isn't guaranteed                   |
+| Guide                                                   |                                                        |
+| ------------------------------------------------------- | ------------------------------------------------------ |
+| [Write and test rules locally](docs/getting-started.md) | Write rules and connect Claude Code                    |
+| [Rules](docs/rules.md)                                  | Everything a rule file can contain                     |
+| [Runs, gates and budgets (preview)](docs/runs.md)       | Rules about what already happened in a run             |
+| [Commands and tools](docs/commands-and-tools.md)        | How each kind of call is described and matched         |
+| [CLI reference (nodrail-policy)](docs/cli.md)           | Every `nodrail-policy` command                         |
+| [CLI reference (nodrail)](https://nodrail.com/docs/cli) | `nodrail`: projects, plan and apply, the control plane |
+| [Integrate your own harness](docs/library.md)           | Use the engine from TypeScript                         |
+| [Security model](docs/security-model.md)                | What is and isn't guaranteed                           |
 
 ## Nodrail
 
 This engine is the open-source core of [Nodrail](https://nodrail.com). `nodrail apply` installs it as a hook on each agent host (Claude Code, Codex, Copilot), where it decides every call locally. The Nodrail control plane, self-hosted or Nodrail Cloud, adds the published policy, runs, receipts, shared budgets and evidence for a team. You don't need a control plane to use the engine.
 
+For a connected project, `nodrail apply` enrolls the machine and saves its
+runtime credential for the project and environment at the selected server.
+For a local project, `connect: { decide: local }` uses the repository rules.
+
+The hook validates and canonicalizes the origin before looking up the machine
+credential. If the environment's policy moves to a different project, the
+hook reports the new owner and denies the call in enforcement mode.
+
 ## Contributing
 
 See [CONTRIBUTING.md](https://github.com/Nodrail/nodrail-js/blob/main/CONTRIBUTING.md). Please report vulnerabilities privately, as described in [SECURITY.md](SECURITY.md).
 
+The engine suite runs Windows, macOS and Linux secret-store paths on every
+host with injected OS operations, alongside the native tests.
+
 ## License
 
 [Apache-2.0](https://github.com/Nodrail/nodrail-js/blob/main/LICENSE)
+
+## Connected hooks
+
+Connected hooks prefer caller metadata supplied by the host, then the configured entry agent. The control plane admits active declared agents for the enrolled project and uses the enrolled host identity for an undeclared caller. When another project takes over the environment, the old project's hook blocks and names the new owner.
+
+A connected hook reads the machine credential that `nodrail apply` stored for its control-plane origin, workspace, environment and project. For an explicit environment credential, set `NODRAIL_URL` to the issuing origin. Each covered call needs a fresh access response, including in watch mode. The hook includes the server’s admission ID in its decision report. The server uses this evidence and the current access epoch to verify the report. Missing or expired evidence leaves reports visible in unverified history. On Windows, run the hook under the same account that enrolled the machine so it can open the DPAPI-protected credential. On publish skew the hook keeps evaluating verified policy from its own lock. Decision reports contain caller and tool metadata, verdict, rule, policy digest and run references. Set `connect.report_arguments: true` to include redacted arguments and explanations.

@@ -1,8 +1,8 @@
 # A support desk: marketing writes from the public handbook and hands
 # internal questions to support. The same file sets it up on Claude Code
-# or Codex: nodrail plan . --runtime claude-code (or codex).
+# Codex or Copilot: nodrail plan . --runtime claude-code (or codex or copilot).
 kind: nodrail.project/v1
-runtimes: [claude-code, codex]
+runtimes: [claude-code, codex, copilot]
 resources: ./resources
 imports:
   - "@nodrail/read-only"

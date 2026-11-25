@@ -14,7 +14,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
-import { afterAll, beforeAll, describe, expect, test } from "vitest";
+import { afterAll, beforeAll, describe, expect, test, vi } from "vitest";
 import { encodeSpans, type SpanRecord } from "../src/otlp";
 import {
   decisionSpan,
@@ -539,6 +539,49 @@ describe("secret references", () => {
     expect(secretValue(ref, { OTLP_TOKEN: "v" })).toBe("v");
     expect(() => secretValue(ref, {})).toThrow("OTLP_TOKEN isn't set");
   });
+
+  test("macOS probes the Keychain and retrieves a value without its trailing newline", () => {
+    const ref = { fromKeychain: { service: "nodrail", account: "operator" } };
+    const execute = vi.fn(() => "fixture-value\n");
+    const keychain = { platform: "darwin", execute } as const;
+    expect(hasSecret(ref, {}, keychain)).toBe(true);
+    expect(secretValue(ref, {}, 250, keychain)).toBe("fixture-value");
+    const args = ["find-generic-password", "-s", "nodrail", "-a", "operator"];
+    expect(execute).toHaveBeenNthCalledWith(
+      1,
+      "/usr/bin/security",
+      args,
+      expect.objectContaining({ stdio: "ignore" }),
+    );
+    expect(execute).toHaveBeenNthCalledWith(
+      2,
+      "/usr/bin/security",
+      [...args, "-w"],
+      expect.objectContaining({ timeout: 250 }),
+    );
+    execute.mockImplementation(() => {
+      throw new Error("missing");
+    });
+    expect(
+      hasSecret({ fromKeychain: { service: "nodrail" } }, {}, keychain),
+    ).toBe(false);
+    expect(() => secretValue(ref, {}, undefined, keychain)).toThrow(
+      "Keychain nodrail/operator isn't in the Keychain",
+    );
+  });
+
+  test.each(["linux", "win32"] as const)(
+    "Keychain references on %s never spawn security",
+    (platform) => {
+      const ref = { fromKeychain: { service: "nodrail" } };
+      const execute = vi.fn();
+      expect(hasSecret(ref, {}, { platform, execute })).toBe(false);
+      expect(() =>
+        secretValue(ref, {}, undefined, { platform, execute }),
+      ).toThrow("Keychain references work on macOS only");
+      expect(execute).not.toHaveBeenCalled();
+    },
+  );
 
   test("from the Keychain: named by service and account; absent is an error naming it", () => {
     const ref = {

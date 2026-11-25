@@ -49,7 +49,7 @@ A gate matches exactly as a rule with the same fields would: `tool`, `operation`
   - `agent`: the step that must have finished.
   - `verdict`: one verdict or a list. Any of them meets it.
   - `since` (optional): an agent, a list of agents, or `{ list: <name> }`. The step must have started and finished after the latest work: anything these agents did (started, acted or finished), and any [change](#what-counts-as-a-change) by another agent than the one required. Without `since`, any time in the run counts.
-- `otherwise` (optional): `deny`, the only value and the default, applied while a requirement is unmet. `otherwise: require_approval` was removed; a file that still has it fails to compile and says to write `deny` or leave it out.
+- `otherwise` (optional): `deny`, the only value and the default, applied while a requirement is unmet.
 
 What a gate does:
 
@@ -288,7 +288,7 @@ That is not enough against an agent set on it. `repo-work` lets the agent write 
 ```sh
 nodrail-policy runs                 # every run: steps, events, last activity
 nodrail-policy runs show feature/x  # one run, step by step; allowed actions counted
-nodrail-policy runs report          # per agent: steps, verdicts, held actions
+nodrail-policy runs report          # per agent: steps, verdicts, denied actions
 ```
 
 ### Testing gates

@@ -37,7 +37,6 @@ A rules file is a YAML list of `rule`, `list` and `macro` entries, plus `gate` a
 
 A rule only allows or denies. Every matching rule counts, in any order, and deny beats allow. If no rule matches, the outcome is `none`, and whatever calls the engine must treat that as blocked. Nothing waits for a person: a denied call comes back to the agent with its reason, so it can change course or, for a [gate or budget](runs.md), meet what is missing and try again. Irreversible actions, such as deploying to production, merging to main or deleting data, are for people to do themselves; write rules that deny them to agents.
 
-`effect: require_approval` was removed. A file that still uses it fails to compile and says what to write instead: `deny`, with a gate, budget or evidence requirement to say when the call is allowed.
 
 ## Rule fields
 

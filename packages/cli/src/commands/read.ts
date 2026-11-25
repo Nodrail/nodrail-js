@@ -1,7 +1,9 @@
 import type { Query } from "../api.ts";
 import type { Command, Values } from "../context.ts";
 import { activityTable, runsTable, table } from "../format.ts";
+import { CliError, UsageError } from "../io.ts";
 import { noArgs, requireArg } from "./auth.ts";
+import { z } from "zod";
 
 const filtersOf = (values: Values, names: (keyof Values)[]): Query =>
   Object.fromEntries(
@@ -76,7 +78,7 @@ export async function run(command: Command) {
   command.print(found, () =>
     [
       `Run ${found.key} (${found.id}) · ${found.status}`,
-      `${found.steps} steps, ${found.actions} actions, ${found.held} held, ${found.waiting} waiting`,
+      `${found.steps} steps, ${found.actions} actions`,
       "",
       table(
         (found.timeline as TimelineEntry[]).map((entry) => [
@@ -89,24 +91,36 @@ export async function run(command: Command) {
   );
 }
 
-type Insights = {
-  days: number;
-  decisions: {
-    actions: number;
-    allowed: number;
-    denied: number;
-    no_rule: number;
-  };
-};
+const insightDays = z.enum(["7", "30", "90"]);
+const count = z.number().int().nonnegative();
+const insightCounts = z.object({
+  days: count.positive(),
+  decisions: z.object({
+    actions: count,
+    allowed: count,
+    denied: count,
+    no_rule: count,
+  }),
+});
+
+export function parseInsightDays({ days: value }: Values) {
+  const days = insightDays.optional().safeParse(value);
+  if (!days.success) throw new UsageError("Use --days 7, 30 or 90.");
+  return days.data === undefined ? undefined : Number(days.data);
+}
 
 export async function insights(command: Command) {
-  noArgs(command);
-  const days = command.values.days ? Number(command.values.days) : undefined;
-  const data = (await (await command.api()).insights(days)) as Insights;
+  const days = parseInsightDays(command.values);
+  const data = await (await command.api()).insights(days);
+  const summary = insightCounts.safeParse(data);
+  if (!summary.success)
+    throw new CliError(
+      "The control plane returned an unrecognized Insights response.",
+    );
   command.print(data, () => {
-    const d = data.decisions;
+    const d = summary.data.decisions;
     return [
-      `Last ${data.days} days`,
+      `Last ${summary.data.days} days`,
       `Actions ${d.actions}: ${d.allowed} allowed, ${d.denied} denied (${d.no_rule} because no rule covered them).`,
     ].join("\n");
   });

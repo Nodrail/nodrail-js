@@ -1,5 +1,6 @@
 import { isDeepStrictEqual } from "node:util";
 import {
+  catalogRuleMarker,
   compilePolicies,
   renderPolicies,
   type PolicySource,
@@ -35,12 +36,18 @@ export function effectivePolicy(sources: PolicySource[]) {
         .map((issue) => `  ${issue.file}:${issue.line}: ${issue.message}`)
         .join("\n")}`,
     );
+  const catalog = separate.rules.filter(({ source }) =>
+    source.file.startsWith("@"),
+  );
   // Rendered only when joining changed the meaning: the engine can't
   // render every document back (a version 4 one, yet), and joining is how
   // most policies are written anyway.
   for (const text of [
     () => joined(sources),
-    () => HEADER + renderPolicies(separate.document),
+    () =>
+      HEADER +
+      catalogRuleMarker(catalog.map(({ id }) => id)) +
+      renderPolicies(separate.document),
   ]) {
     let written: string;
     try {
@@ -50,7 +57,11 @@ export function effectivePolicy(sources: PolicySource[]) {
     }
     const one = compiled("effective.yaml", written);
     if (one.ok && isDeepStrictEqual(one.document, separate.document))
-      return { text: written, document: separate.document };
+      return {
+        text: written,
+        document: separate.document,
+        catalogRules: new Set(catalog.map(({ name }) => name)),
+      };
   }
   throw new CliError(
     "The policy can't be written as one file that means the same",

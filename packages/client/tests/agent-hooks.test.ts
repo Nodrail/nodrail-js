@@ -1,7 +1,7 @@
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import { resolveConnection } from "../src/connection";
 import { isSafeUrl } from "../src/index";
 import { describeToolCall, HOOK_VERSION, runHook } from "../src/hooks";
@@ -21,7 +21,11 @@ const event = (tool_name: string, tool_input: object) =>
     cwd: work,
   });
 
-const env = { NODRAIL_CREDENTIAL: "c", NODRAIL_WAIT_SECONDS: "0" };
+const env = {
+  NODRAIL_URL: "https://app.nodrail.com",
+  NODRAIL_CREDENTIAL: "c",
+  NODRAIL_WAIT_SECONDS: "0",
+};
 const reasonOf = (stdout: string) =>
   (
     JSON.parse(stdout) as {
@@ -228,37 +232,81 @@ describe("finding the connection", () => {
     return home;
   };
 
-  test("needs only a credential, and defaults to the hosted service", () => {
-    expect(resolveConnection({ NODRAIL_CREDENTIAL: "c" })).toEqual({
-      url: "https://app.nodrail.com",
-      credential: "c",
-    });
-  });
-
-  test("reads the Claude Code plugin's settings", () => {
+  test("reads complete plugin settings and canonicalizes their origin", () => {
     expect(
       resolveConnection({
         CLAUDE_PLUGIN_OPTION_CREDENTIAL: "plugin",
-        CLAUDE_PLUGIN_OPTION_URL: "http://self-hosted",
+        CLAUDE_PLUGIN_OPTION_URL: "HTTPS://Self-Hosted.Example:443/",
       }),
-    ).toEqual({ url: "http://self-hosted", credential: "plugin" });
+    ).toEqual({ url: "https://self-hosted.example", credential: "plugin" });
   });
 
-  test("reads the saved file", () => {
+  test("accepts the same complete pair in the environment and plugin settings", () => {
+    expect(
+      resolveConnection({
+        NODRAIL_URL: "https://nodrail.test",
+        NODRAIL_CREDENTIAL: "match",
+        CLAUDE_PLUGIN_OPTION_URL: "https://NODRAIL.test:443/",
+        CLAUDE_PLUGIN_OPTION_CREDENTIAL: "match",
+      }),
+    ).toEqual({ url: "https://nodrail.test", credential: "match" });
+  });
+
+  test("configuration errors surface at session start without requests or reports", async () => {
+    const fetch = vi.fn<typeof globalThis.fetch>();
+    const environment = { NODRAIL_CREDENTIAL: "unpaired" };
+    const run = (name: string) =>
+      runHook(JSON.stringify({ hook_event_name: name }), environment, {
+        fetch,
+      });
+    expect((await run("SessionStart")).stdout).toContain(
+      "Pair NODRAIL_URL with NODRAIL_CREDENTIAL",
+    );
+    expect((await run("PostToolUse")).stdout).toBe("");
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  test("reads the saved Cloud credential", () => {
     expect(resolveConnection({ NODRAIL_HOME: saved() }).credential).toBe(
       "from-file",
     );
   });
 
-  test("the nearest setting wins", () => {
-    expect(
-      resolveConnection({
-        NODRAIL_HOME: saved(),
-        NODRAIL_CREDENTIAL: "env",
-        CLAUDE_PLUGIN_OPTION_CREDENTIAL: "plugin",
-      }).credential,
-    ).toBe("env");
-  });
+  test.each([
+    { NODRAIL_CREDENTIAL: "env" },
+    { NODRAIL_URL: "https://self-hosted.example" },
+    {
+      NODRAIL_URL: "https://self-hosted.example",
+      CLAUDE_PLUGIN_OPTION_CREDENTIAL: "plugin",
+    },
+    {
+      NODRAIL_URL: "https://self-hosted.example",
+      NODRAIL_CREDENTIAL: "env",
+      CLAUDE_PLUGIN_OPTION_URL: "https://plugin.example",
+      CLAUDE_PLUGIN_OPTION_CREDENTIAL: "plugin",
+    },
+  ])(
+    "blocks incomplete and conflicting pairs before sending a credential",
+    async (settings) => {
+      const environment = { NODRAIL_HOME: saved(), ...settings };
+      expect(resolveConnection(environment)).toMatchObject({
+        credential: null,
+      });
+      const fetch = vi.fn<typeof globalThis.fetch>();
+      const result = await runHook(
+        event("Bash", { command: "ls" }),
+        environment,
+        { fetch },
+      );
+      expect(reasonOf(result.stdout)).toContain(
+        "Pair NODRAIL_URL with NODRAIL_CREDENTIAL",
+      );
+      expect(reasonOf(result.stdout)).toContain(
+        "CLAUDE_PLUGIN_OPTION_URL with CLAUDE_PLUGIN_OPTION_CREDENTIAL",
+      );
+      expect(fetch).not.toHaveBeenCalled();
+    },
+  );
 
   test("nothing configured means no credential", () => {
     expect(resolveConnection({ NODRAIL_HOME: "/nonexistent" }).credential).toBe(

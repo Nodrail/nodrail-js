@@ -39,15 +39,18 @@ export const loadChecker = (): Promise<Chunk> => {
 };
 
 /** The contracts file: the host's project folder, else the nearest above `cwd`. */
-export function findContractsFile(cwd: string, env: Environment) {
+export const findContractsFile = (cwd: string, env: Environment) =>
+  findProjectFile(cwd, env, CONTRACTS_FILE);
+
+export function findProjectFile(cwd: string, env: Environment, name: string) {
   const project = env.CLAUDE_PROJECT_DIR?.trim();
   if (project) {
-    const file = join(resolve(project), CONTRACTS_FILE);
+    const file = join(resolve(project), name);
     return existsSync(file) ? file : null;
   }
   let folder = resolve(cwd);
   for (let depth = 0; depth < MAX_DEPTH; depth += 1) {
-    const file = join(folder, CONTRACTS_FILE);
+    const file = join(folder, name);
     if (existsSync(file)) return file;
     const parent = dirname(folder);
     if (parent === folder) return null;

@@ -915,10 +915,8 @@ describe("connect: in nodrail.yaml", () => {
     });
   });
 
-  test("local decisions need no credential; Cloud is the default address", () => {
-    const result = connected(
-      "  workspace: acme\n  environment: production\n  decide: local\n  enforce: watch\n",
-    );
+  test("local decisions need no credentials or server coordinates", () => {
+    const result = connected("  decide: local\n  enforce: watch\n");
     expect(about(result)).toEqual([]);
     expect(result.setup.connect).toMatchObject({
       decide: "local",
@@ -927,11 +925,29 @@ describe("connect: in nodrail.yaml", () => {
     expect(result.setup.connect?.url).toBeUndefined();
   });
 
+  test("Cloud uses enrollment when there is no explicit credential", () => {
+    const result = connected(
+      "  workspace: acme\n  environment: development\n  decide: cloud\n",
+    );
+    expect(about(result)).toEqual([]);
+    expect(result.setup.connect).toMatchObject({
+      decide: "cloud",
+      workspace: "acme",
+      environment: "development",
+    });
+    expect(result.setup.connect?.credential).toBeUndefined();
+  });
+
   test.each([
     [
-      "decide: cloud without a credential",
-      "  workspace: acme\n  environment: development\n  decide: cloud\n",
-      /needs a credential/,
+      "cloud without a workspace",
+      "  environment: development\n  decide: cloud\n",
+      /needs the workspace slug/,
+    ],
+    [
+      "an address with embedded sign-in details",
+      "  url: https://name@example.test\n  decide: local\n",
+      /without a path or sign-in details/,
     ],
     [
       "who decides left out",

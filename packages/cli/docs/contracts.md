@@ -46,6 +46,47 @@ apiVersion: nodrail.com/v1alpha1
 kind: Agent
 metadata: { name: reviewer }
 spec: { instructions: ./reviewer.md, receipt: reviewer }
+---
+apiVersion: nodrail.com/v1alpha1
+kind: Team
+metadata: { name: review }
+spec: { entry: reviewer, members: [reviewer] }
+```
+
+Save the following files in the same project.
+
+```markdown
+<!-- resources/reviewer.md -->
+Review the proposed change and record a receipt.
+```
+
+```yaml
+# policies/review.yaml
+- rule: Allow git status
+  command: git status
+  effect: allow
+```
+
+Save this message as `samples/message.md`.
+
+````markdown
+The change is ready to ship.
+
+```nodrail-receipt
+agent: reviewer
+verdict: ship
+issue: ENG-42
+findings: { blocker: 0, major: 1 }
+anchor: fresh
+```
+`````
+
+From the project folder:
+
+```sh
+nodrail policy lock
+nodrail contracts render reviewer
+nodrail contracts validate receipt:reviewer samples/message.md
 ```
 
 An Agent without `spec.receipt` gets the receipt of its own name, if there is one; `plan` shows it as `(by its name)`.
@@ -62,7 +103,7 @@ spec:
     }
 ```
 
-The engine's compiler checks all of it, and the CLI refuses the project on any issue: an unknown key, a missing shape, a receipt without a verdict, a gate waiting for a verdict the receipt can't give (`pass isn't a verdict this receipt can give (verdict-value)`). `evidence:` is read too, with engine level 5: see [evidence.md](evidence.md). Every other contract key (`views:`…) is still refused, with the key named: this release reads none of them. `approvals:` was removed: nothing waits for a person.
+The engine's compiler checks all of it, and the CLI refuses the project on any issue: an unknown key, a missing shape, a receipt without a verdict, a gate waiting for a verdict the receipt can't give (`pass isn't a verdict this receipt can give (verdict-value)`). `evidence:` is read too, with engine level 5: see [evidence.md](evidence.md). Every other contract key (`views:`…) is still refused, with the key named: this release reads none of them.
 
 A connection's operation may name the shape of its arguments and of its result:
 
@@ -220,19 +261,6 @@ valid: samples/message.md against receipt:reviewer (shape reviewer-result, contr
 Read as the hook reads it: verdict ship, 1 finding (0 blocker / 1 major)
 Reported (may leave this machine): {"verdict":"ship","findings":{"blocker":0,"major":1}}
 Withheld: issue, lesson, anchor
-
-$ nodrail contracts validate receipt:reviewer samples/bad.yaml
-invalid: samples/bad.yaml against receipt:reviewer (shape reviewer-result, contract sha256:1b57b28e954d)
-  verdict: enum (expected one of ship, ship-with-debt, fix-first)
-  findings.blocker: type (expected integer)
-  anchor: required
-nodrail: samples/bad.yaml doesn't match receipt:reviewer.
-
-$ nodrail contracts validate receipt:developer samples/legacy.md
-valid: samples/legacy.md against receipt:developer (shape developer-result, contract sha256:7c4a24f88792)
-Read as the hook reads it: verdict done, 2 findings (tests, docs)
-Reported (may leave this machine): {"result":"done"}
-Withheld: categories, branch
 ```
 
 An issue names a path and a reason, never the rejected value. Exit code 1 when the sample doesn't match.
@@ -284,4 +312,4 @@ Contracts, compared with the last committed nodrail.lock.yaml:
 - The hook checks a connection `input` before the rules; the `output` is checked only by the connection Nodrail runs.
 - On the control plane, a `where` on an unreported brief or input field is never met.
 - Evidence is declared once, in nodrail.yaml, like shapes and receipts; a rule file's own `contracts` entry that declares evidence is refused there. Gates read it at engine level 5 ([evidence.md](evidence.md)).
-- Every other contract key (`views:`…) is refused: this engine can't observe them yet. `approvals:` was removed.
+- Every other contract key (`views:`…) is refused: this engine can't observe them yet.

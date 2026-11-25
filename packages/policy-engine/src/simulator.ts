@@ -51,6 +51,8 @@ export type SimulationInput = {
    * budget that covers the action holds it.
    */
   run?: RunContext | null;
+  /** The authenticated hook caller, including calls outside a step. */
+  caller?: string;
   /**
    * The revision the work is at now, as the runtime observes it: read only
    * when a requirement with `subject: revision` needs it. Without one, such
@@ -303,11 +305,14 @@ export function simulate(input: SimulationInput): SimulationResult {
   const budgets =
     document.version === 1
       ? []
-      : document.budgets.flatMap((budget) => budgetState(budget, run) ?? []);
+      : document.budgets.flatMap(
+          (budget) => budgetState(budget, run, input.caller) ?? [],
+        );
   const limits = limitsOf(document).flatMap(
     (budget) =>
       limitState(budget, {
         run,
+        caller: input.caller,
         call: {
           tool: descriptor.toolKey,
           operation: descriptor.operationKey,

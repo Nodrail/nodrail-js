@@ -27,10 +27,7 @@ const USAGE = `Usage:
       Publish texts as files, one per publication: an effect you can count.`;
 
 /** The tool a connector serves, from its name and flags. */
-export function connectorTools(
-  args: string[],
-  env: Record<string, string | undefined>,
-): Tool[] {
+export function parseConnectorArgs(args: string[]) {
   const [name, ...rest] = args;
   const { values } = parseArgs({
     args: rest,
@@ -44,18 +41,30 @@ export function connectorTools(
   if (name === "http-search" && values.endpoint && !values.folder) {
     if (!/^https?:\/\//.test(values.endpoint))
       throw new Error("--endpoint must be an http or https URL");
-    return [searchTool(httpBackend(values.endpoint, env.SEARCH_TOKEN))];
+    return { name, endpoint: values.endpoint } as const;
   }
   if (name === "files-search" && values.folder && !values.endpoint)
-    return [searchTool(filesBackend(values.folder, values.receipts))];
+    return { name, folder: values.folder, receipts: values.receipts } as const;
   if (
     name === "outbox" &&
     values.folder &&
     !values.endpoint &&
     !values.receipts
   )
-    return [outboxTool(values.folder)];
+    return { name, folder: values.folder } as const;
   throw new Error(USAGE);
+}
+
+export function connectorTools(
+  args: string[],
+  env: Record<string, string | undefined>,
+): Tool[] {
+  const input = parseConnectorArgs(args);
+  if (input.name === "http-search")
+    return [searchTool(httpBackend(input.endpoint, env.SEARCH_TOKEN))];
+  if (input.name === "files-search")
+    return [searchTool(filesBackend(input.folder, input.receipts))];
+  return [outboxTool(input.folder)];
 }
 
 /** Where a mediated connection keeps its call records: project data, never locked. */

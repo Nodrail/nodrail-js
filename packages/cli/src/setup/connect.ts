@@ -1,7 +1,7 @@
 import type { ProjectSetup } from "@nodrail/policy-engine/yaml";
 import { secretName, secretValue } from "@nodrail/policy-engine/command-line";
 import { DEFAULT_URL } from "../api.ts";
-import { normalizeUrl, type Env } from "../config.ts";
+import { normalizeUrl, resolveUrl, type Env } from "../config.ts";
 import { LOCK_FILE } from "../project/lockfile.ts";
 import { VERSION } from "../version.ts";
 import type { Check } from "./plan.ts";
@@ -12,7 +12,7 @@ type Connect = NonNullable<ProjectSetup["connect"]>;
 
 /** The Nodrail `connect:` names: Cloud when it gives no address. */
 export const connectUrl = (connect: Connect) =>
-  normalizeUrl(connect.url ?? DEFAULT_URL);
+  resolveUrl({}, connect.url ?? DEFAULT_URL);
 
 const where = (connect: Connect) =>
   `${connectUrl(connect)}, workspace ${connect.workspace}, environment ${connect.environment}`;
@@ -27,6 +27,7 @@ export const connectRead = (
 export function connectFile(
   connect: Connect | null,
   revision: Revision,
+  projectId?: string,
 ): DesiredFile | null {
   if (!connect) return null;
   const { decide, enforce } = connect;
@@ -39,6 +40,7 @@ export function connectFile(
           workspace: connect.workspace,
           environment: connect.environment,
           credential: connect.credential,
+          project_id: projectId,
           workspace_revision: revision.workspace,
           policy_digest: revision.policy,
           lock: `../${LOCK_FILE}`,
@@ -61,10 +63,12 @@ export function connectNotes(setup: Pick<ProjectSetup, "connect">): string[] {
   if (!connect) return [];
   return [
     connect.decide === "cloud"
-      ? `The host decides using the locked policy pulled from ${where(connect)}. Decisions go to Runs and Activity.`
+      ? `The host decides using the locked policy pulled from ${where(connect)}. See decisions in Activity and grouped runs in Activity → Runs.`
       : "The host decides using repository policy (decide: local).",
     ...(connect.enforce === "watch"
-      ? ["Watch mode records policy decisions and lets the host continue."]
+      ? [
+          "Watch mode records policy decisions and lets ordinary calls continue. Protected setup files are still guarded.",
+        ]
       : []),
   ];
 }
@@ -89,6 +93,13 @@ export async function credentialChecks(
   const name = `credential ${secretName(connect.credential)}`;
   let credential: string;
   try {
+    if (
+      !env.NODRAIL_URL ||
+      normalizeUrl(env.NODRAIL_URL) !== connectUrl(connect)
+    )
+      throw new Error(
+        `Pair NODRAIL_URL with the credential referenced by connect.credential (${name})`,
+      );
     credential = secretValue(connect.credential, env);
   } catch (error) {
     return [
@@ -99,6 +110,16 @@ export async function credentialChecks(
       },
     ];
   }
+  const origin = connectUrl(connect);
+  const trusted = resolveUrl(env);
+  if (origin !== trusted)
+    return [
+      {
+        name,
+        ok: false,
+        detail: `Set NODRAIL_URL=${origin} where you provide this runtime credential to bind it to that control plane.`,
+      },
+    ];
   const answer = await askIdentity(connect, credential, fetcher);
   return [
     "identity" in answer
@@ -115,9 +136,8 @@ async function askIdentity(
 ): Promise<{ identity: Identity } | Omit<Check, "name">> {
   const base = connectUrl(connect);
   const unchecked = (why: string) => ({
-    ok: true,
-    unverified: true,
-    detail: `set, not checked: ${base} ${why}`,
+    ok: false,
+    detail: `${base} ${why}. Check the control plane and run nodrail plan again.`,
   });
   let response: Response;
   try {
@@ -126,8 +146,11 @@ async function askIdentity(
       signal: AbortSignal.timeout(IDENTITY_TIMEOUT_MS),
       redirect: "error",
     });
-  } catch (error) {
-    return unchecked(`didn't answer (${(error as Error).message})`);
+  } catch {
+    return {
+      ok: false,
+      detail: `${base} did not answer. Check the connection and run nodrail plan again.`,
+    };
   }
   if (response.status === 401 || response.status === 403)
     return {
