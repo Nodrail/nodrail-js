@@ -1,8 +1,12 @@
-import { chmodSync, readFileSync, rmSync } from "node:fs";
+import { chmodSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { readdirSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, test } from "vitest";
-import { readHostCredential } from "@nodrail/policy-engine/command-line";
+import {
+  readHostCredential,
+  telemetryId,
+} from "@nodrail/policy-engine/command-line";
+import { z } from "zod";
 import { saveToken } from "../src/config.ts";
 import { appliedEnrollments } from "../src/setup/applied-enrollment.ts";
 import { applySetup } from "../src/setup/apply.ts";
@@ -669,6 +673,46 @@ connect: { url: ${ORIGIN}, workspace: acme, environment: development, decide: cl
     expect((await p.run("plan", "--replace-live", "--details")).out).toContain(
       "- Removed catalog rule",
     );
+  });
+
+  test("connect, plan and apply reuse a legacy machine ID", async () => {
+    const { p, state } = await connected();
+    const file = join(p.home, ".nodrail", "machine-id");
+    const legacy = "1234567890ab0def0fedcba987654321\n";
+    const expected = "12345678-90ab-4def-8fed-cba987654321";
+    mkdirSync(join(p.home, ".nodrail"), { recursive: true });
+    writeFileSync(file, legacy);
+
+    const results = [
+      await p.run(
+        "connect",
+        ORIGIN,
+        "--workspace",
+        "acme",
+        "--environment",
+        "development",
+      ),
+      await p.run("plan"),
+      await p.run("apply", "--yes"),
+    ];
+    for (const result of results) expect(result.code, result.err).toBe(0);
+    expect(z.uuid().parse(state.applies[0]?.machine?.id)).toBe(expected);
+    expect(telemetryId(p.home)).toBe(expected.replaceAll("-", ""));
+    expect(readFileSync(file, "utf8")).toBe(legacy);
+  });
+
+  test("apply reports how to repair a malformed machine ID", async () => {
+    const { p, state } = await connected();
+    const file = join(p.home, ".nodrail", "machine-id");
+    mkdirSync(join(p.home, ".nodrail"), { recursive: true });
+    writeFileSync(file, "damaged");
+
+    const result = await p.run("apply", "--yes");
+    expect(result.code).toBe(1);
+    expect(result.out).toContain("rm ~/.nodrail/machine-id");
+    expect(result.out).toContain("then run `nodrail apply` again");
+    expect(state.applies).toEqual([]);
+    expect(readFileSync(file, "utf8")).toBe("damaged");
   });
 
   test("previews and adopts bootstrap, publishes intentions, then reuses or rotates the machine key", async () => {

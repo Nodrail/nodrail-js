@@ -24,7 +24,12 @@ export { readHookConnection } from "./hook-connection.ts";
 export { hookCredential, controlPlaneOrigin } from "./hook-credential.ts";
 export { sendDecisionQueue } from "./decision-sender.ts";
 export type { SpanRecord } from "./otlp.ts";
-export { machineId } from "./reporting-spans.ts";
+export {
+  enrollmentId,
+  saveMachineId,
+  telemetryId,
+  telemetryId as machineId,
+} from "./machine-id.ts";
 import { caseRun, toRunContext } from "./case-runs.ts";
 import { checkRunsArgs, runsCommand } from "./runs-cli.ts";
 import type { ActionDescriptor } from "./protocol.ts";

@@ -225,4 +225,9 @@ Apache-2.0
 
 ## Connected Inventory
 
+Enrollment and telemetry share `~/.nodrail/machine-id`. Upgrading keeps an
+existing legacy hex or UUID file intact. If the CLI reports an invalid machine
+ID, remove the damaged file with `rm ~/.nodrail/machine-id` (PowerShell:
+`Remove-Item ~/.nodrail/machine-id`) and run `nodrail apply` again.
+
 Connected projects send host observations to the enrolled environment using their machine credential. `nodrail apply` sends the first setup report. Session-start observation and `nodrail observe` refresh activation, revision and count data. Use `observe: { names: true }` to include names. Optional OTLP export can use a separate `NODRAIL_INVENTORY_TOKEN` when sending to the legacy Nodrail OTLP endpoint.

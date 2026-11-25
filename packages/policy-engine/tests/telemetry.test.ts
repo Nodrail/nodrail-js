@@ -450,14 +450,19 @@ describe("the hook's observer", () => {
   });
 
   test.each([
-    ["git status", false],
-    ["git push", true],
+    ["git status", false, "not a directory"],
+    ["git status", false, "malformed"],
+    ["git push", true, "malformed"],
   ])(
-    "a machine id that can't be kept leaves `%s` as the rules decide",
-    async (command, denied) => {
-      // ~/.nodrail is a file: the machine id has nowhere to go.
+    "a machine id that can't be kept leaves `%s` (denied: %s) as the rules decide when %s",
+    async (command, denied, problem) => {
       const home = mkdtempSync(join(tmpdir(), "nodrail-home-"));
-      writeFileSync(join(home, ".nodrail"), "");
+      const directory = join(home, ".nodrail");
+      const machine = join(directory, "machine-id");
+      if (problem === "malformed") {
+        mkdirSync(directory);
+        writeFileSync(machine, "damaged");
+      } else writeFileSync(directory, "");
       const { project, file } = unreachableTelemetry();
       const rules = join(project, "rules.yaml");
       writeFileSync(
@@ -480,6 +485,8 @@ describe("the hook's observer", () => {
         expect(answer.stderr).toContain(
           "telemetry is off: can't keep this machine's id",
         );
+        if (problem === "malformed")
+          expect(readFileSync(machine, "utf8")).toBe("damaged");
       } finally {
         restoreHome();
       }
@@ -489,6 +496,10 @@ describe("the hook's observer", () => {
   test("records what the host was told, and a failure only warns", () => {
     const home = mkdtempSync(join(tmpdir(), "nodrail-home-"));
     const { file } = unreachableTelemetry();
+    const machine = "12345678-90ab-4def-8fed-cba987654321";
+    const machineFile = join(home, ".nodrail", "machine-id");
+    mkdirSync(dirname(machineFile));
+    writeFileSync(machineFile, `${machine}\n`);
     const restoreHome = homeAt(home);
     const warnings: string[] = [];
     try {
@@ -511,14 +522,18 @@ describe("the hook's observer", () => {
       });
       for (const stdout of ["", denied, "not json"])
         observer.observe({ judged: judged(stdout), event: null, agent: null });
-      const told = readFileSync(join(folder, "spool.jsonl"), "utf8")
+      const spans = readFileSync(join(folder, "spool.jsonl"), "utf8")
         .trim()
         .split("\n")
-        .map(
-          (line) =>
-            (JSON.parse(line) as SpanRecord).attributes["nodrail.decision"],
-        );
-      expect(told).toEqual(["allow", "deny", "deny"]);
+        .map((line) => (JSON.parse(line) as SpanRecord).attributes);
+      expect(spans.map((span) => span["nodrail.decision"])).toEqual([
+        "allow",
+        "deny",
+        "deny",
+      ]);
+      for (const span of spans)
+        expect(span["nodrail.machine"]).toBe(machine.replaceAll("-", ""));
+      expect(readFileSync(machineFile, "utf8")).toBe(`${machine}\n`);
       // The queue can't be written: the decision stands, with a warning.
       rmSync(folder, { recursive: true });
       writeFileSync(folder, "");
