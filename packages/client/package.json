@@ -62,7 +62,7 @@
     "@modelcontextprotocol/sdk": "^1.32.2",
     "@openai/agents": "^0.22.0",
     "@types/node": "^26.6.6",
-    "@vitest/coverage-v8": "5.1.0",
+    "@vitest/coverage-v8": "5.1.1",
     "ai": "^7.0.171",
     "esbuild": "^0.28.2",
     "fast-check": "^4.10.2",
