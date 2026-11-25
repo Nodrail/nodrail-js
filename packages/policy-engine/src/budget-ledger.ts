@@ -244,13 +244,14 @@ export function limitState(
   budget: NumericBudget,
   context: {
     run: RunContext | null;
+    caller?: string;
     call: BudgetCall;
     now: Date;
     authority: BudgetAuthority;
   },
 ): LimitState | null {
   const { run, call, now, authority } = context;
-  const agent = run?.step?.agent ?? MAIN;
+  const agent = context.caller ?? run?.step?.agent ?? MAIN;
   if (!covers(budget, call, agent)) return null;
   if (budget.across === "environment") {
     const fallback: LimitState = { ...base(budget, now), state: "shared" };

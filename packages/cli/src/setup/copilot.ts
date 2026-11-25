@@ -1,3 +1,4 @@
+import { launcherTail, launchShell, shellArg as quoted } from "./launcher.ts";
 import { readFileSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import type { ProjectSetup, SetupAgent } from "@nodrail/policy-engine/yaml";
@@ -31,9 +32,6 @@ export const COPILOT_MCP = ".github/mcp.json";
 /** The Copilot CLI the setup was verified with. */
 export const MIN_COPILOT = "1.0.114";
 
-/** One argument for the shell Copilot runs hooks with, quoted. */
-const quoted = (text: string) => `'${text.replace(/'/g, `'\\''`)}'`;
-
 /** Copilot's hook command, by full paths: it fails closed if nodrail can't run. */
 export function copilotHookCommand(
   root: string,
@@ -43,7 +41,7 @@ export function copilotHookCommand(
   const real = realpathSync(root);
   const path = (file: string) => quoted(join(real, file));
   const reads = hookReads(setup, path) + connectRead(setup, path);
-  return `nodrail policy hook ${quoted(join(real, EFFECTIVE_FILE))} --protect-list ${quoted(join(real, PROTECT_LIST))}${reads} --host copilot --agent ${entry}`;
+  return `${launchShell} policy hook ${quoted(join(real, EFFECTIVE_FILE))} --protect-list ${quoted(join(real, PROTECT_LIST))}${reads} --host copilot --agent ${entry}`;
 }
 
 function agentFile(agent: SetupAgent, team: string, body: string) {
@@ -160,6 +158,14 @@ export function copilotActivation(input: {
   home: string;
   env: Env;
 }): Activation {
+  const disabled = copilotHookChecks(input)[0];
+  if (disabled) return { state: "inactive", detail: disabled.detail };
+  if (!hasCopilotHook(input.root))
+    return {
+      state: "inactive",
+      detail:
+        "the policy hook is missing from .github/hooks/nodrail.json; run nodrail apply",
+    };
   let trusted: string[] = [];
   try {
     const config = JSON.parse(
@@ -195,6 +201,28 @@ export function copilotActivation(input: {
         detail:
           "Copilot runs the project's hooks only in a trusted folder: open copilot here and choose to remember the folder",
       };
+}
+
+function hasCopilotHook(root: string) {
+  try {
+    const config = JSON.parse(
+      readFileSync(join(root, COPILOT_HOOKS), "utf8"),
+    ) as {
+      version?: unknown;
+      hooks?: { preToolUse?: { bash?: unknown }[] };
+    };
+    return (
+      config.version === 1 &&
+      Array.isArray(config.hooks?.preToolUse) &&
+      config.hooks.preToolUse.some(
+        (hook) =>
+          typeof hook?.bash === "string" &&
+          launcherTail(hook.bash).startsWith("policy hook "),
+      )
+    );
+  } catch {
+    return false;
+  }
 }
 
 /**

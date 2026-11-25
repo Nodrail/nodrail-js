@@ -210,9 +210,12 @@ describe("nodrail observe", () => {
   test("--detach starts it apart and returns at once", async () => {
     const marker = join(mkdtempSync(join(tmpdir(), "nodrail-detach-")), "ran");
     const script = join(marker, "..", "child.cjs");
+    const pending = JSON.stringify(`${marker}.tmp`);
     writeFileSync(
       script,
-      `require("node:fs").writeFileSync(${JSON.stringify(marker)}, process.argv.slice(2).join(" "));`,
+      `const fs = require("node:fs");
+fs.writeFileSync(${pending}, process.argv.slice(2).join(" "));
+fs.renameSync(${pending}, ${JSON.stringify(marker)});`,
     );
     const io = fakeIo({ self: [script] });
     const project = join(tmpdir(), "some project");

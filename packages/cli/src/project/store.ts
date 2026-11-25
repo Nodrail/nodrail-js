@@ -1,16 +1,23 @@
 import { createHash } from "node:crypto";
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   readFileSync,
   realpathSync,
   renameSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
 import { CliError } from "../io.ts";
 import { hasJournal, replayJournal } from "./journal.ts";
+import {
+  acquireLocalLock,
+  LocalLockBusy,
+  processAlive,
+} from "@nodrail/policy-engine/command-line";
 import { LOCK_FILE, MANIFEST_FILE, sha256 } from "./lockfile.ts";
 
 /** The only files a project write ever replaces. */
@@ -34,15 +41,6 @@ export function stagingFolder({ root, home }: Place) {
   return join(home, ".nodrail", "writes", project);
 }
 
-const alive = (pid: number) => {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    return (error as NodeJS.ErrnoException).code === "EPERM";
-  }
-};
-
 function readOr(path: string) {
   try {
     return readFileSync(path, "utf8");
@@ -57,10 +55,19 @@ function readOr(path: string) {
  * send the text anywhere else.
  */
 function replace(root: string, name: string, text: string) {
+  const destination = join(root, name);
+  const mode =
+    statSync(destination, { throwIfNoEntry: false })?.mode ??
+    0o666 & ~process.umask();
   const temporary = join(root, `.${name}.${process.pid}.tmp`);
   rmSync(temporary, { force: true });
-  writeFileSync(temporary, text, { flag: "wx", flush: true });
-  renameSync(temporary, join(root, name));
+  try {
+    writeFileSync(temporary, text, { flag: "wx", flush: true, mode: 0o600 });
+    chmodSync(temporary, mode & 0o7777);
+    renameSync(temporary, destination);
+  } finally {
+    rmSync(temporary, { force: true });
+  }
 }
 
 /** The staged files, if every one is complete and is what was staged. */
@@ -113,44 +120,6 @@ export const writeInProgress = (place: Place) =>
   existsSync(stagingFolder(place));
 
 /**
- * Puts the lock folder in place whole, its owner already inside: prepared
- * beside it, then renamed. Another nodrail never sees it without an owner,
- * so it can't take a live writer for a dead one. False when it exists.
- */
-function claim(folder: string) {
-  const prepared = `${folder}.${process.pid}.claim`;
-  rmSync(prepared, { recursive: true, force: true });
-  mkdirSync(prepared);
-  writeFileSync(join(prepared, "owner"), String(process.pid), { flush: true });
-  try {
-    renameSync(prepared, folder);
-    return true;
-  } catch (error) {
-    rmSync(prepared, { recursive: true, force: true });
-    const code = (error as NodeJS.ErrnoException).code;
-    if (code === "EEXIST" || code === "ENOTEMPTY" || code === "EPERM")
-      return false;
-    throw error;
-  }
-}
-
-function takeLock(place: Place, folder: string) {
-  mkdirSync(join(folder, ".."), { recursive: true });
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    if (claim(folder)) return;
-    const owner = Number(readOr(join(folder, "owner")));
-    if (owner && owner !== process.pid && alive(owner))
-      throw new CliError(
-        `Another nodrail (process ${owner}) is changing this project. Try again when it has finished.`,
-      );
-    recover(place, folder);
-  }
-  throw new CliError(
-    `Couldn't start a write to this project; if no nodrail is running, remove ${folder}.`,
-  );
-}
-
-/**
  * Runs `change` as the project's only writer and replaces the files it
  * returns all together: each is staged in full first, then all are put in
  * place. An interrupted run leaves either every old file or, on the next
@@ -168,16 +137,18 @@ export function writeProject(
         `A project write may only replace ${[...WRITABLE].join(" and ")}`,
       );
     if (names.length > 0) {
-      mkdirSync(join(folder, "next"));
+      mkdirSync(join(folder, "next"), { mode: 0o700 });
       for (const name of names)
         writeFileSync(join(folder, "next", name), files[name]!, {
           flush: true,
+          mode: 0o600,
         });
       const hashes = Object.fromEntries(
         names.map((name) => [name, sha256(files[name]!)]),
       );
       writeFileSync(join(folder, "ready"), JSON.stringify(hashes), {
         flush: true,
+        mode: 0o600,
       });
       for (const name of names) replace(place.root, name, files[name]!);
     }
@@ -191,10 +162,54 @@ export function writeProject(
  */
 export function holdProject<T>(place: Place, work: (folder: string) => T): T {
   const folder = stagingFolder(place);
-  takeLock(place, folder);
+  const lock = projectLock(folder, false);
   try {
-    return work(folder);
+    if (existsSync(folder)) {
+      // Older CLI versions put their process ID inside the journal itself.
+      const owner = Number(readOr(join(folder, "owner")));
+      if (owner && processAlive(owner))
+        throw new CliError(
+          `Another nodrail (process ${owner}) is changing this project. Try again when it has finished.`,
+        );
+      recover(place, folder);
+    }
+    mkdirSync(folder, { mode: 0o700 });
+    try {
+      return work(folder);
+    } finally {
+      recover(place, folder);
+    }
   } finally {
-    recover(place, folder);
+    lock.release();
+  }
+}
+
+function projectLock(folder: string, leased: boolean) {
+  try {
+    return acquireLocalLock(`${folder}.lock`, { leased });
+  } catch (error) {
+    if (error instanceof LocalLockBusy) throw new CliError(error.message);
+    throw error;
+  }
+}
+
+export type WriterLock = Pick<
+  ReturnType<typeof acquireLocalLock>,
+  "renew" | "commit"
+>;
+
+/** Holds a named local writer lock while an asynchronous operation settles. */
+export async function holdProjectAsync<T>(
+  folder: string,
+  work: (lock: WriterLock) => Promise<T>,
+) {
+  const lock = projectLock(folder, true);
+  try {
+    return await work(lock);
+  } catch (error) {
+    if (error instanceof LocalLockBusy) throw new CliError(error.message);
+    throw error;
+  } finally {
+    lock.release();
   }
 }

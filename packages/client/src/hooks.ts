@@ -1,3 +1,4 @@
+import { homedir } from "node:os";
 import {
   allowQuietly,
   deny,
@@ -8,7 +9,9 @@ import {
   type ToolInput as Input,
 } from "@nodrail/policy-engine/actions";
 import {
-  agentName,
+  callerCandidate,
+  deferToAppliedHook,
+  resolveHookCaller,
   HANDBACK_TOOL,
   receiptText,
   runKey,
@@ -33,7 +36,7 @@ export {
   type HookResult,
 } from "@nodrail/policy-engine/actions";
 
-export const HOOK_VERSION = "0.8.0";
+export const HOOK_VERSION = "0.9.0";
 
 /** Nodrail answers at once; past this the call is denied, within the hook's own time limit. */
 const HOOK_DEADLINE_MS = 25_000;
@@ -67,19 +70,17 @@ type HookEvent = {
   is_interrupt?: unknown;
   tool_response?: unknown;
   session_id?: unknown;
+  source?: unknown;
   agent_id?: unknown;
   agent_type?: unknown;
+  agent_name?: unknown;
+  session_agent?: unknown;
   last_assistant_message?: unknown;
 };
 
 /** The step taking a call, from the subagent fields Claude Code adds. */
 function stepOf(event: HookEvent) {
-  const id = text(event.agent_id);
-  if (!id) return undefined;
-  return {
-    id: id.slice(0, 200),
-    agent: agentName(text(event.agent_type) ?? "unnamed"),
-  };
+  return resolveHookCaller(event, "unnamed").step;
 }
 
 /**
@@ -201,6 +202,7 @@ async function beforeTool(
   const decision = await decideInTime(
     authorize(client, fields.action, key, {
       run,
+      agent: callerCandidate(event),
       // The work the agent's session is in, as the runtime reads it.
       subject: revisionAt(text(event.cwd) ?? process.cwd()),
     }),
@@ -238,6 +240,7 @@ async function afterTool(
     const action = await client.findByKey(key);
     await client.report(action.action_id, {
       key,
+      agent: callerCandidate(event),
       outcome: interrupted ? "unknown" : failed ? "failure" : "success",
       permitId: action.permit_id,
       details: {
@@ -275,7 +278,12 @@ async function onStep(
   }
   const step = run?.step;
   if (!client || !run || !step) return allowQuietly;
-  const body: StepEvent = { run: { key: run.key }, step, event: "started" };
+  const body: StepEvent = {
+    run: { key: run.key },
+    step,
+    agent: callerCandidate(event),
+    event: "started",
+  };
   if (event.hook_event_name === "SubagentStop") {
     body.event = "finished";
     const block = receiptOf(text(event.last_assistant_message), step.agent);
@@ -336,6 +344,7 @@ async function onHandback(
     const body: StepEvent = {
       run: { key: run.key },
       step,
+      agent: callerCandidate(event),
       event: "finished",
       ...(block ? { receipt: { text: block } } : {}),
     };
@@ -371,7 +380,7 @@ async function onSessionStart(env: Environment, deps: HookDeps) {
   const client = clientFrom(env, deps);
   if (!client)
     return notice(
-      "Nodrail is not connected, so governed actions will be blocked. Set NODRAIL_CREDENTIAL or save it to ~/.nodrail/credential.",
+      "Nodrail is not connected, so governed actions will be blocked. Set NODRAIL_URL and NODRAIL_CREDENTIAL together, or save the Cloud credential to ~/.nodrail/credential.",
     );
   try {
     await client.heartbeat();
@@ -382,6 +391,35 @@ async function onSessionStart(env: Environment, deps: HookDeps) {
       );
     // Otherwise the next governed call also counts as a check-in.
   }
+  return allowQuietly;
+}
+
+function projectOwnsSession(
+  event: HookEvent,
+  env: Environment,
+  agent?: AgentKind,
+) {
+  const session = text(event.session_id);
+  const root = env.CLAUDE_PROJECT_DIR;
+  if (
+    !session ||
+    !root ||
+    agent === "codex" ||
+    env.NODRAIL_REQUIRE_STANDALONE === "1"
+  )
+    return false;
+  return deferToAppliedHook(homedir(), root, text(event.cwd) ?? process.cwd(), {
+    id: session,
+    starting:
+      event.hook_event_name === "SessionStart" &&
+      (event.source === "startup" || event.source === "resume"),
+  });
+}
+
+function connectionFailure(event: HookEvent, error: string) {
+  if (event.hook_event_name === "SessionStart")
+    return notice(`Nodrail: ${error}`);
+  if (event.hook_event_name === "PreToolUse") return deny(`Nodrail: ${error}`);
   return allowQuietly;
 }
 
@@ -398,6 +436,9 @@ export async function runHook(
       "Nodrail: the hook received an unreadable event, so this action is blocked.",
     );
   }
+  if (projectOwnsSession(event, env, deps.agent)) return allowQuietly;
+  const { error } = resolveConnection(env);
+  if (error) return connectionFailure(event, error);
   switch (event.hook_event_name) {
     case "PreToolUse":
       return event.tool_name === HANDBACK_TOOL && text(event.agent_id)

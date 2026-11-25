@@ -5,6 +5,8 @@ import {
   readFileSync,
   statSync,
 } from "node:fs";
+import { createHash } from "node:crypto";
+import { readSecretFile } from "@nodrail/policy-engine/command-line";
 import { describe, expect, test } from "vitest";
 import { configPath } from "../src/config.ts";
 import { VERSION } from "../src/cli.ts";
@@ -65,11 +67,18 @@ describe("login", () => {
     // The mode and the text from one open file, so both are the same file.
     const file = openSync(configPath(t.io.home), "r");
     try {
-      // Windows has no Unix file modes.
-      if (!windows) expect(fstatSync(file).mode & 0o777).toBe(0o600);
-      expect(JSON.parse(readFileSync(file, "utf8"))).toEqual({
-        tokens: { "https://app.nodrail.com": TOKEN },
-      });
+      const stored = readFileSync(file, "utf8");
+      // Windows has no Unix file modes: the token is encrypted for this
+      // user instead, so the file never holds it in plain text.
+      if (windows) {
+        expect(JSON.parse(stored)).toHaveProperty("windows_protected");
+        expect(stored).not.toContain(TOKEN);
+      } else {
+        expect(fstatSync(file).mode & 0o777).toBe(0o600);
+      }
+      expect(
+        JSON.parse(readSecretFile(configPath(t.io.home)) ?? "null"),
+      ).toMatchObject({ tokens: { "https://app.nodrail.com": TOKEN } });
     } finally {
       closeSync(file);
     }
@@ -82,27 +91,101 @@ describe("login", () => {
 
     const out = fakeIo({ home: t.io.home });
     expect(await out.run("logout")).toBe(0);
-    expect(out.stdout()).toContain("still works until you revoke it");
+    expect(out.stdout()).toContain("can still be revoked");
     const none = fakeIo({ home: t.io.home });
     expect(await none.run("logout")).toBe(0);
     expect(none.stdout()).toContain("No saved token");
   });
 
-  test("asks with hidden input at a terminal", async () => {
-    const t = fakeIo({
-      fetch: fakeApi().fetch,
-      interactive: true,
-      answers: [TOKEN],
-    });
-    expect(await t.run("login")).toBe(0);
-    expect(t.asked).toEqual([{ question: "Token: ", hidden: true }]);
+  test("runs browser login and reuses the self-hosted origin in a fresh CLI process", async () => {
+    const api = fakeApi({ scopes: ["read", "rules:write", "agents:manage"] });
+    const origin = "http://127.0.0.1:3301";
+    const session = `ndc_${"x".repeat(43)}`;
+    let challenge = "";
+    let opened = "";
+    let workspace = "";
+    let revoked = false;
+    const fetcher: typeof fetch = async (input, init) => {
+      const url = new URL(input instanceof Request ? input.url : input);
+      const body =
+        typeof init?.body === "string" ? JSON.parse(init.body) : null;
+      expect(url.origin).toBe(origin);
+      expect(init?.redirect).toBe("error");
+      if (url.pathname.endsWith("/start")) {
+        challenge = body.challenge;
+        expect(body.origin).toBe(origin);
+        return Response.json({ ok: true });
+      }
+      if (url.pathname.endsWith("/exchange")) {
+        expect(opened).toContain(challenge);
+        expect(createHash("sha256").update(body.verifier).digest("hex")).toBe(
+          challenge,
+        );
+        expect(body.origin).toBe(origin);
+        return Response.json({ token: session });
+      }
+      expect(new Headers(init?.headers).get("authorization")).toBe(
+        `Bearer ${session}`,
+      );
+      if (url.pathname.endsWith("/logout")) {
+        revoked = true;
+        return Response.json({ ok: true });
+      }
+      workspace = url.searchParams.get("workspace") ?? "";
+      const me = await (
+        await api.fetch(input, {
+          headers: { authorization: `Bearer ${TOKEN}` },
+        })
+      ).json();
+      return Response.json({
+        ...me,
+        effective_scopes: ["read", "rules:write", "agents:manage"],
+      });
+    };
+    const first = fakeIo({ fetch: fetcher });
+    first.io.openBrowser = (url) => {
+      opened = url;
+    };
+    expect(await first.run("login", "--url", origin)).toBe(0);
+    expect(first.stdout()).toContain(
+      "Can now      read, rules:write, agents:manage",
+    );
+    expect(first.stdout()).not.toContain(session);
+    for (const { args, message } of [
+      { args: ["--workspace", "unknown"], message: `Logged in to ${origin}.` },
+      {
+        args: [],
+        message: `Logged in to ${origin}. Create or join a workspace in the console.`,
+      },
+    ]) {
+      const unavailable = fakeIo({
+        fetch: (input, init) => {
+          const url = new URL(input instanceof Request ? input.url : input);
+          if (url.pathname.endsWith("/me"))
+            return Promise.resolve(
+              Response.json({ error: { code: "NOT_FOUND" } }, { status: 404 }),
+            );
+          return fetcher(input, init);
+        },
+      });
+      unavailable.io.openBrowser = first.io.openBrowser;
+      expect(await unavailable.run("login", "--url", origin, ...args)).toBe(0);
+      expect(unavailable.stdout()).toBe(message);
+    }
+
+    const again = fakeIo({ home: first.io.home, fetch: fetcher });
+    expect(await again.run("whoami")).toBe(0);
+    expect(await again.run("whoami", "--workspace", "second")).toBe(0);
+    expect(workspace).toBe("second");
+    expect(await again.run("logout")).toBe(0);
+    expect(revoked).toBe(true);
+    expect(await again.run("whoami")).toBe(1);
   });
 
-  test("refuses without a terminal, agent credentials and bad tokens", async () => {
-    expect(await fakeIo().run("login")).toBe(2);
+  test("rejects agent credentials and malformed tokens on stdin", async () => {
     const agent = fakeIo({ stdin: `ndr_0123456789ab_${"A".repeat(43)}` });
     expect(await agent.run("login", "--token-stdin")).toBe(2);
-    expect(agent.stderr()).toContain("agent's credential");
+    expect(agent.stderr()).toContain("personal API token");
     expect(await fakeIo({ stdin: "nope" }).run("login", "--token-stdin")).toBe(
       2,
     );

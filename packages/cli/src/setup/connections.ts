@@ -1,3 +1,4 @@
+import { launcher } from "./launcher.ts";
 import { randomUUID } from "node:crypto";
 import { realpathSync } from "node:fs";
 import { pluginCalls } from "@nodrail/policy-engine/yaml";
@@ -100,13 +101,24 @@ export const runnerArgs = (file: string, name: string) => [
   name,
 ];
 
+/** Resolve the built-in CLI in the generated copy, without changing the declaration. */
+function connectionLaunch(spec: ConnectionSpec): ConnectionSpec {
+  return spec.command === "nodrail"
+    ? {
+        ...spec,
+        command: launcher.command,
+        args: [...launcher.args, ...spec.args],
+      }
+    : spec;
+}
+
 export function connectionsFile(
   setup: ProjectSetup,
   contracts: CompiledContracts | null = null,
 ): DesiredFile | null {
   if (setup.connections.length === 0 && !pluginServers(setup)) return null;
   const connections = Object.fromEntries(
-    setup.connections.map((each) => [each.name, each.spec]),
+    setup.connections.map((each) => [each.name, connectionLaunch(each.spec)]),
   );
   // Plugin servers apart: the host starts them, so only the hook reads them.
   const plugins = pluginCalls(
@@ -427,9 +439,10 @@ function listTools(input: {
   spec: ConnectionSpec;
   env: Env;
 }): Promise<Tool[]> {
+  const { command, args } = connectionLaunch(input.spec);
   return askServer<Tool[]>({
-    command: input.spec.command,
-    args: input.spec.args,
+    command,
+    args,
     cwd: input.root,
     env: connectionEnv(input.spec, input.env, input.root),
     timeout: HEALTH_TIMEOUT,
@@ -474,8 +487,8 @@ export function mcpServerEntries(
         name,
         {
           ...shape,
-          command: "nodrail",
-          args: runnerArgs(file, name),
+          command: launcher.command,
+          args: [...launcher.args, ...runnerArgs(file, name)],
           ...(names.length > 0 ? { env } : {}),
         },
       ];

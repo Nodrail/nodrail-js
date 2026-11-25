@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { describeNamedTool } from "@nodrail/policy-engine/actions";
 import { blockedText } from "./blocked-text.ts";
-import { resolveConnection, type Environment } from "./connection.ts";
+import { resolveSdkConnection, type Environment } from "./connection.ts";
 import { authorize } from "./authorize.ts";
 import { NodrailClient, type Decision } from "./client.ts";
 import type { ActionDescriptor } from "./protocol.ts";
@@ -22,7 +22,7 @@ import {
   type ToolHooks,
 } from "./tool-shapes.ts";
 
-export const SDK_VERSION = "0.8.0";
+export const SDK_VERSION = "0.9.0";
 
 type Blocked = Extract<Decision, { allowed: false }>;
 
@@ -92,11 +92,11 @@ export class Nodrail {
   constructor(options: NodrailOptions = {}) {
     this.options = options;
     this.env = options.env ?? process.env;
-    this.client = this.connect();
+    this.client = this.connect().client;
     this.onBlocked = options.onBlocked ?? "return";
     this.sleep = options.sleep;
     this.runs = new Runs(
-      () => (this.client ??= this.connect()),
+      () => (this.client ??= this.connect().client),
       options.run?.trim() || this.env.NODRAIL_RUN?.trim() || undefined,
     );
   }
@@ -124,28 +124,38 @@ export class Nodrail {
    * importing its tools still gets checked calls once they are there.
    */
   private connect() {
-    const found = resolveConnection(this.env);
-    const credential = this.options.credential ?? found.credential;
-    return credential
-      ? new NodrailClient({
-          url: this.options.url ?? found.url,
-          credential,
-          adapterVersion:
-            this.options.adapterVersion ?? `typescript-sdk/${SDK_VERSION}`,
-          fetch: this.options.fetch,
-        })
-      : null;
+    const found = resolveSdkConnection(
+      this.env,
+      this.options.url,
+      this.options.credential,
+    );
+    const credential = found.credential;
+    return {
+      error: found.error,
+      client: credential
+        ? new NodrailClient({
+            url: found.url,
+            credential,
+            adapterVersion:
+              this.options.adapterVersion ?? `typescript-sdk/${SDK_VERSION}`,
+            fetch: this.options.fetch,
+          })
+        : null,
+    };
   }
 
   private decide(descriptor: ActionDescriptor): Promise<Decision> {
-    this.client ??= this.connect();
-    if (!this.client)
-      return Promise.resolve({
-        allowed: false,
-        code: "NOT_CONFIGURED",
-        reason: null,
-        reference: null,
-      });
+    if (!this.client) {
+      const { client, error } = this.connect();
+      if (!client)
+        return Promise.resolve({
+          allowed: false,
+          code: "NOT_CONFIGURED",
+          reason: error ?? null,
+          reference: null,
+        });
+      this.client = client;
+    }
     return authorize(this.client, descriptor, randomUUID(), {
       run: this.runs.current(),
       subject: this.subject(),

@@ -16,7 +16,7 @@ import type { PolicyDocument } from "./policies.ts";
 import type { ActionDescriptor } from "./protocol.ts";
 import type { RunContext, RunEvent, Subject } from "./runs.ts";
 import { HANDBACK_ACTION } from "./hook-runs.ts";
-import { agentName } from "./names.ts";
+import { resolveHookCaller, type CallerEvent } from "./hook-caller.ts";
 import {
   touchedData,
   touchedRules,
@@ -49,6 +49,13 @@ export type StepReport = {
 
 export type LocalHookOptions = Identity & {
   document: PolicyDocument;
+  /** The caller admitted by the control plane for a connected event. */
+  caller?: string;
+  accessRefusal?: string;
+  pausedAgents?: string[];
+  admission?: { id: string; call: string };
+  pausedRun?: string | null;
+  watch?: boolean;
   now: Date;
   /**
    * What to do when no rule covers a call: deny it, or allow it and leave it
@@ -84,29 +91,20 @@ export type LocalHookOptions = Identity & {
   report?: ((run: string, event: RunEvent, step?: StepReport) => void) | null;
 };
 
-/**
- * Who is calling. Claude Code and Codex name the agent a call comes from:
- * a subagent's own type, or the session's `--agent`. The host sets it from
- * the agent definition it started, not from anything the model writes, so it
- * wins over this hook's `--agent`, which names the entry agent for calls the
- * host doesn't label.
- */
-function callerOf(
-  event: { agent_type?: unknown },
-  identity: Identity,
-): Identity {
-  const named = nonEmptyText(event.agent_type);
-  return named ? { ...identity, agent: agentName(named) } : identity;
+/** The same caller goes to policy evaluation, runs and observers. */
+export function callerOf(event: CallerEvent, options: LocalHookOptions) {
+  const { agent, installation } = options;
+  const resolved = resolveHookCaller(event, agent ?? "main", options.caller);
+  return { installation, agent: resolved.agent };
 }
 
 export const parseEvent = (stdin: string) => {
   try {
-    return JSON.parse(stdin) as {
+    return JSON.parse(stdin) as CallerEvent & {
       hook_event_name?: unknown;
       tool_name?: unknown;
       tool_input?: unknown;
       cwd?: unknown;
-      agent_type?: unknown;
     };
   } catch {
     return null;
@@ -262,8 +260,11 @@ export function judgeToolCall(
       judged,
       event: event as Record<string, unknown> | null,
       agent: callerOf(event ?? {}, options).agent ?? null,
-      run: options.run?.run ?? null,
+      run: options.pausedRun ?? options.run?.run ?? null,
+      ...(options.admission ? { admission: options.admission } : {}),
+      ...(options.pausedAgents ? { pausedAgents: options.pausedAgents } : {}),
       step: options.run?.step?.id ?? null,
+      ...(options.watch ? { watch: true } : {}),
     });
   }
   return judged;
@@ -309,6 +310,7 @@ function judgeCall(stdin: string, options: LocalHookOptions): Judged {
   const call = describeEvent(stdin, options);
   if (typeof call === "string") return refused(call);
   const { action, event, input } = call;
+  if (options.accessRefusal) return refused(options.accessRefusal, action);
   const guarded = integrityOf(call, options);
   if (guarded) return refused(guarded, action);
   const contracted = checkContracts(
@@ -327,6 +329,7 @@ function judgeCall(stdin: string, options: LocalHookOptions): Judged {
       simulate({
         document,
         descriptor: toDescriptor(view, caller),
+        caller: options.caller,
         now,
         run,
         subject: options.subject,

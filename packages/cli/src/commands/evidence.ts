@@ -48,9 +48,13 @@ import { visibleLines } from "../api.ts";
 import { UsageError, type Io } from "../io.ts";
 import { spawn } from "../spawn.js";
 import { contractOf, parseEvidenceArgs, short } from "./evidence-shared.ts";
-import { submit } from "./evidence-submit.ts";
+import { parseSubmitArgs, submitEvidence } from "./evidence-submit.ts";
 import { policyHere } from "./policy-here.ts";
-import { runSubcommand } from "./subcommands.ts";
+import {
+  checkSubcommand,
+  parsedSubcommand,
+  runSubcommand,
+} from "./subcommands.ts";
 
 export { SUBMIT_EXIT } from "./evidence-submit.ts";
 
@@ -109,7 +113,7 @@ function runCommand(command: string[], cwd: string, env: Io["env"]) {
   });
 }
 
-async function run(rest: string[], io: Io) {
+function parseRunArgs(rest: string[]) {
   const split = rest.indexOf("--");
   if (split < 0 || split === rest.length - 1)
     throw new UsageError(
@@ -122,6 +126,13 @@ async function run(rest: string[], io: Io) {
     throw new UsageError(
       "Usage: nodrail evidence run <name> [--policy <file>] -- <command>",
     );
+  return { name, values, command };
+}
+
+async function run(
+  { name, values, command }: ReturnType<typeof parseRunArgs>,
+  io: Io,
+) {
   const document = policyHere({ cwd: io.cwd, home: io.home, ...values });
   const contract = contractOf(document, name, "runtime-observed");
   const ledger = ledgerDirectory(io.cwd, io.env);
@@ -184,11 +195,15 @@ async function run(rest: string[], io: Io) {
 }
 
 /** The local events of one evidence, newest first, with what each gate makes of them. */
-function show(rest: string[], io: Io) {
+function parseShowArgs(rest: string[]) {
   const { values, positionals } = parseEvidenceArgs(rest);
   const [name, extra] = positionals;
   if (!name || extra !== undefined)
     throw new UsageError("Usage: nodrail evidence show <name>");
+  return { name, values };
+}
+
+function show({ name, values }: ReturnType<typeof parseShowArgs>, io: Io) {
   const ledger = ledgerDirectory(io.cwd, io.env);
   const events = readEvidence(ledger, name);
   const subject = workRevision(io.cwd);
@@ -250,6 +265,15 @@ function show(rest: string[], io: Io) {
   return 0;
 }
 
+const subcommands = {
+  run: parsedSubcommand(parseRunArgs, run),
+  show: parsedSubcommand(parseShowArgs, show),
+  submit: parsedSubcommand(parseSubmitArgs, submitEvidence),
+};
+
+export const checkEvidenceArgs = (args: string[]) =>
+  checkSubcommand(subcommands, EVIDENCE_USAGE, args);
+
 /** `nodrail evidence <run|submit|show> …`; answers its exit code. */
 export const evidence = (args: string[], io: Io) =>
-  runSubcommand({ run, submit, show }, EVIDENCE_USAGE, args, io);
+  runSubcommand(subcommands, EVIDENCE_USAGE, args, io);

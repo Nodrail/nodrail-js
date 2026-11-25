@@ -17,6 +17,7 @@ import {
   type Environment,
 } from "./ledger.ts";
 import {
+  callerOf,
   judgeToolCall,
   parseEvent,
   type LocalHookOptions,
@@ -25,7 +26,8 @@ import {
 import { hasContracts, limitsOf } from "./policies.ts";
 import { tokensOf } from "./outcome-readings.ts";
 import { fingerprint } from "./protocol.ts";
-import { agentName, MAIN_AGENT, type RunEvent } from "./runs.ts";
+import { resolveHookCaller } from "./hook-caller.ts";
+import { type RunEvent } from "./runs.ts";
 import {
   finishedBefore,
   finishedEvent,
@@ -38,22 +40,24 @@ const quiet: HookResult = { exitCode: 0, stdout: "", stderr: "" };
 type Where = { directory: string; run: string | null; cwd: string };
 type Event = Record<string, unknown>;
 
-export function runPlacement(event: Event, env: Environment): Where {
+export function runPlacement(
+  event: Event,
+  env: Environment,
+  { pin = true } = {},
+): Where {
   const cwd = nonEmptyText(event.cwd) ?? process.cwd();
   return {
     directory: ledgerDirectory(cwd, env),
-    run: runKey(cwd, nonEmptyText(event.session_id), env),
+    run: runKey(cwd, nonEmptyText(event.session_id), env, { pin }),
     cwd,
   };
 }
 
 const SUBAGENT_TOOLS = new Set(["Agent", "Task"]);
 
-export const stepOf = (event: Event): Step | null => {
-  const id = nonEmptyText(event.agent_id);
-  if (!id) return null;
-  return { id, agent: agentName(nonEmptyText(event.agent_type) ?? "unnamed") };
-};
+export const stepOf = (event: Event, options?: LocalHookOptions): Step | null =>
+  resolveHookCaller(event, options?.agent ?? "unnamed", options?.caller).step ??
+  null;
 
 /** Reporting is told after the ledger has the event; it never blocks. */
 function reported(
@@ -123,7 +127,7 @@ function recordStep(
   place: Where,
   options: LocalHookOptions,
 ): HookResult {
-  const step = stepOf(event);
+  const step = stepOf(event, options);
   const { run } = place;
   if (!run || !step) return quiet;
   try {
@@ -218,7 +222,7 @@ function actionEntry(
   return {
     type: "action",
     step: step?.id ?? null,
-    agent: step?.agent ?? MAIN_AGENT,
+    agent: callerOf(event, options).agent,
     at: options.now.toISOString(),
     tool: action.tool,
     operation: action.operation,
@@ -254,7 +258,7 @@ function decideAndRecord(
   options: LocalHookOptions,
   { directory, run, cwd }: Where & { run: string },
 ): Decided {
-  const step = stepOf(event);
+  const step = stepOf(event, options);
   const key = callKey(event, options);
   const events = readRun(directory, run);
   // A host that delivers the same call again gets the decision it got the
@@ -323,7 +327,7 @@ function handback(
   options: LocalHookOptions,
   place: Where & { run: string },
 ) {
-  const step = stepOf(event)!;
+  const step = stepOf(event, options)!;
   const input = event.tool_input as { message?: unknown } | null;
   const message = typeof input?.message === "string" ? input.message : null;
   return withRunLock(place.directory, place.run, () => {
@@ -463,7 +467,7 @@ export function runHook(
     return judgeToolCall(stdin, options).result;
   let place: Where;
   try {
-    place = runPlacement(event, env);
+    place = runPlacement(event, env, { pin: !options.accessRefusal });
   } catch (error) {
     // Where the run is kept is unknown: a call is blocked, and a step goes
     // unrecorded, so a gate that needs it stays closed.
@@ -472,6 +476,10 @@ export function runHook(
       ? { ...quiet, stderr: `${reason} The step isn't recorded.\n` }
       : deny(`${reason} So this action is blocked.`);
   }
+  if (options.accessRefusal)
+    return step
+      ? quiet
+      : judgeToolCall(stdin, { ...options, pausedRun: place.run }).result;
   return step
     ? recordStep(event, place, options)
     : decideInRun(stdin, event, options, place);

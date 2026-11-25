@@ -1,6 +1,6 @@
 {
   "name": "@nodrail/cli",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "Nodrail, the open control plane for AI agent development: declare agents and rules in nodrail.yaml, then plan and apply them on Claude Code, Codex and Copilot.",
   "keywords": [
     "ai",

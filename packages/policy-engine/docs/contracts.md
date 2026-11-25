@@ -400,7 +400,6 @@ nodrail.yaml:
     values: { team: payments, cost_centre: cc-120 }
 ```
 
-S08, approval forms (`approvals:` in `nodrail.yaml` and `approval:` on a rule or gate), was removed with `require_approval`: nothing waits for a person. A file that still has either fails to compile and says so; a rule allows or denies, and a gate, budget or evidence says when a call is allowed.
 
 Inventory labels are single values, validated against the shape at compile. Labels describe; they never grant a role, move billing or change a project's tenant.
 
@@ -430,7 +429,7 @@ Consumer fields in rule files need `required_engine_version: 4` in the file; evi
 | C09 | `insights.<name>: { source, measure, path, group }`                                                                                                                                                                  | `measure` is `count`, `validity`, `verdicts` or `rework` (receipts) or `sum` (a reported number with a unit). Groups are reported enums or booleans. Denominators include missing, invalid and unsupported records.                                            |
 | C10 | `notifications.<name>: { source, where, fields, to }`                                                                                                                                                                | Fields and conditions read reported values only. Exports and the API apply the same projection.                                                                                                                                                                |
 
-`source` is `{ receipt: <name> }`, `{ evidence: <name> }` or `{ memory: <name> }`. C05, C09 and C10 run off the machine, so every path they name must be reported. A notification goes `to` a server role, `admin` or `policy_manager`. C04, approval routing, was removed with approval forms.
+`source` is `{ receipt: <name> }`, `{ evidence: <name> }` or `{ memory: <name> }`. C05, C09 and C10 run off the machine, so every path they name must be reported. A notification goes `to` a server role, `admin` or `policy_manager`.
 
 ### Numeric budgets (enforced, engine level 5)
 

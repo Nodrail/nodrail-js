@@ -37,6 +37,8 @@ function readOptional(path: string) {
   }
 }
 
+export type ProposedProject = { manifest: string; lock: Lock };
+
 /** The project's manifest and lock as they are on disk. */
 export function readProject(root: string) {
   const manifest = readOptional(join(root, MANIFEST_FILE));

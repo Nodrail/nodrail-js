@@ -1,0 +1,21 @@
+# Host files that nodrail apply recreates for this example
+/.claude/settings.json
+/.claude/settings.local.json
+/.claude/hooks/
+/.claude/agents/
+/.claude/skills/
+/.codex/config.toml
+/.codex/hooks.json
+/.codex/agents/
+/.agents/skills/
+/.github/agents/
+/.github/skills/
+/.github/hooks/nodrail.json
+/.github/mcp.json
+/.mcp.json
+/.nodrail/
+
+# Output from running the example
+/activity/*.jsonl
+/outbox/*.md
+!/outbox/README.md

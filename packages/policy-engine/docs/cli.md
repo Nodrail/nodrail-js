@@ -73,7 +73,7 @@ The rule files and folders given to `hook` are protected: a file tool that would
 
 > **Preview command.** `runs` needs version 0.2.0 or later. Check `nodrail-policy --help` for the commands in your installation.
 
-`runs` (or `runs list`) lists the runs in the ledger, `runs show <run>` prints one step by step, and `runs report` counts steps, verdicts and held actions per agent. It needs no rules file. It reads the ledger of the repository you are in, or the folder `NODRAIL_LEDGER` names. Runs on a branch are named `<repo>/<branch>`, such as `github.com/acme/app/feature/login`: see [Claude Code run history (preview)](runs.md#claude-code).
+`runs` (or `runs list`) lists the runs in the ledger, `runs show <run>` prints one step by step, and `runs report` counts steps, verdicts and denied actions per agent. It needs no rules file. It reads the ledger of the repository you are in, or the folder `NODRAIL_LEDGER` names. Runs on a branch are named `<repo>/<branch>`, such as `github.com/acme/app/feature/login`: see [Claude Code run history (preview)](runs.md#claude-code).
 
 ## `check` and `exec`
 

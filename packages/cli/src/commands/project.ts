@@ -19,6 +19,7 @@ import { NEW_MANIFEST, withImport } from "../project/manifest-edit.ts";
 import {
   checkIntegrity,
   planProject,
+  type ProposedProject,
   readProject,
   type ProjectPlan,
 } from "../project/project.ts";
@@ -80,19 +81,27 @@ const waiting = (plan: ProjectPlan) =>
   );
 
 function nextStep(plan: ProjectPlan) {
-  return plan.pending.length > 0
-    ? `Next: give the values in ${MANIFEST_FILE}, then run \`nodrail policy lock\`.`
-    : "Next: commit nodrail.yaml and nodrail.lock.yaml, then `nodrail policy export --frozen` for your adapters.";
+  if (plan.pending.length > 0)
+    return `Next: give the values in ${MANIFEST_FILE}, then run \`nodrail policy lock\`.`;
+  const { team, runtimes } = plan.resolution.setup;
+  if (team && runtimes.length) {
+    const runtime = runtimes.length === 1 ? "" : ` --runtime ${runtimes[0]}`;
+    return `Next: run \`nodrail plan${runtime}\` and \`nodrail apply${runtime}\`, then commit nodrail.yaml and nodrail.lock.yaml.`;
+  }
+  return "Next: commit nodrail.yaml and nodrail.lock.yaml, then `nodrail policy export --frozen` for your adapters.";
 }
 
 const NOT_ACTIVE =
   "This changes the project's files only. Agents follow it once you activate an export for them.";
 
-export async function add(command: Command) {
-  const [ref, ...rest] = command.args;
+export function parseAddArgs([ref, ...rest]: string[]) {
   if (!ref || rest.length > 0)
     throw new UsageError("Usage: nodrail add <@nodrail/module | ./file.yaml>");
-  const asked = wanted(ref);
+  return wanted(ref);
+}
+
+export async function add(command: Command) {
+  const asked = parseAddArgs(command.args);
   const { io } = command;
   const root = io.cwd;
   const catalog = bundledCatalog();
@@ -143,8 +152,12 @@ export async function add(command: Command) {
 }
 
 /** `nodrail policy lock`: review what changed since the last lock and record it. */
-export async function lock(args: string[], io: Io) {
+export function checkLockArgs(args: string[]) {
   if (args.length > 0) throw new UsageError("Usage: nodrail policy lock");
+}
+
+export async function lock(args: string[], io: Io) {
+  checkLockArgs(args);
   const root = io.cwd;
   let report: string[] = [];
   writeProject({ root, home: io.home }, () => {
@@ -173,6 +186,7 @@ export async function lock(args: string[], io: Io) {
         ...waiting(plan),
         ...contractReview(root, project.lock, plan),
         ...since,
+        nextStep(plan),
       ];
       return null;
     }
@@ -182,7 +196,7 @@ export async function lock(args: string[], io: Io) {
       ...contentReview(project.lock, plan.lock),
       ...contractReview(root, project.lock, plan),
       reviewText(baseline, plan),
-      NOT_ACTIVE,
+      ...(plan.resolution.setup.team ? [] : [NOT_ACTIVE]),
       nextStep(plan),
     ];
     return { [LOCK_FILE]: next };
@@ -251,11 +265,15 @@ function drift(locked: ProjectPlan["lock"], now: ProjectPlan["lock"]) {
  * stdout, offline, only when every file still matches the lock. Anything
  * else exits nonzero with the reason on stderr and nothing on stdout.
  */
-export async function exportFrozen(args: string[], io: Io) {
+export function checkExportArgs(args: string[]) {
   if (args.length !== 1 || args[0] !== "--frozen")
     throw new UsageError(
       "Export reads only a reviewed lock: use `nodrail policy export --frozen`.",
     );
+}
+
+export async function exportFrozen(args: string[], io: Io) {
+  checkExportArgs(args);
   const { text } = frozenPolicy({ root: io.cwd, home: io.home });
   io.out(text.replace(/\n$/, ""));
   return 0;
@@ -268,6 +286,7 @@ export async function exportFrozen(args: string[], io: Io) {
 /** What a setup is made from: its resources, and every local file read. */
 export const setupOf = (plan: ProjectPlan) => ({
   setup: plan.resolution.setup,
+  catalogRules: plan.effective?.catalogRules ?? new Set<string>(),
   inputs: plan.resolution.inputs.flatMap((input) =>
     input.kind === "local" ? [input.path] : [],
   ),
@@ -280,17 +299,19 @@ export function frozenPolicy({
   root,
   home,
   held = false,
+  proposed,
 }: {
   root: string;
   home: string;
   /** This process holds the project, so its own write isn't someone else's. */
   held?: boolean;
+  proposed?: ProposedProject;
 }) {
   if (!held && writeInProgress({ root, home }))
     throw new CliError(
       "A change to this project was interrupted or is under way. Run `nodrail policy lock` or `nodrail apply` to settle it.",
     );
-  const project = readProject(root);
+  const project = proposed ?? readProject(root);
   if (project.manifest === null)
     throw new CliError(`No ${MANIFEST_FILE} here.`);
   if (project.lock === null)

@@ -2,6 +2,7 @@ import { lstatSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { accountableFiles } from "./accountable.ts";
 import { connectionsFile, telemetrySettings } from "./connections.ts";
+import { launcher } from "./launcher.ts";
 import type { Env } from "../config.ts";
 import type { CompiledContracts } from "../contracts/engine.ts";
 import { briefSection } from "../contracts/brief.ts";
@@ -155,6 +156,7 @@ function protectList(
     ...input.inputs,
     ...input.connectionFiles,
     ...input.pluginFolders,
+    ...launcher.args,
     ...members.flatMap((agent) => [
       ...(agent.instructions ? [agent.instructions] : []),
       ...agent.skills,

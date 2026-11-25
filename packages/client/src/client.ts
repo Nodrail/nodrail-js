@@ -44,6 +44,7 @@ export type StepReceipt =
 export type StepEvent = {
   run: { key: string };
   step: { id: string; agent: string };
+  agent?: string;
   event: "started" | "finished";
   receipt?: StepReceipt;
 };
@@ -117,7 +118,8 @@ export type LivePolicy = {
 export type HostDecision = ActionDescriptor & {
   /** Deterministic per call on the host, so a retry is the same row. */
   idempotency_key: string;
-  verdict: "allow" | "deny";
+  verdict: "allow" | "deny" | "would_deny";
+  agent?: string;
   rule?: { id: string; name?: string } | null;
   reason?: string;
   /** ISO 8601, the host's clock. */
@@ -229,12 +231,17 @@ export class NodrailClient {
     descriptor: ActionDescriptor,
     idempotencyKey: string,
     run?: RunRef,
-    subject?: string | null,
+    context?: string | null | { subject?: string | null; agent?: string },
   ) {
+    const { subject, agent } =
+      typeof context === "object" && context !== null
+        ? context
+        : { subject: context, agent: undefined };
     const send = (withSubject: boolean) =>
       this.request("/actions", {
         body: {
           ...descriptor,
+          ...(agent ? { agent } : {}),
           ...(run
             ? { run: withSubject ? { ...run, subject: subject ?? null } : run }
             : {}),
@@ -353,6 +360,7 @@ export class NodrailClient {
     report: {
       key: string;
       outcome: ReportOutcome;
+      agent?: string;
       permitId?: string | null;
       details?: object;
       measured?: readonly Measured[];
@@ -372,6 +380,7 @@ export class NodrailClient {
         body: {
           report_key: report.key,
           outcome: report.outcome,
+          ...(report.agent ? { agent: report.agent } : {}),
           ...(report.permitId ? { permit_id: report.permitId } : {}),
           ...(report.details ? { details: report.details } : {}),
           ...(withMeasured && measured ? { measured } : {}),

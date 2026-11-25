@@ -1,3 +1,5 @@
+import { hooksIn, json, object, textOf, type Json } from "./hook-settings.ts";
+import { launcherTail } from "./launcher.ts";
 import { readdirSync, readFileSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import type { Env } from "../config.ts";
@@ -6,7 +8,7 @@ import {
   isPolicyHook,
   isNodrailHook,
   MCP_FILE,
-  OBSERVE_PREFIX,
+  isObserveHook,
   SETTINGS_FILE,
 } from "./claude-code.ts";
 import { missingHooks } from "./hook-drift.ts";
@@ -38,21 +40,6 @@ export type Unmanaged = {
   where: string;
 };
 
-type Json = Record<string, unknown>;
-
-const object = (value: unknown): Json | null =>
-  value !== null && typeof value === "object" && !Array.isArray(value)
-    ? (value as Json)
-    : null;
-
-export function json(path: string): Json | null {
-  try {
-    return object(JSON.parse(readFileSync(path, "utf8")));
-  } catch {
-    return null;
-  }
-}
-
 const list = (folder: string) => {
   try {
     return readdirSync(folder, { withFileTypes: true }).filter(
@@ -79,24 +66,7 @@ export function fileDrift(root: string, entry: HostState): Drift[] {
   });
 }
 
-const textOf = (value: unknown) => (typeof value === "string" ? value : null);
-
 const isOurs = isNodrailHook;
-
-/** Every hook command in a Claude Code settings object, by event. */
-function claudeHooks(settings: Json | null) {
-  const hooks = object(settings?.hooks) ?? {};
-  return Object.entries(hooks).flatMap(([event, groups]) =>
-    (Array.isArray(groups) ? groups : []).flatMap((group) =>
-      ((object(group)?.hooks as unknown[] | undefined) ?? []).map((hook) => ({
-        event,
-        matcher: textOf(object(group)?.matcher),
-        command:
-          textOf(object(hook)?.command) ?? textOf(object(hook)?.type) ?? "?",
-      })),
-    ),
-  );
-}
 
 /** Claude Code's shared settings, against the entries nodrail set. */
 export function claudeSettingsDrift(root: string, entry: HostState): Drift[] {
@@ -108,7 +78,7 @@ export function claudeSettingsDrift(root: string, entry: HostState): Drift[] {
     detail,
   });
   const drift: Drift[] = [];
-  const policyHooks = claudeHooks(settings).filter((hook) =>
+  const policyHooks = hooksIn(settings).filter((hook) =>
     isPolicyHook(hook.command),
   );
   if (policyHooks.length === 0)
@@ -312,7 +282,7 @@ function claudeSettingsItems(
   ] as const;
   return places.flatMap(([path, where, scope]): Unmanaged[] => {
     const settings = json(path);
-    const hooks = claudeHooks(settings)
+    const hooks = hooksIn(settings)
       .filter((hook) => !isOurs(hook.command))
       .map((hook): Unmanaged => ({
         kind: "hook",
@@ -420,9 +390,7 @@ function otherCodexHooks(
 ): Unmanaged[] {
   return (hooks ?? [])
     .filter(
-      (hook) =>
-        hook.command !== ours &&
-        !(hook.command ?? "").startsWith(OBSERVE_PREFIX),
+      (hook) => hook.command !== ours && !isObserveHook(hook.command ?? ""),
     )
     .map((hook) => ({
       kind: "hook",
@@ -442,7 +410,7 @@ export function appliedCodexHook(root: string) {
       const command = object(hook)?.command;
       if (
         typeof command === "string" &&
-        command.startsWith("nodrail policy hook ")
+        launcherTail(command).startsWith("policy hook ")
       )
         return command;
     }

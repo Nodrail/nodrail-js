@@ -21,7 +21,12 @@ import {
   type DecisionTarget,
   type VerifiedReport,
 } from "./decision-destination.ts";
-import { told, type HookReporting, type Observed } from "./hook-telemetry.ts";
+import {
+  reportedVerdict,
+  type HookReporting,
+  type Observed,
+} from "./hook-telemetry.ts";
+import { callerCandidate } from "./hook-caller.ts";
 import { receiptText } from "./hook-runs.ts";
 import { parseEvent, type StepReport } from "./local-hook.ts";
 import type { RunEvent } from "./runs.ts";
@@ -43,6 +48,7 @@ export type QueuedDecision = {
 export type QueuedOutcome = {
   type: "outcome";
   key: string;
+  agent?: string;
   outcome: "success" | "failure" | "unknown";
   measured?: { path: string; value: number }[];
   tokens?: number;
@@ -50,13 +56,25 @@ export type QueuedOutcome = {
   cancellation?: true;
 };
 export type QueuedStep = { type: "step"; item: Record<string, unknown> };
-export type Queued = QueuedDecision | QueuedOutcome | QueuedStep;
+export type QueuedInventory = {
+  type: "inventory";
+  item: Record<string, unknown>;
+};
+export type Queued =
+  QueuedDecision | QueuedOutcome | QueuedStep | QueuedInventory;
 
-function stepItem(run: string, event: RunEvent, details?: StepReport) {
+function stepItem(
+  run: string,
+  event: RunEvent,
+  policyDigest: string | null,
+  details?: StepReport,
+) {
   if (event.type !== "step.started" && event.type !== "step.finished")
     return null;
   const item = {
     run: { key: run },
+    agent: event.agent,
+    ...(policyDigest ? { policy_digest: policyDigest } : {}),
     step: { id: event.step, agent: event.agent },
   };
   if (event.type === "step.started") return { ...item, event: "started" };
@@ -130,6 +148,46 @@ function reportedRule(document: PolicyDocument, id: string | null) {
   return name ? { id, name } : { id };
 }
 
+function decisionRun(run: string, step?: string | null, agent?: string | null) {
+  return { key: run, ...(step && agent ? { step: { id: step, agent } } : {}) };
+}
+
+function decisionMarkers(
+  tool: string,
+  event: Observed["event"],
+  pausedAgents: Observed["pausedAgents"],
+) {
+  const command = (event?.tool_input as { command?: unknown } | undefined)
+    ?.command;
+  // The console generates an exact echo command containing a random token.
+  const check =
+    tool === "shell" && typeof command === "string"
+      ? /^echo (nodrail-check-[a-f0-9]{16})$/.exec(command)
+      : null;
+  return {
+    ...(check && check[0] === command ? { check_token: check[1] } : {}),
+    ...(pausedAgents ? { paused_agents: pausedAgents } : {}),
+  };
+}
+
+function decisionDescriptor(
+  action: NonNullable<Observed["judged"]["action"]>,
+  includeArguments: boolean,
+  reason?: string,
+) {
+  return {
+    tool: action.tool,
+    operation: action.operation,
+    resource: includeArguments
+      ? action.resource
+      : { kind: action.resource.kind, id: "redacted" },
+    params: includeArguments ? action.params : {},
+    ...(includeArguments && reason
+      ? { reason: reason.slice(0, MAX_REASON) }
+      : {}),
+  };
+}
+
 /** A judged call as the control plane records it, or null when it can't be. */
 export function decisionItem(
   observed: Observed,
@@ -138,30 +196,32 @@ export function decisionItem(
     document: PolicyDocument;
     policyDigest: string | null;
     now?: Date;
+    includeArguments?: boolean;
   },
 ): Record<string, unknown> | null {
-  const { judged, event, agent, run, step } = observed;
+  const { judged, event, agent, run, step, pausedAgents, admission } = observed;
   // A call that couldn't be safely described has no action to record.
   if (!judged.action) return null;
   const ruleId = judged.decision?.matchedRuleId ?? null;
   const reason = judged.refusal ?? judged.decision?.explanation;
   return {
+    ...decisionMarkers(judged.action.tool, event, pausedAgents),
+    ...decisionDescriptor(
+      judged.action,
+      !!input.includeArguments && !pausedAgents,
+      reason,
+    ),
     idempotency_key:
-      callKey(input.host, event) ?? `${input.host}:${randomUUID()}`,
-    ...judged.action,
-    verdict: told(judged),
+      admission?.call ??
+      callKey(input.host, event) ??
+      `${input.host}:${randomUUID()}`,
+    ...(admission ? { admission_id: admission.id } : {}),
+    ...(agent ? { agent } : {}),
+    verdict: reportedVerdict(observed),
     rule: reportedRule(input.document, ruleId),
-    ...(reason ? { reason: reason.slice(0, MAX_REASON) } : {}),
     decided_at: (input.now ?? new Date()).toISOString(),
     policy_digest: input.policyDigest,
-    ...(run
-      ? {
-          run: {
-            key: run,
-            ...(step && agent ? { step: { id: step, agent } } : {}),
-          },
-        }
-      : {}),
+    ...(run ? { run: decisionRun(run, step, agent) } : {}),
   };
 }
 
@@ -189,9 +249,11 @@ function outcomeFor(
   const limits = document ? limitsOf(document) : [];
   const success = name === "PostToolUse";
   const shared = limits.some(({ across }) => across === "environment");
+  const agent = callerCandidate(event);
   return {
     type: "outcome",
     key,
+    ...(agent ? { agent } : {}),
     outcome: success ? "success" : shared ? "unknown" : "failure",
     ...(success
       ? remoteReadings(event, sharedLimitsForOutcome(event, limits, tool))
@@ -202,6 +264,7 @@ function outcomeFor(
 /** What the hook tells the sink: each decision, and each outcome. */
 export type DecisionSink = {
   destination: DecisionTarget;
+  inventory?: () => void;
   observe: (observed: Observed) => void;
   outcome: (stdin: string) => void;
   step: (run: string, event: RunEvent, details?: StepReport) => void;
@@ -218,6 +281,7 @@ type SinkInput = HookReporting & {
   env?: Record<string, string | undefined>;
   verified?: VerifiedReport;
   tool?: OutcomeTool;
+  includeArguments?: boolean;
 };
 
 export function decisionSink(input: SinkInput): DecisionSink | null {
@@ -261,12 +325,23 @@ export function decisionSink(input: SinkInput): DecisionSink | null {
   };
   return {
     destination,
+    inventory: input.verified?.config.project_id
+      ? () => {
+          queue({
+            type: "inventory",
+            item: {
+              host: input.host,
+              heartbeat: true,
+            },
+          });
+        }
+      : undefined,
     observe: (observed) => {
       const item = decisionItem(observed, { ...input, policyDigest });
       if (item) queue({ type: "decision", item });
     },
     step: (run, event, details) => {
-      const item = stepItem(run, event, details);
+      const item = stepItem(run, event, policyDigest, details);
       if (item) queue({ type: "step", item });
     },
     outcome: (stdin) => queueOutcome(stdin, input, folder, queue),

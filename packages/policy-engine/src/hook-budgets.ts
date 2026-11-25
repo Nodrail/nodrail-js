@@ -160,7 +160,7 @@ async function authorityFor(
   send: typeof fetch,
 ): Promise<BudgetAuthority> {
   const { run } = runPlacement(event, config.env);
-  const step = run ? stepOf(event) : null;
+  const step = run ? stepOf(event, options) : null;
   const { calls, ids, amounts } = requirements(
     stdin,
     options,
@@ -179,7 +179,9 @@ async function authorityFor(
     {
       call_fingerprint: key,
       policy_digest: config.policyDigest,
+      agent: options.caller,
       calls: [...calls.values()],
+      budget_ids: [...ids],
       ...(amounts.length ? { amounts: Object.fromEntries(amounts) } : {}),
       ...(run ? { run: { key: run, step: step ?? undefined } } : {}),
     },
@@ -189,7 +191,7 @@ async function authorityFor(
   const reply = response.parse(await answer.json());
   if (!canStart(reply, ids)) return fromReply(reply, ids);
   const claim = await startLease(
-    { ...config, policyDigest: config.policyDigest },
+    { ...config, policyDigest: config.policyDigest, agent: options.caller },
     key,
     reply.expires_at,
     send,
@@ -217,7 +219,7 @@ function canStart(
 }
 
 async function startLease(
-  config: RemoteOptions & { policyDigest: string },
+  config: RemoteOptions & { policyDigest: string; agent?: string },
   key: string,
   deadline: string,
   send: typeof fetch,
@@ -232,6 +234,7 @@ async function startLease(
       call_fingerprint: key,
       policy_digest: config.policyDigest,
       claim_id: claimId,
+      agent: config.agent,
     },
     send,
   );

@@ -26,6 +26,7 @@ await build({
   entryPoints: ["src/hook-main.ts"],
   outfile: "dist/nodrail-hook.mjs",
   bundle: true,
+  minifySyntax: true,
   banner: { js: "#!/usr/bin/env node" },
 });
 

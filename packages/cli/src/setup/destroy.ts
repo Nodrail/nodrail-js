@@ -1,3 +1,4 @@
+import { removeAppliedHook } from "@nodrail/policy-engine/command-line";
 import { HOST_NAMES } from "./state.ts";
 import { existsSync, readdirSync, readFileSync, rmdirSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -47,10 +48,11 @@ export function planDestroy(input: {
   if (
     input.runtime !== undefined &&
     input.runtime !== "claude-code" &&
-    input.runtime !== "codex"
+    input.runtime !== "codex" &&
+    input.runtime !== "copilot"
   )
     throw new CliError(
-      `--runtime is claude-code or codex, not ${input.runtime}.`,
+      `--runtime is claude-code, codex or copilot, not ${input.runtime}.`,
     );
   const hosts =
     input.runtime === undefined
@@ -229,8 +231,8 @@ export function destroySetup(
   reviewed: DestroyPlan,
   again: string,
 ) {
-  const left = holdProject(place, (folder) =>
-    replayReviewed(
+  const left = holdProject(place, (folder) => {
+    const left = replayReviewed(
       folder,
       place.root,
       {
@@ -240,8 +242,11 @@ export function destroySetup(
         again,
       },
       (plan) => journalFor(place.root, plan),
-    ),
-  );
+    );
+    if (reviewed.hosts.includes("claude-code"))
+      removeAppliedHook(place.home, place.root);
+    return left;
+  });
   for (const step of reviewed.steps)
     if (step.action === "remove") pruneFolders(place.root, dirname(step.path));
   if (left.length > 0)

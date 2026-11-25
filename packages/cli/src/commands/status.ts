@@ -1,3 +1,5 @@
+import { hookStatus } from "../setup/status.ts";
+import { projectPolicyStatus } from "../setup/policy-status.ts";
 import { HOST_NAMES } from "../setup/state.ts";
 import { resolve } from "node:path";
 import type { Command } from "../context.ts";
@@ -26,21 +28,50 @@ const MARK: Record<Drift["change"], string> = {
   changed: "!",
 };
 
-function revisionLine({ revision }: HostStatus) {
+function revisionLine({ revision, host }: HostStatus) {
   const short = (sha: string | null) =>
     sha ? sha.slice(0, 12) : "none recorded";
   if (revision.locked === null)
     return `  Revision: applied from workspace ${short(revision.applied)}`;
   return revision.applied === revision.locked
     ? `  Revision: workspace ${short(revision.applied)}, as locked`
-    : `  Revision: applied from workspace ${short(revision.applied)}; the lock is at ${short(revision.locked)}: run \`nodrail plan\`, then \`nodrail apply\``;
+    : `  Revision: applied from workspace ${short(revision.applied)}; the lock is at ${short(revision.locked)}: run \`nodrail plan --runtime ${host}\`, then \`nodrail apply --runtime ${host}\``;
 }
 
-function hostText(status: HostStatus) {
+function policyText(policy: ReturnType<typeof projectPolicyStatus>) {
+  const { mode, source, remote } = policy;
+  const lines = [
+    source
+      ? `Source compared with lock: ${source}`
+      : "Source matches the lock.",
+    mode === "watch"
+      ? "Mode: watch (ordinary policy denials let calls continue)."
+      : "Mode: enforce.",
+  ];
+  if (remote?.state === "unchecked")
+    lines.push(
+      "Connected policy: no hook check recorded for this revision yet.",
+    );
+  if (remote?.state === "live")
+    lines.push(
+      `Connected policy: last verified with the control plane at ${remote.at}.`,
+    );
+  if (remote?.state === "cached")
+    lines.push(
+      `Connected policy: the control plane didn't answer at ${remote.at}; the hook used the verified cache.`,
+    );
+  if (remote?.state === "unavailable")
+    lines.push(
+      `Connected policy: no usable policy at ${remote.at}; the hook ${mode === "watch" ? "let ordinary calls continue" : "blocked calls"}.${remote.detail ? ` ${remote.detail}.` : ""}`,
+    );
+  return lines.join("\n");
+}
+
+function hostText(status: HostStatus, connected: boolean) {
   const lines = [
     `${HOST_NAMES[status.host]}${status.entry ? `: starts as ${status.entry}` : ""}`,
     revisionLine(status),
-    `  Policy hook: ${status.activation.state}, ${status.activation.detail}.`,
+    `  ${hookStatus(status.activation, connected)}`,
     `  Observation: ${OBSERVING[status.observing]}.`,
   ];
   lines.push(
@@ -91,7 +122,7 @@ export async function status(command: Command) {
   const { io, values } = command;
   if (command.args.length > 1)
     throw new UsageError(
-      "Usage: nodrail status [<project folder>] [--runtime claude-code|codex]",
+      "Usage: nodrail status [<project folder>] [--runtime claude-code|codex|copilot]",
     );
   const root =
     command.args[0] === undefined ? io.cwd : resolve(io.cwd, command.args[0]);
@@ -106,12 +137,23 @@ export async function status(command: Command) {
         : `${values.runtime} isn't set up here by nodrail apply.`,
     );
   const last = lastObservation(io.home, root);
+  const policy = projectPolicyStatus(root, io.home);
+  const ready =
+    statuses.every(inStep) &&
+    !policy.source &&
+    policy.mode === "on" &&
+    (policy.remote === null || policy.remote.state === "live");
   command.print(
-    { hosts: statuses, inStep: statuses.every(inStep), lastObservation: last },
-    () => [...statuses.map(hostText), lastLine(last)].join("\n\n"),
+    { hosts: statuses, inStep: ready, lastObservation: last, policy },
+    () =>
+      [
+        policyText(policy),
+        ...statuses.map((status) => hostText(status, policy.remote !== null)),
+        lastLine(last),
+      ].join("\n\n"),
   );
-  if (!statuses.every(inStep))
+  if (!ready)
     throw new CliError(
-      "Not as nodrail set it up from the locked revision, or the policy isn't enforced: see above.",
+      "The installed setup, source lock or connected policy check needs attention. See above.",
     );
 }

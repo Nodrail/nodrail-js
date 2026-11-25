@@ -35,7 +35,7 @@ Run these in the folder that holds `nodrail.yaml`, usually the root of your repo
 | `policy lock`                     | Shows the permission changes since the last lock, records them | 0 done or up to date, 1 refused             |
 | `policy export --frozen`          | Prints the locked policy as one rules file                     | 0 printed, 1 anything differs from the lock |
 | `example` (preview)               | Copies an example project out of the package                   | 0 copied, 1 the folder isn't empty          |
-| `plan` (preview)                  | Shows what `nodrail apply` would set up for the team           | 0 could apply, 1 something blocks it (or, with `--require-active`, the policy isn't enforced) |
+| `plan` (preview)                  | Shows what `nodrail apply` would set up for the team           | 0 could apply, 1 something blocks it (or, with `--require-active`, the current hook is missing, inactive, or in watch mode) |
 | `apply` (preview)                 | Sets the team up on its host, after showing the plan           | 0 done or nothing to do, 1 refused          |
 | `destroy` (preview)               | Takes out what `apply` set up, after showing what              | 0 done or nothing to do, 1 refused          |
 | `observe <folder>` (preview)      | Records the project's status in `~/.nodrail/observations/`; the session-start hook runs it | always 0 |
@@ -146,7 +146,7 @@ Codex runs a project's config and hooks only after you trust them, and nodrail n
 1. Open `codex` in the folder and trust it.
 2. Run `/hooks` in Codex and trust nodrail's hook.
 
-`plan` and `apply` ask Codex whether it runs nodrail's hook here, through `codex app-server`, without changing anything. Until it does, `plan` says which step is missing and `apply` exits with 1 after writing the files. The hook names the policy by its full path, because Codex runs hooks in the folder you started it in; after moving the project, run `apply` again and trust the hook again. When Codex can't run `nodrail` at all, the hook answers with a deny, so Codex blocks the call rather than letting it through. Codex reads files through its shell (`cat`, `sed -n`, `rg`): the hook judges those as the file reads they are, so a policy that allows reading files lets Codex read them, and the same secret rules hold. Codex on Windows isn't set up yet.
+`plan` and `apply` ask Codex whether it runs nodrail's hook here, through `codex app-server`, without changing anything. Until it does, `plan` and `apply` explain which trust step is missing. `apply` succeeds once the files are written and leaves Codex stopped until you trust the hook. Use `plan --require-active` to require a current, enforcing hook. In watch mode a trusted hook records decisions and lets ordinary calls continue. The hook names the policy by its full path, because Codex runs hooks in the folder you started it in; after moving the project, run `apply` again and trust the hook again. When Codex can't run `nodrail` at all, the hook answers with a deny, so Codex blocks the call rather than letting it through. Codex reads files through its shell (`cat`, `sed -n`, `rg`): the hook judges those as the file reads they are, so a policy that allows reading files lets Codex read them, and the same secret rules hold. Codex on Windows isn't set up yet.
 
 For `runtime: copilot` (GitHub Copilot CLI) it plans:
 
@@ -171,7 +171,7 @@ Copilot runs a project's hooks and MCP servers only in a folder you trust, and n
 
 `plan` starts with the reviewed revision it sets up, from the lock: `Revision: workspace 0d3971b91508, policy 2e28ae1c4035`. `apply` records it for the host in `.nodrail/setup-state.json`, so `plan --json` shows both the revision it would set up (`revision`) and the one each host here was last applied from (`applied`).
 
-Whether apply *could* go ahead (`ready`, the exit code) is one question; whether the host enforces the policy is another. `plan` ends with the second as `Policy hook: <state>, <why>`, and `--json` gives it as `activation`:
+Whether apply *could* go ahead (`ready`, the exit code) is one question; whether the host enforces the policy is another. `plan` reports whether the hook is installed and active and whether the locked policy revision is pending. `Policy hook: <state>, <why>` gives the activation detail, also available as `activation` with `--json`:
 
 | State | Meaning |
 | --- | --- |
@@ -184,13 +184,73 @@ With `connect:` and `decide: cloud` (see [Connect to Nodrail](playbooks.md#conne
 
 - **in sync**
 - **apply publishes** the lock, with what it adds, changes and removes
-- **drift:** the live rules were changed in Nodrail, or come from another project. `apply` refuses until you bring the change into the repo, or pass `--replace-live` to take them over.
+- **drift:** the live policy differs from the lock. Review the rules and bring any changes you need to keep into the repo before applying.
+- **takeover:** a different project owns the environment's live policy. Review the owner and enrolled hosts with `nodrail plan --replace-live`, then use `nodrail apply --replace-live` to confirm. This applies even when the rules are identical.
+- **enrollment:** the original enrolling user can use `apply` to recover a lost credential. When a workspace admin revokes an enrollment, they must explicitly rotate its credential in Agents to reactivate it.
+
+Workspace admins can grant or revoke another policy writer's project-level access via `POST /api/v1/projects/access?workspace=<slug>` with an `agents:manage` token. Send `action` as `grant-apply` or `revoke-apply`, with `project_id` and `user_id`. To bind an existing agent explicitly, send `action` as `bind-agent`, with `project_id` and the `agent` key.
+
+Connected plans show the project and destination, policy version and counts,
+agent changes and the number of setup files that would change. Use
+`nodrail plan --details` to expand the checks and every rule and file change.
+
+Use `nodrail connect <url> --workspace <slug> --environment <slug>` to set the
+destination, sign in if needed, update the lock and run plan. Add `--runtime`
+to choose a host in a project that supports several.
 
 `apply` publishes before it writes any file, and only what `plan` previewed. A change made in between is refused.
 
-`plan` exits with 0 whenever apply could go ahead, whatever the activation. For automation that must not run agents without the policy, add `--require-active`: `plan` then also exits with 1 unless the state is `verified` or `configured`. The `active` key stays as before: `true` or `false` for Codex, `null` for Claude Code.
+`plan` exits with 0 whenever apply could go ahead, whatever the activation. With `--require-active`, `plan` also exits with 1 unless the installed hook matches the plan, is in enforcement mode and is `verified` or `configured`. For Claude Code and Copilot, `configured` is inferred from settings. Exercise an allowed and a denied call to verify live behavior. For connected Claude Code projects, use **Verify the first check-in** in **Agents → Connect a project** and look for the matching decision in Activity. The `active` key stays as before: `true` or `false` for Codex, `null` for Claude Code.
 
-When both hosts are set up in the folder, a change to the shared policy reaches the other host's open sessions at their next tool call; `plan` says so before you apply. If the other host's agents and skills were applied from an older revision, `plan` names the `apply --runtime` that brings them up to date. If `.nodrail/setup-state.json` is missing while nodrail's files are there, `plan` says so: nodrail takes none of them for its own, and overwrites nothing, until you restore the state from git or move the files aside. A damaged state stops `plan` with what to do.
+When both hosts are set up in the folder, a change to the shared policy reaches the other host's open sessions at their next tool call; `plan` says so before you apply. If the other host's agents and skills were applied from an older revision, `plan` names the `apply --runtime` that brings them up to date. If `.nodrail/setup-state.json` is missing while nodrail's files are there, `plan` says so: nodrail takes none of them for its own, and overwrites nothing, until you restore the state from a local backup or move the files aside. A damaged state stops `plan` with what to do.
+
+## Upgrade to connect
+
+Install the [published CLI from Get started](https://nodrail.com/docs/get-started#install)
+for this workflow. It covers existing standalone plugins, CLI 0.4 projects and
+source-built CLI 0.5 projects.
+
+1. Keep the existing workspace, environment and reviewed policy. If resource
+   files use `apiVersion: apf.nodrail.com/v1alpha1`, change it to
+   `nodrail.com/v1alpha1`. Review any policy that relied on a person clearing a
+   tool call. Change those rules to `deny` until the conditions for an explicit
+   `allow` are in place. Remove the retired form and notification fields
+   flagged by the compiler.
+2. For each repository, add [the connect block](https://nodrail.com/docs/get-started#connect)
+   for the workspace and environment you already use. Sign in once with
+   `nodrail login --url <address>`. Apply enrolls the machine in that
+   environment. Keep the standalone credential only for installations that
+   still use it.
+3. Run these commands from the repository, replacing the runtime for each host
+   you use. Resolve any reported live-policy drift in the repository and
+   review the plan before applying.
+
+   ```sh
+   nodrail policy lock
+   nodrail plan --runtime claude-code
+   nodrail apply --runtime claude-code
+   ```
+
+   If the live policy already belongs to the standalone installation, pull it
+   with `nodrail rules pull live-rules.yaml` and review its decisions against
+   the locked project policy. When you intend the repository to take ownership,
+   rerun both `plan` and `apply` with `--replace-live`.
+
+   This replaces the source-built 0.5 project hook in place. For an offline
+   project that stays offline, use `plan` to check whether it needs to be
+   relocked before reapplying.
+4. Trust the new folder and hook when the host asks. Before opening a new
+   session, disable the standalone Nodrail plugin for that host. Use
+   `/plugin disable nodrail@nodrail` in Claude Code or
+   `codex plugin remove nodrail@nodrail` in Codex. If the plugin protects other
+   repositories, migrate those before disabling it globally.
+5. Restart existing sessions. Run the configuration check and exercise one
+   allowed and one denied call. In the connected environment, look for the two
+   corresponding decisions in **Activity**.
+
+   ```sh
+   nodrail plan --runtime claude-code --require-active
+   ```
 
 ### `apply` (preview)
 
@@ -204,7 +264,7 @@ nodrail apply --yes
 
 It runs as the project's only writer, like `add` and `lock`: a second `nodrail` waits its turn and names the one at work. Inside, it plans again, and if anything differs from what you were shown, it stops without changing anything. Every change is staged first in a journal in your home folder, then made one file at a time, with `.nodrail/setup-state.json` last. If it stops partway, the next `nodrail apply` or `nodrail policy lock` finishes it. A file someone changes while it runs is left alone and named.
 
-Run it again after changing a resource, a skill or a binding, and lock the policy first: it updates only the files that changed and removes the ones no longer needed, such as a member who left the team. With nothing to change it writes nothing.
+Run it again after changing a resource, a skill or a binding, and lock the policy first: it updates only the files that changed and removes the ones no longer needed, such as a member who left the team. With nothing to change it leaves the files as they are. In a connected project, `apply` sends the first setup report to Inventory with the enrolled machine credential. Session starts refresh the report.
 
 With `start: true` in `nodrail.yaml` and a terminal, it then opens the host. Otherwise run `claude` or `codex` in the folder: it starts as the entry agent, behind the policy hook. For Codex, `apply` is done only once Codex runs nodrail's hook; see above.
 
@@ -228,7 +288,9 @@ nodrail destroy ./project --yes
 - **Kept:** your own entries and files; any file you edited since nodrail wrote it (marked `!`, and yours from then on); `nodrail.yaml`, `nodrail.lock.yaml` and the files they name; each connection's data, which `destroy` names. A file the other host still needs stays for it.
 - **Yours to do:** a plugin you installed with `codex plugin add` is installed for every folder, so `destroy` names the `codex plugin remove` to run and doesn't run it.
 
-Sessions already open keep what they started with. Run `nodrail apply` to set everything up again.
+For an enrolled project, `apply` records the enrollment in your home directory so `destroy` can disconnect it even after `.nodrail/connect.json` is edited or removed. This affects every runtime sharing the machine credential. The live policy and audit history stay available. If the control plane cannot confirm revocation, `destroy` exits with code 1 and keeps the credential. Run `nodrail destroy` again after restoring connectivity, or use the console link it prints to revoke the credential. Use `nodrail logout --url <control-plane-url>` to end the personal CLI session.
+
+Sessions already open keep what they started with. Run `nodrail apply` to enroll the machine and set everything up again.
 
 ### `status` (preview)
 
@@ -247,7 +309,7 @@ For each host `apply` set up here, `status` shows:
 
 It also says whether the session-start observation is on, and when it last recorded (stale after 24 hours); see [Observation](playbooks.md#observation-preview).
 
-It reads only, offline, and changes nothing. It shows names and places, never a file's contents, a server's environment or a secret. For Codex, it asks Codex which hooks it runs, as `plan` does. It reads `.nodrail/setup-state.json`, so it works even when `nodrail.yaml` no longer reads. Use `--json` in scripts; the exit code is 0 only when every host is in step and enforced.
+It compares source files with the lock and shows enforcement mode. For a connected policy, it shows when the hook last verified the policy, used its cache or found no usable policy. This is a local record of the last check. For Codex, it asks Codex which hooks it runs. Use `--json` in scripts. Exit code 0 means every host is in step and configured to enforce, the source matches the lock and any connected policy was last verified with the server.
 
 ### `plugin fetch` (preview)
 

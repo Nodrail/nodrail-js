@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+- Extend coverage of unreadable project contracts and refused hand-back receipts.
+
+- Preserve the agent pause reason when a retried action returns redacted digests.
+
+## 0.9.0
+
+Uses `@nodrail/policy-engine` 0.9.0.
+
+- Bind saved credentials to the origin stored alongside them. Keep legacy Cloud credentials at the Cloud origin.
+
+- The Claude Code plugin steps aside only for a verified installed project hook. Standalone connection settings require a complete origin and credential pair.
+
+- Plugin hooks pair runtime credentials with their own origin, carry caller metadata and use the installed engine hook for applied projects.
+
 ## 0.8.0
 
 Uses `@nodrail/policy-engine` 0.8.0. 0.7.0 was never published to npm;

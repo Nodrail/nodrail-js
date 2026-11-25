@@ -15,7 +15,7 @@ const why: Record<string, string> = {
 /** Blocks that say the same whatever the request. */
 const fixed: Record<string, string> = {
   NOT_CONFIGURED:
-    "Nodrail: not configured, so this action is blocked. Set NODRAIL_CREDENTIAL or save it to ~/.nodrail/credential.",
+    "Nodrail: not configured, so this action is blocked. Pair NODRAIL_URL with NODRAIL_CREDENTIAL, or save the Cloud credential to ~/.nodrail/credential.",
   INSECURE_URL:
     "Nodrail: its address must use https (plain http only for this machine), so the credential isn't sent and this action is blocked.",
   UNAUTHENTICATED:
@@ -33,6 +33,8 @@ export function blockedText(decision: Extract<Decision, { allowed: false }>) {
   // Said here, from the declared contract: paths and codes, never values.
   if (decision.code === "CONTRACT_REFUSED" && decision.reason)
     return decision.reason;
+  if (decision.code === "NOT_CONFIGURED" && decision.reason)
+    return `Nodrail: ${decision.reason}`;
   const constant = fixed[decision.code];
   if (constant) return constant;
   const reference = decision.reference ? ` Request ${decision.reference}.` : "";

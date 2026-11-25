@@ -1,6 +1,6 @@
 {
   "name": "@nodrail/client",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "description": "TypeScript client for the Nodrail control plane, self-hosted or Nodrail Cloud. Each wrapped tool call is allowed or denied before it runs.",
   "keywords": [
     "ai",

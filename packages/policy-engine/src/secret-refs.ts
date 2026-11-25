@@ -1,9 +1,21 @@
-import { execFileSync } from "node:child_process";
+import {
+  execFileSync,
+  type ExecFileSyncOptionsWithStringEncoding,
+} from "node:child_process";
 import type { SecretRef } from "./connections.ts";
 
 /** Reads secrets by reference, where they are kept; never writes one. */
 
 type Env = Record<string, string | undefined>;
+
+type Keychain = {
+  platform?: NodeJS.Platform;
+  execute?: (
+    file: string,
+    args: string[],
+    options: ExecFileSyncOptionsWithStringEncoding,
+  ) => string;
+};
 
 const SECURITY = "/usr/bin/security";
 
@@ -25,11 +37,16 @@ export const secretName = (ref: SecretRef) =>
     : `Keychain ${ref.fromKeychain.service}${ref.fromKeychain.account ? `/${ref.fromKeychain.account}` : ""}`;
 
 /** Whether the reference resolves here, without reading the secret. */
-export function hasSecret(ref: SecretRef, env: Env) {
+export function hasSecret(
+  ref: SecretRef,
+  env: Env,
+  { platform = process.platform, execute = execFileSync }: Keychain = {},
+) {
   if ("fromEnv" in ref) return (env[ref.fromEnv] ?? "") !== "";
-  if (process.platform !== "darwin") return false;
+  if (platform !== "darwin") return false;
   try {
-    execFileSync(SECURITY, keychainArgs(ref.fromKeychain, false), {
+    execute(SECURITY, keychainArgs(ref.fromKeychain, false), {
+      encoding: "utf8",
       stdio: "ignore",
       timeout: 10_000,
     });
@@ -40,16 +57,21 @@ export function hasSecret(ref: SecretRef, env: Env) {
 }
 
 /** The secret's value; an error names the reference, never a value. */
-export function secretValue(ref: SecretRef, env: Env, timeout = 10_000) {
+export function secretValue(
+  ref: SecretRef,
+  env: Env,
+  timeout = 10_000,
+  { platform = process.platform, execute = execFileSync }: Keychain = {},
+) {
   if ("fromEnv" in ref) {
     const value = env[ref.fromEnv];
     if (!value) throw new Error(`${ref.fromEnv} isn't set`);
     return value;
   }
-  if (process.platform !== "darwin")
+  if (platform !== "darwin")
     throw new Error("Keychain references work on macOS only");
   try {
-    return execFileSync(SECURITY, keychainArgs(ref.fromKeychain, true), {
+    return execute(SECURITY, keychainArgs(ref.fromKeychain, true), {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
       timeout,

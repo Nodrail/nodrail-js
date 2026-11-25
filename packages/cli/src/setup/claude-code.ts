@@ -1,3 +1,4 @@
+import { launcherTail, launchShell } from "./launcher.ts";
 import { claudeMarketplace, claudePluginSettings } from "./plugins.ts";
 import { stringify } from "yaml";
 import {
@@ -99,23 +100,27 @@ export const HOOK_PREFIX = `nodrail policy hook "$CLAUDE_PROJECT_DIR/.nodrail/`;
 export const OBSERVE_PREFIX = "nodrail observe ";
 
 /** Recognize pre-switch-over hooks so apply replaces them in place. */
-const CONNECT_PREFIX = `nodrail connect hook "$CLAUDE_PROJECT_DIR/.nodrail/`;
+export const CONNECT_PREFIX = `nodrail connect hook "$CLAUDE_PROJECT_DIR/.nodrail/`;
 
 /** Whether a command is nodrail's policy hook, local or connected. */
 export const isPolicyHook = (command: string) =>
-  command.startsWith(HOOK_PREFIX) || command.startsWith(CONNECT_PREFIX);
+  launcherTail(command).startsWith(HOOK_PREFIX.slice(8)) ||
+  command.startsWith(CONNECT_PREFIX);
+
+export const isObserveHook = (command: string) =>
+  launcherTail(command).startsWith(OBSERVE_PREFIX.slice(8));
 
 /** Whether a hook command is one of nodrail's own. */
 export const isNodrailHook = (command: unknown) =>
   typeof command === "string" &&
-  (isPolicyHook(command) || command.startsWith(OBSERVE_PREFIX));
+  (isPolicyHook(command) || isObserveHook(command));
 
 /** The observation command, for a project the host names by `root`. */
 export const observeCommand = (
   root: string,
   setup: Pick<ProjectSetup, "observe">,
 ) =>
-  `${OBSERVE_PREFIX}${root} --detach${setup.observe.names ? " --names" : ""}`;
+  `${launchShell} observe ${root} --detach${setup.observe.names ? " --names" : ""}`;
 
 export type ClaudeSetup = {
   files: DesiredFile[];
@@ -168,7 +173,7 @@ export function claudeCodeSetup(input: {
   const policy = input.setup.connect
     ? connectRead(input.setup, path)
     : evidenceRead(input, path);
-  const command = `${HOOK_PREFIX}effective.yaml" --protect-list ${path(PROTECT_LIST)}${reads}${policy} --agent ${team.entry}`;
+  const command = `${launchShell} ${HOOK_PREFIX.slice(8)}effective.yaml" --protect-list ${path(PROTECT_LIST)}${reads}${policy} --agent ${team.entry}`;
   // Claude Code starts a project server in the project folder; the runner
   // finds the file by its full path anyway.
   const mcpServers = mcpServerEntries(root, connections, { type: "stdio" });

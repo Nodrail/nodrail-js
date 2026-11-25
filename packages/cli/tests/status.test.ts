@@ -20,6 +20,8 @@ import {
 type PlanJson = {
   ready: boolean;
   active: boolean | null;
+  hook_active: boolean | null;
+  hook_configured: boolean;
   activation: { state: string; detail: string };
   revision: { policy: string | null; workspace: string | null };
   applied: Record<string, { policy?: string; workspace?: string } | null>;
@@ -56,9 +58,7 @@ describe("Claude Code's activation", () => {
     const p = await locked();
     const before = await p.run("plan");
     expect(before.code).toBe(0);
-    expect(before.out).toContain(
-      "Policy hook: inactive, apply hasn't written the hook and the policy yet.",
-    );
+    expect(before.out).toContain("Hook status: the policy hook is missing");
     const required = await p.run("plan", "--require-active");
     expect(required.code).toBe(1);
     expect(required.err).toContain(
@@ -68,6 +68,8 @@ describe("Claude Code's activation", () => {
     const after = json((await p.run("plan", "--json")).out);
     expect(after.activation.state).toBe("configured");
     expect(after.active).toBeNull();
+    expect(after.hook_active).toBeNull();
+    expect(after.hook_configured).toBe(true);
     expect((await p.run("plan", "--require-active")).code).toBe(0);
   });
 
@@ -85,6 +87,33 @@ describe("Claude Code's activation", () => {
       detail: `${join(p.home, ".claude/settings.json")} sets disableAllHooks, so no hook runs`,
     });
     expect((await p.run("plan", "--require-active")).code).toBe(1);
+  });
+
+  test("watch mode cannot satisfy require-active", async () => {
+    const p = await locked({
+      ...RESOURCES,
+      "nodrail.yaml":
+        RESOURCES["nodrail.yaml"] +
+        "connect: { decide: local, enforce: watch, workspace: fixture, environment: development }\n",
+    });
+    expect((await p.run("apply", "--yes")).code).toBe(0);
+    const active = await p.run("plan", "--require-active");
+    expect(active.code).toBe(1);
+    expect(active.err).toContain("watch mode");
+    const status = await p.run("status");
+    expect(status.code).toBe(1);
+    expect(status.out).toContain("Mode: watch");
+  });
+
+  test("status sees an unreviewed source edit before the lock changes", async () => {
+    const p = await locked();
+    expect((await p.run("apply", "--yes")).code).toBe(0);
+    p.write("policies/base.yaml", p.read("policies/base.yaml") + "# Updated\n");
+    const status = await p.run("status");
+    expect(status.code).toBe(1);
+    expect(status.out).toContain(
+      "policies/base.yaml changed since it was locked",
+    );
   });
 
   test("so does an administrator's that allows only managed hooks", () => {
@@ -146,7 +175,7 @@ describe("a missing state", () => {
     const plan = await p.run("plan", "--json");
     expect(json(plan.out).notes).toContainEqual(
       expect.stringContaining(
-        ".nodrail/setup-state.json is missing, so nodrail owns none of the files marked !",
+        "If an earlier apply wrote them, restore the state from a local backup; otherwise move them aside.",
       ),
     );
     expect(plan.code).toBe(1);

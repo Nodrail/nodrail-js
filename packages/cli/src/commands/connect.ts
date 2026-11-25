@@ -2,8 +2,8 @@
 // It delegates to the policy hook so the host applies its local guards.
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { parseArgs } from "node:util";
-import type { Io } from "../io.ts";
+import { parseFlags } from "./subcommands.ts";
+import { UsageError, type Io } from "../io.ts";
 import { policy } from "./policy.ts";
 
 function installedAgent(folder: string) {
@@ -17,15 +17,11 @@ function installedAgent(folder: string) {
   }
 }
 
-export function legacyConnect(args: string[], io: Io) {
+export function parseLegacyConnectArgs(args: string[]) {
   const [command, ...rest] = args;
-  const { values, positionals } = parseArgs({
-    args: rest,
-    options: {
-      "protect-list": { type: "string" },
-      connections: { type: "string" },
-    },
-    allowPositionals: true,
+  const { values, positionals } = parseFlags(rest, {
+    "protect-list": { type: "string" },
+    connections: { type: "string" },
   });
   const [file] = positionals;
   if (
@@ -33,12 +29,26 @@ export function legacyConnect(args: string[], io: Io) {
     !file ||
     positionals.length !== 1 ||
     !values["protect-list"]
-  ) {
-    io.err(
+  )
+    throw new UsageError(
       "Usage: nodrail connect hook <file> --protect-list <file> [--connections <file>]",
     );
+  return {
+    file,
+    protectList: values["protect-list"],
+    connections: values.connections,
+  };
+}
+
+export function legacyConnect(args: string[], io: Io) {
+  let target: ReturnType<typeof parseLegacyConnectArgs>;
+  try {
+    target = parseLegacyConnectArgs(args);
+  } catch (error) {
+    io.err((error as Error).message);
     return 2;
   }
+  const { file, protectList, connections } = target;
   const folder = dirname(file);
   const agent = installedAgent(folder);
   return policy(
@@ -49,8 +59,8 @@ export function legacyConnect(args: string[], io: Io) {
       file,
       "--legacy-connect",
       "--protect-list",
-      values["protect-list"],
-      ...(values.connections ? ["--connections", values.connections] : []),
+      protectList,
+      ...(connections ? ["--connections", connections] : []),
       ...(agent ? ["--agent", agent] : []),
     ],
     io,

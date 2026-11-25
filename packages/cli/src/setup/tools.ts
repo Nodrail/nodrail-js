@@ -1,12 +1,13 @@
-import { execFileSync } from "node:child_process";
 import { accessSync, constants } from "node:fs";
-import { delimiter, join } from "node:path";
+import { posix, win32 } from "node:path";
 import type { Env } from "../config.ts";
+import { spawnSync } from "../spawn.js";
 import type { Check } from "./plan.ts";
 
 /** The host tools a setup needs, found on PATH and checked by version. */
 
 const windows = process.platform === "win32";
+const { delimiter, join } = windows ? win32 : posix;
 
 /** The first executable called `name` on PATH, or null; on Windows, with PATHEXT. */
 export function findOnPath(name: string, env: Env) {
@@ -54,19 +55,15 @@ export function versionCheck(
   const path = findOnPath(name, env);
   if (path === null)
     return { name, ok: false, detail: `not on PATH; ${install}` };
-  let output = "";
-  try {
-    output = execFileSync(windows ? `"${path}"` : path, ["--version"], {
-      encoding: "utf8",
-      env: env as NodeJS.ProcessEnv,
-      timeout: 15_000,
-      stdio: ["ignore", "pipe", "ignore"],
-      // A .cmd runs only through the shell; the arguments are fixed.
-      shell: windows,
-    });
-  } catch {
+  const result = spawnSync(path, ["--version"], {
+    encoding: "utf8",
+    env: env as NodeJS.ProcessEnv,
+    timeout: 15_000,
+    stdio: ["ignore", "pipe", "ignore"],
+  });
+  if (result.error || result.status !== 0)
     return { name, ok: false, detail: `${path} --version failed` };
-  }
+  const output = result.stdout;
   const version = /\d+\.\d+\.\d+/.exec(output)?.[0];
   if (!version)
     return { name, ok: false, detail: `unexpected version: ${output.trim()}` };
