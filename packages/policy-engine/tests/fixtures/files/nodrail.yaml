@@ -1,4 +1,4 @@
-# File contracts (S07) for the artifacts DC-04.2 names. Each folder next to
+# File contracts for generated artifacts. Each folder next to
 # this file holds a valid example and rejected ones; tests/files reads them.
 shapes:
   memory-note:

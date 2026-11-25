@@ -21,6 +21,25 @@ agent fixes it and tries again. Nothing waits for a person, and what can't be
 undone (a production deploy, a merge to main, deleting data) stays with
 people, outside the agents.
 
+## Connect a control plane
+
+Add a project `id` (a UUID) and a `connect:` block to `nodrail.yaml`.
+With `decide: cloud`, `nodrail plan` compares the live policy with the lock
+and `nodrail apply` publishes the lock and installs the engine hook on
+Claude Code, Codex or Copilot. The hook fetches the policy, verifies its
+digest against the lock and decides on the host. The host credential
+lets it read evidence and report decisions to Runs and Activity.
+
+If the control plane is unreachable, the hook uses its last verified
+copy when the digest matches the lock. Without a matching copy, enforcement
+mode denies the call with a reason. Watch mode records policy verdicts and
+evaluation failures while leaving ordinary calls to the host's permissions.
+The setup guard stays active in watch mode.
+
+Use `decide: local` for repository policy with a local record in watch
+mode. See [Connect to Nodrail](docs/playbooks.md#connect-to-nodrail) for the
+configuration and credential setup.
+
 ## A project's policy (offline, no account)
 
 A repository describes its policy in `nodrail.yaml`: catalog modules and its

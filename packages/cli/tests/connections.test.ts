@@ -5,6 +5,7 @@ import { existsSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, test } from "vitest";
 import { startConnection } from "../src/commands/connection.ts";
+import { commandForDisplay } from "../src/format.ts";
 import { CONNECTIONS_FILE, pinChecks } from "../src/setup/connections.ts";
 import {
   codexTools,
@@ -75,7 +76,22 @@ async function desk(extra?: string, runtime = "claude-code") {
   return p;
 }
 
-describe.skipIf(windows)("connections on Claude Code", () => {
+test("the Windows plan renders native paths and preserves argument boundaries", () => {
+  const line = commandForDisplay(
+    [
+      "C:\\tools\\node.exe",
+      "C:\\Program Files\\handbook\\",
+      'say \\"hello"',
+      "",
+    ],
+    "win32",
+  );
+  expect(line).toBe(
+    String.raw`C:\tools\node.exe "C:\Program Files\handbook\\" "say \\\"hello\"" ""`,
+  );
+});
+
+describe("connections on Claude Code", () => {
   // The regression for "plan runs code from the repository with the
   // person's secrets": the connector records each start.
   const starts = (p: { cwd: string; read: (path: string) => string }) =>
@@ -96,8 +112,11 @@ describe.skipIf(windows)("connections on Claude Code", () => {
     expect(out).toContain(
       "Connections (not started: apply starts each once to check it, after you accept)",
     );
+    const executable = /\s/.test(process.execPath)
+      ? '"' + process.execPath + '"'
+      : process.execPath;
     expect(out).toContain(
-      `handbook: runs ${process.execPath} ./connectors/handbook.cjs; with HANDBOOK_TOKEN (secret HANDBOOK_TOKEN), HANDBOOK_MODE, HANDBOOK_DATA=./data/handbook.jsonl`,
+      `handbook: runs ${executable} ./connectors/handbook.cjs; with HANDBOOK_TOKEN (secret HANDBOOK_TOKEN), HANDBOOK_MODE, HANDBOOK_DATA=./data/handbook.jsonl`,
     );
     expect(out).toMatch(/\+ \.mcp\.json\s+the connections handbook/);
     expect(out).not.toContain(SECRET);
@@ -171,7 +190,7 @@ describe.skipIf(windows)("connections on Claude Code", () => {
       args: [
         "connection",
         "run",
-        expect.stringMatching(/\.nodrail\/connections\.json$/),
+        join(realpathSync(p.cwd), CONNECTIONS_FILE),
         "handbook",
       ],
       env: { HANDBOOK_TOKEN: "${HANDBOOK_TOKEN}" },
@@ -232,7 +251,7 @@ describe.skipIf(windows)("connections on Claude Code", () => {
   });
 });
 
-describe.skipIf(windows)("a connection's data", () => {
+describe("a connection's data", () => {
   const keeping = connection().replace(
     "    operations:",
     "    data: [./data]\n    operations:",
@@ -321,7 +340,7 @@ describe.skipIf(windows)("connections on Codex", () => {
   });
 });
 
-describe.skipIf(windows)("nodrail connection run", () => {
+describe("nodrail connection run", () => {
   test("starts the connection in the project with its secrets and nothing else", async () => {
     const p = await desk();
     await p.run("apply", "--yes");
@@ -348,11 +367,7 @@ describe.skipIf(windows)("nodrail connection run", () => {
     expect(realpathSync(started.cwd)).toBe(realpathSync(p.cwd));
     // Whole, so a server that resolves against its install folder still
     // keeps its data in the project.
-    const tail = "/data/handbook.jsonl";
-    expect(started.data.endsWith(tail)).toBe(true);
-    expect(realpathSync(started.data.slice(0, -tail.length))).toBe(
-      realpathSync(p.cwd),
-    );
+    expect(started.data).toBe(join(p.cwd, "data/handbook.jsonl"));
   });
 
   test("a missing secret stops it with the name, never a value", async () => {

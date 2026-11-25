@@ -40,7 +40,7 @@ export function hasSecret(ref: SecretRef, env: Env) {
 }
 
 /** The secret's value; an error names the reference, never a value. */
-export function secretValue(ref: SecretRef, env: Env) {
+export function secretValue(ref: SecretRef, env: Env, timeout = 10_000) {
   if ("fromEnv" in ref) {
     const value = env[ref.fromEnv];
     if (!value) throw new Error(`${ref.fromEnv} isn't set`);
@@ -52,7 +52,7 @@ export function secretValue(ref: SecretRef, env: Env) {
     return execFileSync(SECURITY, keychainArgs(ref.fromKeychain, true), {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
-      timeout: 10_000,
+      timeout,
     }).replace(/\n$/, "");
   } catch {
     throw new Error(`${secretName(ref)} isn't in the Keychain`);

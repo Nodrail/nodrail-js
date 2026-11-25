@@ -256,7 +256,7 @@ describe("receipts in the effective policy", () => {
   });
 });
 
-describe.skipIf(windows)("the hook enforces the receipt", () => {
+describe("the hook enforces the receipt", () => {
   afterEach(() => {
     vi.unstubAllEnvs();
   });

@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.6.0
+
+Uses `@nodrail/policy-engine` 0.8.0, published with it. 0.5.0 was never
+published to npm; 0.6.0 includes its changes.
+
+- Install the connected engine hook on Claude Code, Codex and Copilot.
+  `decide: cloud` publishes and pins policy for host-side decisions, evidence
+  reads and reporting. `decide: local` uses repository policy.
+- Support `enforce: watch` and retire `nodrail connect hook`. Reapply the setup
+  to replace an installed legacy hook.
+
 ## 0.5.0
 
 Uses `@nodrail/policy-engine` 0.7.0, published with it. `connect:` and
@@ -33,7 +44,7 @@ is `.nodrail/effective.yaml`; the approval commands are gone.
   `POST /api/v1/runtime/decisions`, queued on disk and sent by a detached
   process, never delaying a decision. `apply` doesn't install it yet.
 
-- `plan` reads `connect:` (R383). It says who decides, and with a
+- `plan` reads `connect:`. It says who decides, and with a
   credential it asks Nodrail's new `GET /api/v1/runtime/identity` whose it
   is, failing when it belongs to another workspace or environment; it never
   prints it. `decide: cloud` and `enforce: watch` are checked but refused
@@ -74,7 +85,7 @@ and 5 (declared contracts, evidence and numeric budgets).
     job's OIDC token (exit 0 stored, 3 refused, 4 unreachable). See
     `docs/evidence.md`.
   - `nodrail budgets status` and `budgets reconcile <key>
-    --consumed|--released --note`: the local ledger's numbers and the
+--consumed|--released --note`: the local ledger's numbers and the
     person's word on an unknown reservation, with the engine's `/ledger`.
     See `docs/budgets.md`.
   - `plan` lists each budget's label (enforced allowance, measured usage,
@@ -92,7 +103,7 @@ and 5 (declared contracts, evidence and numeric budgets).
 ### Changed
 
 - Gates now use only each agent's latest finished step, per revision with
-  `subject: revision` (engine, R375). Existing gates change too, including
+  `subject: revision` (engine). Existing gates change too, including
   level-3 gates without contracts: a QA `pass` followed by a QA `fail` now
   closes a gate that 0.3.2 left open.
 
@@ -100,12 +111,12 @@ and 5 (declared contracts, evidence and numeric budgets).
 
 - Evidence can be declared with nodrail.yaml's contracts: `evidence:` sits
   next to `shapes:` and `receipts:`, and the generated `nodrail.yaml
-  (contracts)` entry carries it, at engine level 5 only when there is some.
+(contracts)` entry carries it, at engine level 5 only when there is some.
   A rule file's own evidence entry is refused while nodrail.yaml declares
   contracts ("declare them once"). Projects without evidence get the same
   files as before.
 - The hook keeps agents out of the run ledger, and `plan` fails activation
-  for runtime-observed evidence when that guard isn't on (R364).
+  for runtime-observed evidence when that guard isn't on.
 - `contracts explain evidence:<name>` explains the evidence (producers,
   subject, the gates that read it and with which authority), also when it
   is declared in a rule file.
@@ -157,7 +168,7 @@ before, apart from the engine level its lock records (now 4).
 - The effective policy's `contracts` entry now also carries each Agent's
   brief, as declared, and each connection operation's `input`, with the
   shapes they need. The hook checks a dispatch's brief before the agent
-  starts and a call's arguments before any rule (DC-02.1, DC-02.2); rules
+  starts and a call's arguments before any rule; rules
   and gates read them with `where` on `brief.` and `input.`. On Codex the
   dispatch prompt is encrypted, so starting an agent that has a brief is
   denied. A project that declares a brief or an input gets a new effective
@@ -179,7 +190,7 @@ before, apart from the engine level its lock records (now 4).
   start it (the Team's handoffs): one marked section with the
   `nodrail-brief` block to end the dispatch prompt with, each property, and
   an example that is validated and read back before it is written. Nothing
-  checks a dispatch yet: that is the engine's brief reader (DC-02.1).
+  checks a dispatch yet: that is the engine's brief reader.
 - `nodrail contracts render <agent>` prints every section of an agent's
   file; `render brief:<agent>` the brief section alone. `validate
 brief:<agent>` reads a dispatch prompt's final `nodrail-brief` block, and

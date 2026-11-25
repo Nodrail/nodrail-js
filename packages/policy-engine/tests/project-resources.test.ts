@@ -889,7 +889,7 @@ connections:
   });
 });
 
-describe("connect: in nodrail.yaml (R383)", () => {
+describe("connect: in nodrail.yaml", () => {
   const connected = (block: string) =>
     project(`runtime: claude-code\nconnect:\n${block}`);
   // These projects have no Team; only what connect: says matters here.

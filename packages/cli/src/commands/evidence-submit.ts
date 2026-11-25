@@ -1,4 +1,4 @@
-// `nodrail evidence submit <name> --result <file>` (DC-03.1, R295): from a
+// `nodrail evidence submit <name> --result <file>`: from a
 // GitHub Actions job, externally verified evidence for Cloud. It asks
 // Actions for an OIDC token whose audience is this workspace
 // (`<url>/w/<workspace>`) and posts the value with it; Cloud checks the

@@ -1,6 +1,7 @@
 import { parseArgs } from "node:util";
 import { login, logout, showWhoami } from "./commands/auth.ts";
 import { activity, insights, run, runs } from "./commands/read.ts";
+import { legacyConnect } from "./commands/connect.ts";
 import { connection } from "./commands/connection.ts";
 import { connector } from "./commands/connector.ts";
 import { budgets } from "./commands/budgets.ts";
@@ -19,7 +20,6 @@ import { workspace } from "./commands/workspace.ts";
 import { commandFor, type Command, type Values } from "./context.ts";
 import { describeFailure, exitCodeOf, UsageError, type Io } from "./io.ts";
 
-import { connect } from "./commands/connect.ts";
 import { VERSION } from "./version.ts";
 
 export { VERSION };
@@ -160,6 +160,7 @@ export async function main(argv: string[], io: Io): Promise<number> {
   try {
     // Before parsing: policy takes nodrail-policy's flags, not these.
     if (argv[0] === "policy") return await policy(argv.slice(1), io);
+    if (argv[0] === "connect") return await legacyConnect(argv.slice(1), io);
     // Started by a host: its stdio belongs to the connection.
     if (argv[0] === "connection") return await connection(argv.slice(1), io);
     if (argv[0] === "connector")
@@ -167,8 +168,6 @@ export async function main(argv: string[], io: Io): Promise<number> {
     // Their own flags, and `run` passes everything after -- to the command.
     if (argv[0] === "evidence") return await evidence(argv.slice(1), io);
     if (argv[0] === "budgets") return await budgets(argv.slice(1), io);
-    // Run by the host as the connected hook: its stdio is the host's.
-    if (argv[0] === "connect") return await connect(argv.slice(1), io);
     const { values, positionals } = parse(argv);
     if (values.version) {
       io.out(VERSION);

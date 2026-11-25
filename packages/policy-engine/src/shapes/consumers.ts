@@ -71,14 +71,18 @@ const usesAccountable = (item: PolicyItem) =>
   );
 
 /** Whether a path goes through or ends at a secret property. */
-function secretPath(shape: ResolvedShape, path: string) {
+function secretPath(shape: ResolvedShape, path: string, includePii = false) {
   let properties = shape.properties;
   for (const key of path.split(".")) {
     const property = Object.hasOwn(properties, key)
       ? properties[key]
       : undefined;
     if (!property) return false;
-    if (property.classification === "secret") return true;
+    if (
+      property.classification === "secret" ||
+      (includePii && property.classification === "pii")
+    )
+      return true;
     if (property.type !== "object") return false;
     properties = property.properties;
   }
@@ -226,8 +230,9 @@ function numericBudget(registry: Registry, item: PolicyItem, at: Path) {
     return;
   }
   const { tool, operation, path } = item.sum;
+  const scope = ruleScope(registry, { tool, operation });
   const found = propertyAt(
-    ruleScope(registry, { tool, operation }),
+    scope,
     path,
     [...at, "sum", "path"],
     registry.report,
@@ -245,6 +250,18 @@ function numericBudget(registry: Registry, item: PolicyItem, at: Path) {
       "unit",
       [...at, "unit"],
       `The budget's unit must equal the property's (${property.unit ?? "none declared"})`,
+    );
+  const [root, ...parts] = path.split(".");
+  const shape = scope.roots[root!]?.shape;
+  if (
+    item.across === "environment" &&
+    shape &&
+    secretPath(shape, parts.join("."), true)
+  )
+    return registry.report(
+      "path",
+      [...at, "sum", "path"],
+      "A shared budget can't report a classified amount",
     );
   // An argument is known before the call and can be reserved; a result is only measured after it.
   const mode = path.startsWith("input.") ? "admission" : "measured";

@@ -1,5 +1,6 @@
 // `telemetry` in nodrail.yaml: apply writes where the hook sends each
 // decision, both hosts' hooks pass it, and plan says how sending went.
+import { basename } from "node:path";
 import { describe, expect, test } from "vitest";
 import { TELEMETRY_FILE } from "../src/setup/connections.ts";
 import {
@@ -29,7 +30,7 @@ async function project(runtime = "claude-code") {
 
 const recorded = recordSenderStatus;
 
-describe.skipIf(windows)("telemetry", () => {
+describe("telemetry", () => {
   test("apply writes where to send, and the hook is told", async () => {
     const p = await project();
     const plan = await p.run("plan");
@@ -43,7 +44,7 @@ describe.skipIf(windows)("telemetry", () => {
     );
     expect((await p.run("apply", "--yes")).code).toBe(0);
     expect(JSON.parse(p.read(TELEMETRY_FILE))).toEqual({
-      project: p.cwd.split("/").pop(),
+      project: basename(p.cwd),
       traces: {
         endpoint: "http://127.0.0.1:4318/v1/traces",
         protocol: "otlp-http/protobuf",
@@ -126,7 +127,7 @@ describe.skipIf(windows)("telemetry", () => {
     expect(p.read(TELEMETRY_FILE)).not.toContain("ndp_");
   });
 
-  test("Codex's hook sends too", async () => {
+  test.skipIf(windows)("Codex's hook sends too", async () => {
     const p = await project("codex");
     await p.run("apply", "--yes");
     expect(p.read(".codex/hooks.json")).toContain("--telemetry '");

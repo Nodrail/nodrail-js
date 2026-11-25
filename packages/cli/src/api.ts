@@ -1,9 +1,10 @@
+import { DEFAULT_CONTROL_PLANE_URL } from "@nodrail/policy-engine/yaml";
 /**
  * A small client for Nodrail's personal API (`/api/v1`, `ndp_` tokens). The
  * command line and the MCP server both use it, so each call is written once.
  */
 
-export const DEFAULT_URL = "https://app.nodrail.com";
+export const DEFAULT_URL = DEFAULT_CONTROL_PLANE_URL;
 
 /** C0 and C1 control characters, and DEL: what a terminal acts on. */
 const isControl = (code: number) =>
@@ -91,7 +92,7 @@ export type Preview = {
   unchanged: number;
 };
 
-/** The repository project and lock a policy is published from (R383). */
+/** The repository project and lock a policy is published from. */
 export type ManagedSource = {
   project_id: string;
   revision: string;
@@ -104,6 +105,7 @@ export type LiveRules = {
   published_at: string | null;
   published_by: string | null;
   managed: ManagedSource | null;
+  source_digest: string | null;
 };
 
 export type Published = {
@@ -124,7 +126,7 @@ export type IntendedRevision = {
   published_at: string;
 };
 
-/** An evidence verifier (DC-03.1): who may submit externally verified evidence. */
+/** An evidence verifier: who may submit externally verified evidence. */
 export type Verifier = {
   id: string;
   name: string;

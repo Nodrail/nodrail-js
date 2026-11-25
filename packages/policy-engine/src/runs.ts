@@ -171,6 +171,8 @@ export const runEvent = z.discriminatedUnion("type", [
       outcome: z.enum([...effects, "none"]),
       /** It changed things and went ahead: see `isChange`. Missing means no. */
       change: z.boolean().optional(),
+      /** The admission policy measured tokens for this subagent call. */
+      measure_tokens: z.literal(true).optional(),
       /** The host's id for the call (`host:tool_use_id`), when it gave one. */
       key: budgetKey.optional(),
     })
@@ -310,7 +312,7 @@ export function requirementMet(
 ) {
   const after = lastWorkBefore(requirement, events, checkers);
   const startedAfter = new Set<string>();
-  // R375: only the agent's latest finished step counts, per revision when
+  // Only the agent's latest finished step counts, per revision when
   // the requirement is about one: a later receipt that fails closes the
   // gate an earlier one opened.
   let now: string | null | undefined;

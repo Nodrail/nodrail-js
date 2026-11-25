@@ -1,4 +1,4 @@
-// Authority and privacy around a contract (DC-00.2): who produced a record,
+// Authority and privacy around a contract: who produced a record,
 // the runtime-owned envelope no agent field can fill, the reported record
 // that crosses to Cloud.
 import { z } from "zod";

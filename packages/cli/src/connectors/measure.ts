@@ -1,4 +1,4 @@
-// What a mediated call means for a budget (Wave 3, DC-03.3, connector side):
+// What a mediated call means for a budget (connector side):
 // the integer `result.` values a budget sums, read from the validated result
 // only, and how the call's execution settles a reservation. Nothing here
 // reserves or writes a budget: the engine owns that, and calls this through

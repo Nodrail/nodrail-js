@@ -42,7 +42,16 @@ export type BudgetCall = {
  * (the hook). Without one, a numeric budget that covers the call holds it:
  * nothing here can count it.
  */
-export type BudgetAuthority = "local" | null;
+export type BudgetAuthority =
+  | "local"
+  | null
+  | {
+      shared: (
+        budget: NumericBudget,
+        call: BudgetCall,
+        fallback: LimitState,
+      ) => LimitState;
+    };
 
 export type LimitState = {
   id: string;
@@ -65,7 +74,16 @@ export type LimitState = {
    * unknown; `shared`: only the online authority can count it; `no_run`:
    * no run to count in; `uncounted`: no ledger counts it here.
    */
-  state: "ok" | "over" | "unknown" | "shared" | "no_run" | "uncounted";
+  state:
+    | "ok"
+    | "over"
+    | "unknown"
+    | "shared"
+    | "no_run"
+    | "uncounted"
+    | "unavailable";
+  /** The unmet shared condition, when the authority could not reserve it. */
+  reason?: string;
   effect: NumericBudget["effect"];
   /** When a day window resets, ISO; null for step and run. */
   resets: string | null;
@@ -84,7 +102,7 @@ export function covers(budget: NumericBudget, call: BudgetCall, agent: string) {
 }
 
 /** The amount a call adds before it runs, or null when it can't be known. */
-function admissionAmount(budget: NumericBudget, call: BudgetCall) {
+export function admissionAmount(budget: NumericBudget, call: BudgetCall) {
   const { measure } = budget;
   if (measure.kind === "count") return 1;
   if (measure.kind !== "sum") return null;
@@ -234,8 +252,12 @@ export function limitState(
   const { run, call, now, authority } = context;
   const agent = run?.step?.agent ?? MAIN;
   if (!covers(budget, call, agent)) return null;
-  if (budget.across === "environment")
-    return { ...base(budget, now), state: "shared" };
+  if (budget.across === "environment") {
+    const fallback: LimitState = { ...base(budget, now), state: "shared" };
+    return authority && authority !== "local"
+      ? authority.shared(budget, call, fallback)
+      : fallback;
+  }
   if (!authority) return { ...base(budget, now), state: "uncounted" };
   if (!run) return { ...base(budget, now), state: "no_run" };
   const events = run.events.filter(windowed(budget, run, now));
@@ -253,7 +275,9 @@ export function explainLimit(state: LimitState) {
   const resets = state.resets ? `; it resets at ${state.resets}` : "";
   switch (state.state) {
     case "shared":
-      return `Budget ${state.id} is shared across the environment, and shared budgets are enforced only on a Cloud-managed connection.`;
+      return `Budget ${state.id} is shared across the environment and needs a connection to the control plane.`;
+    case "unavailable":
+      return `Shared budget ${state.id} is unmet: ${state.reason ?? "the control plane is unavailable."}`;
     case "uncounted":
       return `Budget ${state.id} is counted by the run ledger or Cloud, and neither counts it here.`;
     case "no_run":
@@ -283,7 +307,12 @@ export function reservationsFor(
 ): Reserved[] {
   return states.flatMap((state) => {
     const budget = budgets.find(({ id }) => id === state.id);
-    if (budget?.source !== "admission" || state.state !== "ok") return [];
+    if (
+      budget?.source !== "admission" ||
+      budget.across !== "run" ||
+      state.state !== "ok"
+    )
+      return [];
     if (state.amount === null) return [];
     return [
       {

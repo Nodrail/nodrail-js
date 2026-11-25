@@ -29,7 +29,8 @@ import {
 import { claudeSteps } from "./claude-settings.ts";
 import { managedChecks } from "./managed.ts";
 import { goneDataNotes, pinChecks, telemetryNote } from "./connections.ts";
-import { connectChecks, connectNotes } from "./connect.ts";
+import { byPath } from "./team-files.ts";
+import { connectFile, connectNotes } from "./connect.ts";
 import { fileStep, goneStep } from "./steps.ts";
 import { runningHere, testedCheck } from "./tested.ts";
 import {
@@ -142,7 +143,6 @@ export function planSetup(input: {
   const effective = policy.text ?? "";
   const host = hostSetup(runtime, { ...input, ...policy, effective });
   checks.push(...hostChecks(input, runtime, setup, host.check));
-  checks.push(...connectChecks(setup, runtime));
   checks.push(
     ...managedChecks(runtime, {
       root,
@@ -151,19 +151,19 @@ export function planSetup(input: {
       managed: input.managed,
     }),
   );
-  // Without a locked policy there is none to write.
-  const files =
-    policy.text === null
-      ? host.files.filter((file) => !file.path.startsWith(".nodrail/"))
-      : host.files;
-  const level5 = accountableHere(input, runtime, effective, files);
-  const owner = { state: base.state, runtime };
-  const steps = files.map((file) => fileStep(root, owner, file));
-  for (const [path, hash] of Object.entries(
-    hostState(base.state, runtime)?.files ?? {},
-  ))
-    if (!files.some((file) => file.path === path))
-      steps.push(goneStep(root, owner, path, hash));
+  const files = setupFiles(
+    host.files,
+    setup.connect,
+    base.revision,
+    policy.text !== null,
+  );
+  const level5 = accountableHere(
+    { ...input, decide: setup.connect?.decide },
+    runtime,
+    effective,
+    files,
+  );
+  const steps = planFileSteps(root, base, files);
   const merged: Record<string, Record<string, unknown>> = {};
   if (host.settings)
     for (const { step, value } of claudeSteps(
@@ -195,6 +195,32 @@ export function planSetup(input: {
     plugins: setup.plugins,
     accountable: level5,
   };
+}
+
+function setupFiles(
+  files: DesiredFile[],
+  connect: ProjectSetup["connect"],
+  revision: Revision,
+  locked: boolean,
+) {
+  // Without a locked policy there is none to write.
+  if (!locked)
+    return files.filter((file) => !file.path.startsWith(".nodrail/"));
+  const connection = connectFile(connect, revision);
+  return connection ? [...files, connection].sort(byPath) : files;
+}
+
+function planFileSteps(
+  root: string,
+  owner: { state: SetupState | null; runtime: Runtime },
+  files: DesiredFile[],
+) {
+  const steps = files.map((file) => fileStep(root, owner, file));
+  const previous = hostState(owner.state, owner.runtime)?.files ?? {};
+  for (const [path, hash] of Object.entries(previous))
+    if (!files.some((file) => file.path === path))
+      steps.push(goneStep(root, owner, path, hash));
+  return steps;
 }
 
 /** What the host needs, and whether its program is there. */

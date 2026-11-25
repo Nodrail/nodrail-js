@@ -1,4 +1,4 @@
-// Evidence declared once, in nodrail.yaml, like shapes and receipts (R304):
+// Evidence declared once, in nodrail.yaml, like shapes and receipts:
 // the generated contracts entry carries it at engine level 5, a rule file's
 // own evidence is refused, and a project without evidence keeps the very
 // entry it had (fixtures/contracts-source/, written before evidence was read

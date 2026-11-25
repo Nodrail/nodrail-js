@@ -3,11 +3,12 @@
 // answers cached), every budget explanation, the run listing, and what a
 // changed budget or evidence requirement does to permissions.
 import { spawnSync } from "node:child_process";
-import { randomUUID } from "node:crypto";
-import { existsSync, mkdtempSync, writeFileSync } from "node:fs";
+import { createHash, randomUUID } from "node:crypto";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, test } from "vitest";
+import { stringify } from "yaml";
+import { describe, expect, test, vi } from "vitest";
 import {
   explainLimit,
   limitState,
@@ -16,16 +17,21 @@ import {
 } from "../src/budget-ledger";
 import { evidenceFile, readEvidence, recordEvidence } from "../src/evidence";
 import { readRemoteConfig, remoteStatuses } from "../src/evidence-remote";
+import { runPolicyCommandLine } from "../src/command-line";
 import { hookEvidence } from "../src/hook-evidence";
 import { budgetAspects, evidenceAspects } from "../src/permission-budgets";
 import { permissionChanges } from "../src/permission-changes";
 import { evidenceOf } from "../src/policies";
 import type { NumericBudget, PolicyDocument } from "../src/policies";
-import { workRevision } from "../src/revision";
+import * as revision from "../src/revision";
 import { evidenceShortfall } from "../src/run-evidence";
 import { compilePolicies } from "../src/yaml";
 import { cli } from "./run-cli.ts";
 import { scratchRepo } from "./support/hook-answers.ts";
+
+// These tests build real git repositories; spawning git is slow on Windows
+// runners, far past the default 5 s, though nothing hangs.
+const GIT_TESTS = 30_000;
 
 const at = "2026-11-21T12:00:00.000Z";
 const now = new Date(at);
@@ -62,15 +68,23 @@ const VERIFIED = `- required_engine_version: 5
 function committed(rules: string) {
   const repo = scratchRepo(rules, "nodrail-reads-", "work");
   const git = (...args: string[]) => spawnSync("git", args, { cwd: repo.repo });
-  git("config", "user.email", "t@example.com");
-  git("config", "user.name", "T");
-  git("config", "commit.gpgsign", "false");
   git("add", "rules.yaml");
-  git("commit", "-q", "-m", "one");
+  git(
+    "-c",
+    "user.email=t@example.com",
+    "-c",
+    "user.name=T",
+    "-c",
+    "commit.gpgsign=false",
+    "commit",
+    "-q",
+    "-m",
+    "one",
+  );
   return repo;
 }
 
-const pushEvent = (cwd: string) =>
+const pushEvent = (cwd?: string) =>
   JSON.stringify({
     hook_event_name: "PreToolUse",
     session_id: "s",
@@ -80,9 +94,91 @@ const pushEvent = (cwd: string) =>
     tool_use_id: "p1",
   });
 
-describe("Cloud's answers in the hook", () => {
+describe("Cloud's answers in the hook", { timeout: GIT_TESTS }, () => {
+  test("the connected engine reads runtime evidence with its host credential", async () => {
+    const { repo } = committed(VERIFIED);
+    const config = join(repo, ".git", "connect.json");
+    const subject = revision.workRevision(repo);
+    expect(subject).toMatch(/^sha256:/);
+    const digest = createHash("sha256").update(VERIFIED).digest("hex");
+    const workspace = "a".repeat(64);
+    const destination = {
+      url: "https://nodrail.example",
+      decide: "cloud",
+      enforce: "on",
+      workspace: "acme",
+      environment: "development",
+      credential: { fromEnv: "HOST_TOKEN" },
+    };
+    const manifest = stringify({ connect: destination });
+    writeFileSync(join(repo, "nodrail.yaml"), manifest);
+    writeFileSync(
+      join(repo, "nodrail.lock.yaml"),
+      stringify({
+        manifest: {
+          sha256: createHash("sha256").update(manifest).digest("hex"),
+        },
+        effective: { sha256: digest },
+        workspace: { sha256: workspace },
+      }),
+    );
+    writeFileSync(
+      config,
+      JSON.stringify({
+        ...destination,
+        lock: "../nodrail.lock.yaml",
+        workspace_revision: workspace,
+        policy_digest: digest,
+      }),
+    );
+    const out: string[] = [];
+    const paths: string[] = [];
+    const result = await runPolicyCommandLine(["hook", "--connect", config], {
+      log: (text) => out.push(text),
+      error: (text) => out.push(text),
+      write: (text) => out.push(text),
+      writeError: (text) => out.push(text),
+      readStdin: async () => pushEvent(repo),
+      home: repo,
+      env: {
+        HOME: repo,
+        HOST_TOKEN: "host-test",
+        NODRAIL_TOKEN: "person-test",
+      },
+      fetch: async (input, init) => {
+        const url = new URL(input instanceof Request ? input.url : input);
+        paths.push(url.pathname);
+        expect(new Headers(init?.headers).get("authorization")).toBe(
+          "Bearer host-test",
+        );
+        if (url.pathname.endsWith("/policy"))
+          return Response.json({ source: { digest, text: VERIFIED } });
+        expect(url.searchParams.get("workspace_revision")).toBe(workspace);
+        expect(url.searchParams.get("gate")).toBe("tested");
+        return Response.json({
+          met: true,
+          reason_code: "met",
+          event_id: "e1",
+          verifier: { name: "github-actions", revoked_at: null },
+          received_at: at,
+        });
+      },
+    });
+    expect(result).toBe(0);
+    expect(out).toEqual([]);
+    expect(paths).toEqual([
+      "/api/v1/runtime/policy",
+      "/api/v1/runtime/evidence/status",
+    ]);
+  });
+
   test("asked only for a covering gate's unmet requirement; a positive answer is cached", async () => {
-    const repo = committed(VERIFIED);
+    // Exercise the hook and cache on a stable revision. revision.test.ts
+    // covers reading the revision from a real Git worktree.
+    using git = vi
+      .spyOn(revision, "workRevision")
+      .mockReturnValue(revision.cleanRevision("a".repeat(40)));
+    const repo = mkdtempSync(join(tmpdir(), "nodrail-reads-"));
     const document = documentOf(VERIFIED);
     const asked: string[] = [];
     const answer = (met: boolean) =>
@@ -109,10 +205,11 @@ describe("Cloud's answers in the hook", () => {
       NODRAIL_LEDGER: mkdtempSync(join(tmpdir(), "nodrail-ledger-")),
     };
     // A call no gate covers asks nothing.
-    const other = pushEvent(repo.repo).replace("git push", "ls");
+    const other = pushEvent(repo).replace("git push", "ls");
     await hookEvidence(other, options, { env, config: config(answer(true)) });
+    expect(git).not.toHaveBeenCalled();
     expect(asked).toEqual([]);
-    const reader = await hookEvidence(pushEvent(repo.repo), options, {
+    const reader = await hookEvidence(pushEvent(repo), options, {
       env,
       config: config(answer(true)),
     });
@@ -123,18 +220,20 @@ describe("Cloud's answers in the hook", () => {
     const down = (async () => {
       throw new Error("down");
     }) as unknown as typeof fetch;
-    const cached = await hookEvidence(pushEvent(repo.repo), options, {
+    const cached = await hookEvidence(pushEvent(repo), options, {
       env,
       config: config(down),
     });
     expect(cached?.remote("tested", 0)?.met).toBe(true);
-    // A negative answer is never cached.
+    // The cache expires and the hook asks Cloud again.
     const later = { ...options, now: new Date(now.getTime() + 6 * 60_000) };
-    const negative = await hookEvidence(pushEvent(repo.repo), later, {
+    const negative = await hookEvidence(pushEvent(repo), later, {
       env,
       config: config(answer(false)),
     });
     expect(negative?.remote("tested", 0)?.reason_code).toBe("no_event");
+    expect(asked).toHaveLength(2);
+    expect(git).toHaveBeenCalledTimes(3);
   });
 
   test("without --evidence, or with no token, only local evidence is read", async () => {
@@ -176,7 +275,7 @@ describe("Cloud's answers in the hook", () => {
       pushEvent(repo.repo),
     );
     expect(run.stdout).toContain("deny");
-  });
+  }, 15_000);
 
   test("no ask when nothing is configured or the revision is unknown", async () => {
     expect(
@@ -186,9 +285,35 @@ describe("Cloud's answers in the hook", () => {
       }),
     ).toEqual(new Map());
   });
+
+  test("a covering gate cannot request remote evidence without a Git revision", async ({
+    onTestFinished,
+  }) => {
+    using git = vi.spyOn(revision, "workRevision").mockReturnValue(null);
+    const send = vi.fn<typeof fetch>();
+    const folder = mkdtempSync(join(tmpdir(), "nodrail-no-revision-"));
+    onTestFinished(() => rmSync(folder, { recursive: true, force: true }));
+    const reader = await hookEvidence(
+      pushEvent(),
+      { document: documentOf(VERIFIED), now, unmatched: "deny" },
+      {
+        env: { NODRAIL_LEDGER: folder },
+        config: {
+          url: "https://nodrail.example",
+          token: "t",
+          workspaceRevision: "rev-1",
+          fetch: send,
+        },
+      },
+    );
+    expect(git).toHaveBeenCalledTimes(1);
+    expect(git).toHaveBeenCalledWith(process.cwd());
+    expect(reader?.remote("tested", 0)).toBeNull();
+    expect(send).not.toHaveBeenCalled();
+  });
 });
 
-describe("why evidence falls short", () => {
+describe("why evidence falls short", { timeout: GIT_TESTS }, () => {
   const need = {
     evidence: "ci-tests",
     contract: "sha256:" + "a".repeat(64),
@@ -328,7 +453,10 @@ describe("why evidence falls short", () => {
       contract: need.contract,
       projection: need.contract,
       producer: { class: "runtime-observed" as const, id: "cli" },
-      subject: { kind: "revision" as const, digest: workRevision(repo.repo)! },
+      subject: {
+        kind: "revision" as const,
+        digest: revision.workRevision(repo.repo)!,
+      },
       observed: { exit_code: 0, started_at: at, finished_at: at },
       validation: { state: "valid" as const, issues: [] },
       value: { status: "passed" },
@@ -354,7 +482,7 @@ const limitsOf = (document: PolicyDocument) =>
   document.version === 4 ? document.limits : [];
 const [publications] = limitsOf(documentOf(BUDGET)) as [NumericBudget];
 
-describe("budget words", () => {
+describe("budget words", { timeout: GIT_TESTS }, () => {
   const state = (over: Partial<LimitState>): LimitState => ({
     id: "b",
     name: "B",
@@ -372,10 +500,7 @@ describe("budget words", () => {
     ...over,
   });
   test.each([
-    [
-      state({ state: "shared" }),
-      "shared budgets are enforced only on a Cloud-managed connection",
-    ],
+    [state({ state: "shared" }), "needs a connection to the control plane"],
     [state({ state: "uncounted" }), "neither counts it here"],
     [state({ state: "no_run" }), "needs a run to count calls"],
     [
@@ -472,43 +597,47 @@ describe("budget words", () => {
   });
 });
 
-describe("what a changed budget or evidence requirement does", () => {
-  const budgetOf = (text: string) => {
-    const document = documentOf(text);
-    if (document.version === 4 && document.limits[0]) return document.limits[0];
-    if (document.version !== 1 && document.budgets[0])
-      return document.budgets[0];
-    throw new Error("no budget");
-  };
-  const gateOf = (text: string) => {
-    const document = documentOf(text);
-    if (document.version === 1) throw new Error("no gate");
-    return evidenceOf(document.gates[0]!);
-  };
-  const shown = (aspects: { impact: string | null; text: string }[]) =>
-    aspects.map((aspect) => `${aspect.impact}: ${aspect.text}`);
-  const impacts = (before: string, after: string) =>
-    before.includes("- gate:")
-      ? shown(evidenceAspects(gateOf(before), gateOf(after)))
-      : shown(budgetAspects(budgetOf(before), budgetOf(after)));
+describe(
+  "what a changed budget or evidence requirement does",
+  { timeout: GIT_TESTS },
+  () => {
+    const budgetOf = (text: string) => {
+      const document = documentOf(text);
+      if (document.version === 4 && document.limits[0])
+        return document.limits[0];
+      if (document.version !== 1 && document.budgets[0])
+        return document.budgets[0];
+      throw new Error("no budget");
+    };
+    const gateOf = (text: string) => {
+      const document = documentOf(text);
+      if (document.version === 1) throw new Error("no gate");
+      return evidenceOf(document.gates[0]!);
+    };
+    const shown = (aspects: { impact: string | null; text: string }[]) =>
+      aspects.map((aspect) => `${aspect.impact}: ${aspect.text}`);
+    const impacts = (before: string, after: string) =>
+      before.includes("- gate:")
+        ? shown(evidenceAspects(gateOf(before), gateOf(after)))
+        : shown(budgetAspects(budgetOf(before), budgetOf(after)));
 
-  test("limit, window, reach and source", () => {
-    expect(
-      impacts(BUDGET, BUDGET.replace("limit: 3", "limit: 5")).join("\n"),
-    ).toContain("loosened: limit 3 outbox.publish calls per run");
-    expect(
-      impacts(
-        BUDGET,
-        BUDGET.replace(
-          "per: run",
-          "per: day\n  timezone: Europe/Madrid\n  across: environment",
-        ),
-      ).join("\n"),
-    ).toMatch(/changed: limit[\s\S]*tightened: across run → environment/);
-    expect(
-      impacts(BUDGET, BUDGET.replace("per: run", "per: step")).join("\n"),
-    ).toContain("loosened");
-    const tokens = `- required_engine_version: 5
+    test("limit, window, reach and source", () => {
+      expect(
+        impacts(BUDGET, BUDGET.replace("limit: 3", "limit: 5")).join("\n"),
+      ).toContain("loosened: limit 3 outbox.publish calls per run");
+      expect(
+        impacts(
+          BUDGET,
+          BUDGET.replace(
+            "per: run",
+            "per: day\n  timezone: Europe/Madrid\n  across: environment",
+          ),
+        ).join("\n"),
+      ).toMatch(/changed: limit[\s\S]*tightened: across run → environment/);
+      expect(
+        impacts(BUDGET, BUDGET.replace("per: run", "per: step")).join("\n"),
+      ).toContain("loosened");
+      const tokens = `- required_engine_version: 5
 - budget: Publications
   id: publications
   tokens: 3
@@ -516,10 +645,10 @@ describe("what a changed budget or evidence requirement does", () => {
   per: run
   otherwise: deny
 `;
-    expect(impacts(BUDGET, tokens).join("\n")).toContain(
-      "loosened: source Enforced allowance → Measured usage · stops further work",
-    );
-    const legacy = `- required_engine_version: 5
+      expect(impacts(BUDGET, tokens).join("\n")).toContain(
+        "loosened: source Enforced allowance → Measured usage · stops further work",
+      );
+      const legacy = `- required_engine_version: 5
 - budget: Publications
   id: publications
   tokens: 3
@@ -527,18 +656,18 @@ describe("what a changed budget or evidence requirement does", () => {
   otherwise: deny
   step_agent: dev
 `;
-    const all = impacts(tokens, legacy).join("\n");
-    expect(all).toContain("Agent-reported usage");
-    expect(all).toContain("loosened: agent all → dev");
-    const [added] = permissionChanges(null, documentOf(BUDGET));
-    expect(added).toMatchObject({ entry: "budget", impact: "tightened" });
-    expect(added?.summary).toContain(
-      "added: deny over 3 outbox.publish calls per run",
-    );
-  });
+      const all = impacts(tokens, legacy).join("\n");
+      expect(all).toContain("Agent-reported usage");
+      expect(all).toContain("loosened: agent all → dev");
+      const [added] = permissionChanges(null, documentOf(BUDGET));
+      expect(added).toMatchObject({ entry: "budget", impact: "tightened" });
+      expect(added?.summary).toContain(
+        "added: deny over 3 outbox.publish calls per run",
+      );
+    });
 
-  test("evidence requirements added, removed, weakened", () => {
-    const shapes = `- required_engine_version: 5
+    test("evidence requirements added, removed, weakened", () => {
+      const shapes = `- required_engine_version: 5
 - contracts:
     shapes:
       r: { properties: { status: { values: [passed, failed] } } }
@@ -549,31 +678,32 @@ describe("what a changed budget or evidence requirement does", () => {
   command: { prefix: git push }
   effect: allow
 `;
-    const gate = (requires: string) =>
-      `${shapes}- gate: G\n  id: g\n  command: { prefix: git push }\n  requires:\n${requires}  otherwise: deny\n`;
-    const ci = (authority: string, where = "") =>
-      `    - { evidence: ci, authority: ${authority}, subject: revision${where} }\n`;
-    const qa =
-      "    - { evidence: qa, authority: runtime-observed, subject: revision }\n";
-    const all = impacts(
-      gate(ci("externally-verified")),
-      gate(ci("runtime-observed", ", where: { status: passed }") + qa),
-    ).join("\n");
-    expect(all).toContain(
-      "loosened: ci authority externally-verified → runtime-observed",
-    );
-    expect(all).toContain("changed: ci conditions or contract changed");
-    expect(all).toContain("tightened: now needs qa (runtime-observed)");
-    expect(
-      impacts(
-        gate(ci("runtime-observed") + qa),
-        gate(ci("runtime-observed")),
-      ).join("\n"),
-    ).toContain("loosened: no longer needs qa");
-  });
-});
+      const gate = (requires: string) =>
+        `${shapes}- gate: G\n  id: g\n  command: { prefix: git push }\n  requires:\n${requires}  otherwise: deny\n`;
+      const ci = (authority: string, where = "") =>
+        `    - { evidence: ci, authority: ${authority}, subject: revision${where} }\n`;
+      const qa =
+        "    - { evidence: qa, authority: runtime-observed, subject: revision }\n";
+      const all = impacts(
+        gate(ci("externally-verified")),
+        gate(ci("runtime-observed", ", where: { status: passed }") + qa),
+      ).join("\n");
+      expect(all).toContain(
+        "loosened: ci authority externally-verified → runtime-observed",
+      );
+      expect(all).toContain("changed: ci conditions or contract changed");
+      expect(all).toContain("tightened: now needs qa (runtime-observed)");
+      expect(
+        impacts(
+          gate(ci("runtime-observed") + qa),
+          gate(ci("runtime-observed")),
+        ).join("\n"),
+      ).toContain("loosened: no longer needs qa");
+    });
+  },
+);
 
-describe("the run listing", () => {
+describe("the run listing", { timeout: GIT_TESTS }, () => {
   test("shows reservations, settlements and measurements", async () => {
     const repo = scratchRepo(
       BUDGET.replace(

@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
 import {
+  expandBraces,
   globCouldReachSecret,
   isSecretName,
   nameForms,
@@ -45,12 +46,21 @@ describe("secret places", () => {
 });
 
 describe("glob details", () => {
+  test("leaves literal braces intact when expanding alternatives", () => {
+    expect(expandBraces("file{literal}-{a,b}.*")).toEqual([
+      "file{literal}-a.*",
+      "file{literal}-b.*",
+    ]);
+  });
+
   test.each([
     ["[.]e[a-z]v", true],
     ["[!x]env", true],
     ["[^.]env", false],
     ["[.env", false],
     ["{a,{.env,b}}", true],
+    ["file{01..09..2}.json", true],
+    [".en{a..z}", true],
     [
       `{${Array.from({ length: 70 }, (_, index) => `a${index}`).join(",")}}`,
       true,

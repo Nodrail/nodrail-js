@@ -27,8 +27,11 @@ const engineIo = (io: Io): EngineIo => ({
   write: (text) => io.write(text),
   writeError: (text) => io.writeErr(text),
   readStdin: () => io.readStdin(),
+  env: { ...process.env, HOME: io.home, ...io.env },
+  home: io.home,
+  fetch: io.fetch,
   // The hook's telemetry sender runs this command line again.
-  self: [process.argv[1] ?? "", "policy"],
+  self: [...(io.self ?? [process.argv[1] ?? ""]), "policy"],
 });
 
 /** Runs `nodrail policy <args>` and answers its exit code. */

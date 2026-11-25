@@ -1,4 +1,4 @@
-// Engine level 5 / document version 4 (Wave 3, DC-03.2 and DC-03.3):
+// Engine level 5 / document version 4:
 // evidence requirements and numeric budgets, from the rule file to the
 // hook's ledger. Version refusals, calendar windows, reserve and settle,
 // idempotent re-deliveries, unknown outcomes, and 20 processes racing a

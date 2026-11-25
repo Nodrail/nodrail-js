@@ -1,3 +1,4 @@
+import { connectRead } from "./connect.ts";
 import { evidenceRead } from "./accountable.ts";
 import { observeCommand, usesLimits } from "./claude-code.ts";
 import { realpathSync } from "node:fs";
@@ -53,7 +54,7 @@ export function codexHookCommand(
   root: string,
   entry: string,
   setup: Pick<ProjectSetup, "connections" | "telemetry"> &
-    Partial<Pick<ProjectSetup, "plugins">> = {
+    Partial<Pick<ProjectSetup, "plugins" | "connect">> = {
     connections: [],
     telemetry: null,
   },
@@ -63,12 +64,11 @@ export function codexHookCommand(
   const real = realpathSync(root);
   const policy = join(real, EFFECTIVE_FILE);
   const list = join(real, PROTECT_LIST);
-  const reads = hookReads(setup as ProjectSetup, (file) =>
-    quoted(join(real, file)),
-  );
-  const evidence = evidenceRead({ root, ...policyText }, (file) =>
-    quoted(join(real, file)),
-  );
+  const path = (file: string) => quoted(join(real, file));
+  const reads = hookReads(setup as ProjectSetup, path);
+  const evidence = setup.connect
+    ? connectRead(setup, path)
+    : evidenceRead({ root, ...policyText }, path);
   return `nodrail policy hook ${quoted(policy)} --protect-list ${quoted(list)}${reads}${evidence} --host codex --agent ${entry} || printf '%s' ${quoted(DENY)}`;
 }
 
@@ -145,7 +145,7 @@ function hooksFile(
   const hook = codexHookCommand(root, entry, setup, policy);
   const hooks = {
     PreToolUse: [{ matcher: ".*", hooks: command(hook) }],
-    ...(usesLimits(policy.effective)
+    ...(setup.connect?.decide === "cloud" || usesLimits(policy.effective)
       ? { PostToolUse: [{ matcher: ".*", hooks: command(hook) }] }
       : {}),
     // Codex asks the person to trust it once, in /hooks.
@@ -228,7 +228,7 @@ export async function codexActivation(input: {
   env: Env;
   entry: string;
   setup: Pick<ProjectSetup, "connections" | "telemetry"> &
-    Partial<Pick<ProjectSetup, "plugins">>;
+    Partial<Pick<ProjectSetup, "plugins" | "connect">>;
   /** The effective policy apply wrote, for the hook's `--evidence`. */
   effective?: string;
 }): Promise<Activation> {

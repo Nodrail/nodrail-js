@@ -1,4 +1,7 @@
-import type { HookResult } from "./actions.ts";
+import { allowQuietly, deny, type HookResult } from "./actions.ts";
+import { readHookConnection, type HookConnection } from "./hook-connection.ts";
+import { loadHookPolicy, type HookPolicy } from "./hook-policy.ts";
+import { budgetExecution } from "./hook-budget-execution.ts";
 import type { ConnectionCalls } from "./connections.ts";
 import {
   claudeAnswerFor,
@@ -10,21 +13,17 @@ import {
   copilotStepEvent,
 } from "./copilot-hook.ts";
 import { hookEvidence } from "./hook-evidence.ts";
-import { readConnections } from "./hook-files.ts";
 import { hookIsStep } from "./hook-guard.ts";
-import { telemetryObserver, type Observed } from "./hook-telemetry.ts";
-import { decisionSink, type DecisionSink } from "./decision-report.ts";
-import { nonEmptyText } from "./actions.ts";
-import { decideToolCall, guardRefusalFor, parseEvent } from "./local-hook.ts";
+import { hostName, reporterOf, sinkOf } from "./hook-reporting.ts";
+import { policyDigestWarning } from "./hook-policy-digest.ts";
+import { told, type Observed } from "./hook-telemetry.ts";
+import { decideToolCall, toolIntegrity } from "./local-hook.ts";
 import type { PolicyDocument } from "./policies.ts";
 import type { Environment } from "./run-key.ts";
-import {
-  dataGuard,
-  protectedPaths,
-  setupGuard,
-  withLedger,
-} from "./rules-guard.ts";
-import { runHook } from "./run-hook.ts";
+import { hookGuards, type Guards } from "./hook-setup.ts";
+import { protectedPaths } from "./rules-guard.ts";
+import { runHook, runOutcome } from "./run-hook.ts";
+import { recordWatchFailure } from "./watch-audit.ts";
 
 /**
  * `nodrail-policy hook`: one host's tool call on stdin, judged by the rules,
@@ -40,13 +39,16 @@ export type HookRun = {
     "protect-list"?: string;
     connections?: string;
     telemetry?: string;
-    /** `{ url, credential }`: record each decision and outcome in Nodrail (R388). */
+    /** `{ url, credential }`: record each decision and outcome in Nodrail. */
     report?: string;
+    connect?: string;
+    "legacy-connect"?: boolean;
     host?: string;
     /** `{ url, workspace_revision }` for externally verified evidence; token from NODRAIL_TOKEN. */
     evidence?: string;
   };
   document: PolicyDocument;
+  policyDigest?: string | null;
   now: Date;
   paths: string[];
 };
@@ -58,6 +60,8 @@ export type HookIo = {
   write(text: string): void;
   writeError(text: string): void;
   self?: readonly string[];
+  home?: string;
+  fetch?: typeof fetch;
 };
 
 const identityOf = (values: HookRun["values"]) => ({
@@ -65,95 +69,21 @@ const identityOf = (values: HookRun["values"]) => ({
   installation: values.installation,
 });
 
-/** Copilot's call, judged as the Claude Code calls it is; one answer back. */
-function copilotHook(
+type PrepareTool = (event: string) => Promise<() => HookResult>;
+
+/** Read remote conditions together, then judge the patch's parts in host order. */
+async function copilotHook(
   stdin: string,
   connections: ConnectionCalls | null,
-  decide: (event: string) => HookResult,
+  prepare: PrepareTool,
 ) {
   const events = copilotEvents(stdin, Object.keys(connections ?? {}));
-  return typeof events === "string"
-    ? copilotRefusal(events)
-    : copilotAnswer(events.map(decide));
+  if (typeof events === "string") return copilotRefusal(events);
+  const prepared = await Promise.all(events.map(prepare));
+  return copilotAnswer(prepared.map((judge) => judge()));
 }
 
-type Guards = {
-  setup: ReturnType<typeof setupGuard> | null;
-  connections: ConnectionCalls | null;
-  data: ReturnType<typeof dataGuard> | null;
-};
-
-/** The protect list and connections the hook was given; a reason when unreadable. */
-function readGuards(values: HookRun["values"]): Guards | string {
-  let reading = "the protect list";
-  try {
-    const setup = values["protect-list"]
-      ? setupGuard(values["protect-list"])
-      : null;
-    reading = "the connections";
-    const connections = values.connections
-      ? readConnections(values.connections)
-      : null;
-    const data =
-      values.connections && connections
-        ? dataGuard(values.connections, connections)
-        : null;
-    return { setup, connections, data };
-  } catch (error) {
-    return `Nodrail: can't read ${reading}: ${(error as Error).message}\n`;
-  }
-}
-
-/** The host as the hook reports it: Copilot's calls are judged as Claude Code's. */
-const hostName = (host: string | undefined) =>
-  host === "codex" || host === "copilot" ? host : "claude-code";
-
-/** What telemetry and the `--report` sink both start from, for a file. */
-const reportingFrom = (run: HookRun, io: HookIo, file: string) => ({
-  file,
-  host: hostName(run.values.host),
-  document: run.document,
-  paths: run.paths,
-  self: io.self ?? [process.argv[1] ?? ""],
-  warn: (text: string) => io.writeError(text),
-});
-
-/**
- * The `--report` sink, which records decisions in Nodrail, or null. A
- * call's outcome is queued here, before anything else can fail.
- */
-function sinkOf(run: HookRun, io: HookIo, stdin: string) {
-  const { report } = run.values;
-  const sink = report ? decisionSink(reportingFrom(run, io, report)) : null;
-  if (sink && isOutcome(stdin)) sink.outcome(stdin);
-  return sink;
-}
-
-/** Telemetry's observer and run reporter, and the sink's observer, or none. */
-function reporterOf(run: HookRun, io: HookIo, sink: DecisionSink | null) {
-  const { telemetry } = run.values;
-  const reporter = telemetry
-    ? telemetryObserver(reportingFrom(run, io, telemetry))
-    : null;
-  const observers = [reporter?.observe, sink?.observe].filter(
-    (observe): observe is NonNullable<typeof observe> => Boolean(observe),
-  );
-  return {
-    observe: observers.length
-      ? (observed: Observed) => {
-          for (const observe of observers) observe(observed);
-        }
-      : null,
-    report: reporter?.report ?? null,
-  };
-}
-
-function hookOptions(
-  run: HookRun,
-  guards: Guards,
-  io: HookIo,
-  sink: DecisionSink | null,
-) {
+function hookOptions(run: HookRun, guards: Guards) {
   const { values, document, now, paths } = run;
   return {
     document,
@@ -162,7 +92,6 @@ function hookOptions(
     ...guards,
     host:
       values.host === "codex" ? ("codex" as const) : ("claude-code" as const),
-    ...reporterOf(run, io, sink),
     unmatched:
       values.unmatched === "allow" ? ("allow" as const) : ("deny" as const),
     ...identityOf(values),
@@ -189,123 +118,316 @@ function copilotMode(host: string | undefined, env: Record<string, unknown>) {
     : null;
 }
 
-/**
- * The guards with the run ledger protected (R364), as the run hook finds it
- * from the call's folder and from the project's; a reason when it can't be
- * found, for the hook must block then, not run unprotected.
- */
-function guardLedger(guards: Guards, stdin: string, env: Environment) {
-  if (!guards.setup) return guards;
-  const cwd = nonEmptyText(parseEvent(stdin)?.cwd) ?? process.cwd();
-  try {
-    return {
-      ...guards,
-      setup: withLedger(guards.setup, [cwd, guards.setup.root], env),
-    };
-  } catch (error) {
-    return `Nodrail: can't find the run ledger to protect: ${(error as Error).message}\n`;
-  }
-}
-
-/**
- * The local hook's guards alone, for a hook that asks Nodrail for the rest
- * (connected mode, R383): the protect list, the setup, the run ledger and
- * git's folders, and the connections' data, assembled exactly as here, so
- * a connected setup is never weaker than a local one. A refusal, a reason
- * to block when the list or the ledger can't be read, or null.
- */
-export function connectedGuard(
-  stdin: string,
-  input: {
-    protectList: string;
-    /** The rule files the setup enforces, which no file tool may change. */
-    rules: string[];
-    connections?: string;
-    env: Environment;
-    host?: "claude-code" | "codex";
-  },
-): string | null {
-  const read = readGuards({
-    "protect-list": input.protectList,
-    ...(input.connections ? { connections: input.connections } : {}),
-  });
-  if (typeof read === "string") return read.trim();
-  const guards = guardLedger(read, stdin, input.env);
-  if (typeof guards === "string") return guards.trim();
-  return guardRefusalFor(stdin, {
-    protect: [...protectedPaths(input.rules), ...(guards.setup?.paths ?? [])],
-    setup: guards.setup,
-    connections: guards.connections,
-    data: guards.data,
-    host: input.host ?? "claude-code",
-  });
-}
-
-/**
- * `--unmatched` is `deny` (the default) or `allow`. Any other value blocks
- * the call: a hook can't guess what a setup meant. `ask` was removed, since
- * nothing waits for a person.
- */
-function unmatchedProblem(value: string | undefined) {
-  if (value === undefined || value === "deny" || value === "allow") return null;
-  return value === "ask"
-    ? "Nodrail: --unmatched ask was removed: nothing waits for a person. Use --unmatched deny (the default), or allow to leave calls no rule covers to the host's own permissions.\n"
-    : `Nodrail: --unmatched is deny or allow, not ${value}.\n`;
-}
-
-/** The hook's options and guards as given, or why the hook must stop. */
-const startGuards = (values: HookRun["values"]) =>
-  unmatchedProblem(values.unmatched) ?? readGuards(values);
-
-export async function hookCommand(run: HookRun, io: HookIo) {
-  const read = startGuards(run.values);
-  // Unprotected would be worse than stopped: 2 is what blocks.
-  if (typeof read === "string") {
-    io.writeError(read);
-    return 2;
-  }
-  // The run's files go where the given environment says, never another's.
-  const env = io.env ?? process.env;
-  const stdin = await io.readStdin();
-  const guards = guardLedger(read, stdin, env);
-  if (typeof guards === "string") {
-    io.writeError(guards);
-    return 2;
-  }
-  const copilot = copilotMode(run.values.host, env);
-  const sink = sinkOf(run, io, stdin);
-  const base = {
-    ...hookOptions(run, guards, io, sink),
-    ...(copilot ? { keyHost: "copilot" } : {}),
-  };
-  // Rules without gates or budgets never read or write the ledger.
-  const runs = run.document.version !== 1;
-  // Read before the decision, which stays synchronous under the run lock.
-  const evidence = await hookEvidence(stdin, base, {
-    env,
-    file: run.values.evidence,
-  });
-  const options = { ...base, evidence };
-  const decide = (event: string) =>
-    runs ? runHook(event, options, env) : decideToolCall(event, options);
-  // A subagent starting or stopping is a step, and a call's outcome settles
-  // its budgets: recorded, never judged, and a failure from here on must
-  // not keep the subagent from stopping or block what already ran.
-  const stepEvent = copilotStepEvent(stdin) ?? copilotSettleEvent(stdin);
-  if (stepEvent) hookIsStep();
-  const step = copilot ? stepEvent : isOutcome(stdin) ? stdin : null;
-  const result = step
-    ? runs
-      ? runHook(step, options, env)
-      : { stdout: "", stderr: "", exitCode: 0 }
-    : copilot === "own"
-      ? copilotHook(stdin, guards.connections, decide)
-      : copilot === "as-claude"
-        ? claudeAnswerFor(
-            copilotHook(copilotFromClaude(stdin), guards.connections, decide),
-          )
-        : decide(stdin);
+function answer(io: HookIo, result: HookResult) {
   if (result.stdout) io.write(result.stdout);
   if (result.stderr) io.writeError(result.stderr);
   return result.exitCode;
+}
+
+function hostEvent(stdin: string, host: string | undefined, env: Environment) {
+  const copilot = copilotMode(host, env);
+  return {
+    stdin,
+    copilot,
+    step:
+      copilotStepEvent(stdin) ??
+      (copilot ? copilotSettleEvent(stdin) : isOutcome(stdin) ? stdin : null),
+  };
+}
+
+function hookRefusal(event: ReturnType<typeof hostEvent>, reason: string) {
+  if (event.step) return { ...allowQuietly, stderr: reason };
+  return event.copilot === "own"
+    ? copilotRefusal(reason.trim())
+    : deny(reason.trim());
+}
+
+type HostEvent = ReturnType<typeof hostEvent>;
+type RepositoryPolicy = {
+  document: PolicyDocument;
+  policyDigest: string | null;
+};
+type LoadRepositoryPolicy = () => Promise<RepositoryPolicy | null>;
+
+async function decideForHost(
+  event: HostEvent,
+  connections: ConnectionCalls | null,
+  prepare: PrepareTool,
+  finish = (result: HookResult, _copilot: boolean) => result,
+) {
+  const { stdin, copilot } = event;
+  if (!copilot) return finish((await prepare(stdin))(), false);
+  const copilotInput = copilot === "own" ? stdin : copilotFromClaude(stdin);
+  const result = finish(
+    await copilotHook(copilotInput, connections, prepare),
+    true,
+  );
+  return copilot === "own" ? result : claudeAnswerFor(result);
+}
+
+const emptyPolicy: PolicyDocument = { version: 1, rules: [] };
+
+async function watchFailure(
+  run: Omit<HookRun, "document">,
+  io: HookIo,
+  failure: { event: HostEvent; guards: Guards; reason: string },
+) {
+  const { event, guards, reason } = failure;
+  recordWatchFailure({
+    file: run.values.connect!,
+    home: io.home,
+    host: event.copilot ? "copilot" : hostName(run.values.host),
+    stdin: event.step ?? event.stdin,
+    now: run.now,
+    reason,
+    warn: (text) => io.writeError(text),
+  });
+  const base = hookOptions({ ...run, document: emptyPolicy }, guards);
+  const result = event.step
+    ? allowQuietly
+    : await decideForHost(
+        event,
+        guards.connections,
+        async (stdin) => () => toolIntegrity(stdin, base) ?? allowQuietly,
+      );
+  return answer(io, { ...result, stderr: reason + result.stderr });
+}
+
+const invalidConnection =
+  "Nodrail: the repository lock differs from the applied policy or the hook configuration is invalid. Run nodrail apply again.\n";
+
+export async function hookCommand(
+  input: Omit<HookRun, "document">,
+  io: HookIo,
+  local: LoadRepositoryPolicy,
+) {
+  const env = io.env ?? process.env;
+  const event = hostEvent(await io.readStdin(), input.values.host, env);
+  if (event.step) hookIsStep();
+  const { settings, error } = connectionFor(input.values);
+  if (event.step && isOutcome(event.step)) {
+    if (error) io.writeError(error);
+    return finishOutcome(input, io, {
+      event: event.step,
+      copilot: !!event.copilot,
+      settings,
+      env,
+    });
+  }
+  if (error) return answer(io, hookRefusal(event, error));
+  return resolveAndEvaluate(input, io, local, { env, event, settings });
+}
+
+function connectionFor(values: HookRun["values"]) {
+  try {
+    const settings = values.connect
+      ? readHookConnection(values.connect, values["legacy-connect"])
+      : null;
+    return { settings, error: null };
+  } catch {
+    return { settings: null, error: invalidConnection };
+  }
+}
+
+async function resolveAndEvaluate(
+  input: Omit<HookRun, "document">,
+  io: HookIo,
+  local: LoadRepositoryPolicy,
+  context: {
+    env: Environment;
+    event: HostEvent;
+    settings: HookConnection | null;
+  },
+) {
+  const { event, env, settings } = context;
+  const { guards, error } = hookGuards(
+    input.values,
+    event.step ?? event.stdin,
+    env,
+    io.home,
+  );
+  const watch = settings?.enforce === "watch";
+  const failure = (reason: string, reply: () => number) =>
+    watch ? watchFailure(input, io, { event, guards, reason }) : reply();
+  const warning = (reason: string) => () => {
+    io.writeError(reason);
+    return event.step ? 0 : 2;
+  };
+  if (error) return failure(error, warning(error));
+
+  const file = input.values.connect;
+  const connected =
+    file && settings ? await loadHookPolicy(file, settings, env, io) : null;
+  if (typeof connected === "string")
+    return failure(connected, () => answer(io, hookRefusal(event, connected)));
+  const policy = await effectivePolicy(connected, local, io, watch);
+  if (!policy) {
+    const reason = "Nodrail: the hook has no repository policy.\n";
+    return failure(reason, warning(reason));
+  }
+  const run: HookRun = {
+    ...input,
+    ...policy,
+    values: event.copilot ? { ...input.values, host: "copilot" } : input.values,
+  };
+  return evaluateHook(run, io, { env, event, guards, connected, settings });
+}
+
+async function effectivePolicy(
+  connected: HookPolicy | null,
+  local: LoadRepositoryPolicy,
+  io: HookIo,
+  watch: boolean,
+): Promise<RepositoryPolicy | null> {
+  if (connected?.document)
+    return {
+      document: connected.document,
+      policyDigest: connected.digest ?? null,
+    };
+  try {
+    return await local();
+  } catch (error) {
+    if (!watch) throw error;
+    io.writeError(`Nodrail: ${(error as Error).message}\n`);
+    return null;
+  }
+}
+
+function finishOutcome(
+  input: Omit<HookRun, "document">,
+  io: HookIo,
+  context: {
+    event: string;
+    copilot: boolean;
+    settings: HookConnection | null;
+    env: Environment;
+  },
+) {
+  const { settings, copilot, event, env } = context;
+  const run: HookRun = {
+    ...input,
+    document: emptyPolicy,
+    policyDigest:
+      settings?.decide === "cloud" ? settings.policy_digest : undefined,
+    values: copilot ? { ...input.values, host: "copilot" } : input.values,
+  };
+  const sink = sinkOf(run, io, settings);
+  sink?.outcome(event);
+  const { report } = reporterOf(run, io, sink);
+  return answer(
+    io,
+    runOutcome(
+      event,
+      {
+        now: run.now,
+        report,
+        host: run.values.host === "codex" ? "codex" : "claude-code",
+        keyHost: copilot ? "copilot" : undefined,
+      },
+      env,
+    ),
+  );
+}
+
+function warnPolicySkew(run: HookRun, io: HookIo) {
+  if (run.values.report && run.policyDigest && run.paths[0]) {
+    const warning = policyDigestWarning(run.paths[0], run.policyDigest);
+    if (warning) io.writeError(warning);
+  }
+}
+
+async function evaluateHook(
+  run: HookRun,
+  io: HookIo,
+  input: {
+    env: Environment;
+    event: ReturnType<typeof hostEvent>;
+    guards: Guards;
+    connected: HookPolicy | null;
+    settings: HookConnection | null;
+  },
+) {
+  const {
+    env,
+    event: { step, copilot },
+    guards,
+    connected,
+  } = input;
+  const sink = sinkOf(run, io, input.settings, connected?.evidence?.token);
+  warnPolicySkew(run, io);
+  const base = {
+    ...hookOptions(run, guards),
+    ...reporterOf(run, io, sink),
+    ...(copilot ? { keyHost: "copilot" } : {}),
+  };
+  const runs =
+    run.document.version !== 1 ||
+    connected?.digest !== undefined ||
+    connected?.watch === true;
+  if (step) return answer(io, runs ? runHook(step, base, env) : allowQuietly);
+  const watch = connected?.watch === true;
+  const execution = budgetExecution(watch ? null : sink, {
+    env,
+    policyDigest: run.policyDigest ?? null,
+    fetch: io.fetch,
+  });
+  const notices: Observed[] = [];
+  const prepare: PrepareTool = async (event) => {
+    const integrity = watch ? toolIntegrity(event, base) : null;
+    const evidence = integrity
+      ? null
+      : await hookEvidence(event, base, {
+          env,
+          file: run.values.evidence,
+          config: connected ? connected.evidence : undefined,
+        });
+    const options = await execution.prepare(event, {
+      ...base,
+      evidence,
+      observe: copilot ? (item) => notices.push(item) : base.observe,
+    });
+    return () => {
+      const result = runs
+        ? runHook(event, options, env)
+        : decideToolCall(event, options);
+      return watch
+        ? { ...(integrity ?? allowQuietly), stderr: result.stderr }
+        : result;
+    };
+  };
+  return answer(
+    io,
+    await decideForHost(
+      input.event,
+      guards.connections,
+      prepare,
+      (result, patch) => {
+        const final = execution.finish(result, patch);
+        for (const item of notices)
+          base.observe?.(
+            final.stdout && told(item.judged) === "allow"
+              ? deniedPatch(item, final)
+              : item,
+          );
+        return final;
+      },
+    ),
+  );
+}
+
+function deniedPatch(item: Observed, result: HookResult): Observed {
+  const { decision } = item.judged;
+  return {
+    ...item,
+    judged: {
+      ...item.judged,
+      result,
+      decision: decision && {
+        ...decision,
+        outcome: "deny",
+        matchedRuleId: null,
+        explanation: "Another change in the same Copilot patch was denied.",
+      },
+    },
+  };
 }

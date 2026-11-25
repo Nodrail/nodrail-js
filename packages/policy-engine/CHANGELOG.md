@@ -1,22 +1,45 @@
 # Changelog
 
+## 0.8.0
+
+The connected hook: a host decides with the control plane's published
+policy, shared budgets and evidence, and reports what it decided. 0.7.0 was
+never published to npm; 0.8.0 includes its changes.
+
+- Recognize Windows drive and UNC paths in file-contract checks, including
+  resolved project aliases, while preserving symlink protections.
+- Defer reading the Git revision for remote evidence until a gate needs it.
+- Match shell globs against connection data paths, including brace
+  alternatives and recursive segments.
+- Measure command performance regressions in CPU time so runner contention
+  does not cause spurious failures.
+- Add `hook --connect` with conditional policy fetches, SHA-256 verification,
+  matching-cache fallback, runtime evidence reads and watch mode.
+- Queue host decisions, step receipts and outcomes for the existing runtime API.
+- Remove the legacy `connectedGuard` entry point.
+- The connected hook reserves shared budget capacity on the control plane before
+  taking the run lock. A failed or expired lease denies the call with the reason.
+  Outcomes settle leases through the background report sender.
+- Decision reports and heartbeats send the policy digest used by the host. The
+  hook warns when the cached file differs from `nodrail.lock.yaml`.
+
 ## 0.7.0
 
-Nodrail is the open control plane for AI agent development (R388). A rule
-only allows or denies: approvals are gone (R398). The format has no other
-name than Nodrail (R396): `apiVersion: nodrail.com/v1alpha1`.
+Nodrail is the open control plane for AI agent development. A rule
+only allows or denies: approvals are gone. The format has no other
+name than Nodrail: `apiVersion: nodrail.com/v1alpha1`.
 
 ### Added
 
 - `connectedGuard` in `@nodrail/policy-engine/command-line`: the local
   hook's guards alone (protect list, setup, run ledger and git's folders,
   connections' data), for a hook that asks Nodrail for everything else.
-- `connect:` in nodrail.yaml (R383): the Nodrail, Cloud or self-hosted, a
+- `connect:` in nodrail.yaml: the Nodrail, Cloud or self-hosted, a
   project is connected to (`url`, `workspace`, `environment`), who decides
   (`decide: cloud | local`, required), `enforce: on | watch` and the agent
   `credential` by reference. Read into the setup as `connect`; a project
   without it is unchanged.
-- `hook --report <file>` (R388): records each call the hook decides, and
+- `hook --report <file>`: records each call the hook decides, and
   each outcome it sees (PostToolUse, PostToolUseFailure), in Nodrail's runs
   and Activity through `POST /api/v1/runtime/decisions`, with the
   credential the file names (`{ url, credential }`, as
@@ -31,7 +54,7 @@ name than Nodrail (R396): `apiVersion: nodrail.com/v1alpha1`.
 
 ### Changed
 
-- Gates and budgets only deny while unmet (R398). `otherwise` is optional
+- Gates and budgets only deny while unmet. `otherwise` is optional
   and defaults to `deny`; the denial says what is missing (the receipt,
   evidence or budget), so the agent gets it done and tries again. Nothing
   waits for a person.
@@ -46,7 +69,7 @@ name than Nodrail (R396): `apiVersion: nodrail.com/v1alpha1`.
 
 ### Removed
 
-- `require_approval` (R398): a rule only allows or denies. A rule file with
+- `require_approval`: a rule only allows or denies. A rule file with
   `effect: require_approval` fails to compile and says to use `deny`, with
   a gate, budget or evidence requirement to say when the call is allowed.
   The evaluator's outcome is `allow`, `deny` or `none`, and cases files
@@ -85,11 +108,11 @@ name than Nodrail (R396): `apiVersion: nodrail.com/v1alpha1`.
 - `receiptText` and `HANDBACK_TOOL` in `@nodrail/policy-engine/hook-runs`,
   for hooks that send a receipt on.
 - `@nodrail/policy-engine/files`: the file-content contracts parser and
-  write reconstruction (DC-04.2, preview). `@nodrail/policy-engine/revision`:
+  write reconstruction (preview). `@nodrail/policy-engine/revision`:
   `workRevision`, and `cleanRevision(commit)`, the revision a clean checkout
   of that commit reads, so CI evidence for a commit ties to the local work.
 
-- Engine level 5 and policy document version 4 (Wave 3, DC-03.2, DC-03.3).
+- Engine level 5 and policy document version 4.
   - **Evidence requirements on gates.** `{ evidence, authority, subject: revision, where }`, with `evidence` contracts in the rule file's `contracts` entry. A `where` on a secret path is refused. Local runtime-observed events are read from the ledger folder; externally verified ones are asked of Cloud with `hook --evidence <file>` (token in `NODRAIL_TOKEN`). Old subjects never satisfy new work. Explanations follow a fixed order.
   - **Numeric budgets.** `count: { tool, operation }`; `sum` of an `input.` (reserved) or `result.` (measured) integer path with its `unit`; `tokens` with `source: measured`; `per: step | run | day` with an IANA `timezone` for a day; `across: run | environment`. Labels are derived from the source: enforced allowance, measured usage, agent-reported usage.
   - **Reserve and settle in the local hook.** Reservations are made under the run lock and keyed `host:tool_use_id`, and a repeated PreToolUse is idempotent. PostToolUse consumes a reservation. Only a mediated `failed`/`not-called` releases one; anything else is unknown and still counted. Measured usage with no reading is unknown and holds.
@@ -101,12 +124,12 @@ name than Nodrail (R396): `apiVersion: nodrail.com/v1alpha1`.
 ### Changed
 
 - Gates now use only each agent's latest finished step, per revision with
-  `subject: revision` (R375). This changes existing gates too, including
+  `subject: revision`. This changes existing gates too, including
   level-3 gates without contracts: a QA `pass` followed by a QA `fail` now
   closes a gate that 0.5.2 left open, and a later invalid receipt closes a
   gate an earlier valid one opened.
 - A chain that makes a link (`ln`, `link`, `cp -s`) and runs anything after
-  it is judged whole, as `command.compound` (R376).
+  it is judged whole, as `command.compound`.
 
 ### Fixed
 
@@ -114,8 +137,8 @@ name than Nodrail (R396): `apiVersion: nodrail.com/v1alpha1`.
   `NODRAIL_LEDGER`) wasn't protected, so a rule allowing `Write` let an
   agent append a `passed` event and open a gate. With a protect list, the
   hook now always denies file tools that change the ledger and shell
-  commands that name it (R364).
-- All of `.git` is protected the same way (R374), and a shell word counts
+  commands that name it.
+- All of `.git` is protected the same way, and a shell word counts
   as the shell joins it (`".git/nod""rail/…"`) and when a wildcard could
   reach `.git`, the ledger or a setup dot folder (`.gi?/…`, `sub/alt*`).
   Wildcards that can't reach them (`cp src/*.ts dist/`) are left to the
@@ -123,8 +146,8 @@ name than Nodrail (R396): `apiVersion: nodrail.com/v1alpha1`.
 - With a protect list, the hook also denies a link pointing at, inside or
   above `.git`, the ledger or a setup dot folder, a recursive copy, move
   or sync into one, or into a folder holding one when it would create or
-  overwrite it, or after another part of the same line (R377), and an
-  extraction into either (R376).
+  overwrite it, or after another part of the same line, and an
+  extraction into either.
   Shell analysis stays best effort: a control, not a sandbox.
 - A gate on a command prefix was named by its internal `<id>-args` twin in
   deny reasons. `declaredGateId` and `declaredGates` give the declared id,
@@ -139,8 +162,7 @@ name than Nodrail (R396): `apiVersion: nodrail.com/v1alpha1`.
   `subject: revision` requirement stayed unmet there. Untracked files are now
   hashed by content as documented.
 
-- Briefs and tool inputs on declared contracts (engine level 4, DC-02.1,
-  DC-02.2). A rule file's `contracts` entry takes `agents.<a>.brief` and
+- Briefs and tool inputs on declared contracts (engine level 4). A rule file's `contracts` entry takes `agents.<a>.brief` and
   `connections.<c>.operations.<op>.input`; rules and gates take `where` on
   `input.` and `brief.` paths. The hook checks the brief of the agent a
   dispatch starts (a fenced `nodrail-brief` block, or opted-in flat

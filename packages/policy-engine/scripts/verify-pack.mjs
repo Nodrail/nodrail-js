@@ -17,9 +17,13 @@ const engine = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const typescript = resolve(engine, "node_modules/typescript/bin/tsc");
 
 // On Windows npm and pnpm are .cmd files, which only start through a shell.
-const shell = process.platform === "win32";
 const run = (command, args, cwd) =>
-  execFileSync(command, args, { cwd, encoding: "utf8", stdio: "pipe", shell });
+  execFileSync(command, args, {
+    cwd,
+    encoding: "utf8",
+    stdio: "pipe",
+    shell: process.platform === "win32" && ["npm", "pnpm"].includes(command),
+  });
 
 function check(condition, message) {
   if (condition) return;
@@ -112,10 +116,10 @@ export const commandLine: (argv: string[], io?: Io) => Promise<number> =
       files: ["use.ts"],
     }),
   );
-  run("node", [typescript, "-p", "tsconfig.json"], folder);
+  run(process.execPath, [typescript, "-p", "tsconfig.json"], folder);
   // The subpaths load at runtime too, not only as types.
   const loaded = run(
-    "node",
+    process.execPath,
     [
       "--input-type=module",
       "-e",
@@ -167,17 +171,17 @@ console.log(typeof files.readFileContent, typeof files.checkWrite, revision.clea
 
   writeFileSync(
     join(folder, "gate.yaml"),
-    `- rule: Echo
-  command: { prefix: echo }
+    `- rule: Git version
+  command: { prefix: "git version" }
   effect: allow
 - rule: Never remove
   command: { prefix: rm }
   effect: deny
 `,
   );
-  const ran = cli("exec", "gate.yaml", "--", "echo", "hello");
+  const ran = cli("exec", "gate.yaml", "--", "git", "version");
   check(
-    ran.status === 0 && ran.stdout.includes("hello"),
+    ran.status === 0 && ran.stdout.startsWith("git version "),
     `exec: ${ran.stderr}`,
   );
   writeFileSync(join(folder, "keep.txt"), "x");
@@ -196,7 +200,7 @@ console.log(typeof files.readFileContent, typeof files.checkWrite, revision.clea
       encoding: "utf8",
       input: event(command),
     });
-  check(hook("echo hi").stdout === "", "hook did not stay quiet on allow");
+  check(hook("git version").stdout === "", "hook did not stay quiet on allow");
   check(hook("rm -rf x").stdout.includes('"deny"'), "hook did not deny");
   check(
     hook("x", "missing.yaml").status === 2,

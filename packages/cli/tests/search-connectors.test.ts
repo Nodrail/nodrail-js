@@ -123,11 +123,15 @@ describe("files-search", () => {
     });
   });
 
-  test.skipIf(windows)("a link out of the folder is skipped", async () => {
+  test("a link out of the folder is skipped", async () => {
     const folder = handbook();
     const outside = mkdtempSync(join(tmpdir(), "nodrail-outside-"));
     writeFileSync(join(outside, "leak.md"), "Returns leak here.\n");
-    symlinkSync(join(outside, "leak.md"), join(folder, "public/leak.md"));
+    if (windows) {
+      symlinkSync(outside, join(folder, "public/leak.md"), "junction");
+    } else {
+      symlinkSync(join(outside, "leak.md"), join(folder, "public/leak.md"));
+    }
     const answer = await call(searchTool(filesBackend(folder)), {
       collection: "public",
       query: "leak",

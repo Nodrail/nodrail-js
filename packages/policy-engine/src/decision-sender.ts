@@ -4,14 +4,13 @@
 // in or refused, so a failure retries it whole, with the same keys: the
 // control plane answers a retried key with the same row.
 import { readFileSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import {
-  reportFile,
   type Queued,
   type QueuedDecision,
   type QueuedOutcome,
 } from "./decision-report.ts";
-import { secretValue } from "./secret-refs.ts";
+import { decisionDestination } from "./decision-destination.ts";
 import {
   batches,
   countsOf,
@@ -125,24 +124,69 @@ async function sendDecisions(sender: Sender, decisions: QueuedDecision[]) {
   }
 }
 
-async function sendOutcomes(sender: Sender, outcomes: QueuedOutcome[]) {
-  const { counts } = sender;
-  for (const { key, outcome } of outcomes) {
-    const id = sender.ids[key];
-    // Its decision was refused, or never seen: nothing to report it on.
-    if (!id) {
-      counts.rejected += 1;
-      continue;
+/** Keep each recorded step in order with the decisions around it. */
+async function sendHistory(sender: Sender, entries: Queued[]) {
+  let decisions: QueuedDecision[] = [];
+  let digest: unknown;
+  for (const entry of entries) {
+    if (entry.type === "decision") {
+      decisions.push(entry);
+      digest = entry.item.policy_digest;
     }
-    const answer = await post(sender, `/actions/${id}/reports`, {
-      report_key: `${key}:outcome`,
-      outcome,
-    });
-    if (answer.ok) counts.sent += 1;
+    if (entry.type !== "step") continue;
+    await sendDecisions(sender, decisions);
+    decisions = [];
+    const answer = await post(sender, "/steps", entry.item);
+    if (answer.ok) sender.counts.sent += 1;
     else {
-      counts.rejected += 1;
-      counts.lastRejection = answer.code;
+      sender.counts.rejected += 1;
+      sender.counts.lastRejection = answer.code;
     }
+  }
+  await sendDecisions(sender, decisions);
+  return digest;
+}
+
+function actionsForOutcome(ids: Sender["ids"], key: string) {
+  if (ids[key]) return [[key, ids[key]]] as const;
+  if (!key.startsWith("copilot:")) return [];
+  return Object.entries(ids).filter(([part]) => part.startsWith(`${key}#`));
+}
+
+async function sendOutcomes(sender: Sender, outcomes: QueuedOutcome[]) {
+  for (const {
+    key,
+    outcome,
+    measured,
+    tokens,
+    settlements,
+    cancellation,
+  } of outcomes) {
+    const body = { outcome, measured, tokens };
+    for (const target of settlements ?? [])
+      await sendOutcome(sender, "/budgets/settle", {
+        call_fingerprint: target.key,
+        policy_digest: target.policyDigest,
+        ...body,
+      });
+    if (cancellation) continue;
+
+    const actions = actionsForOutcome(sender.ids, key);
+    for (const [part, id] of actions)
+      await sendOutcome(sender, `/actions/${id}/reports`, {
+        report_key: `${part}:outcome`,
+        ...body,
+      });
+    if (!actions.length && !settlements?.length) sender.counts.rejected += 1;
+  }
+}
+
+async function sendOutcome(sender: Sender, path: string, body: object) {
+  const answer = await post(sender, path, body);
+  if (answer.ok) sender.counts.sent += 1;
+  else {
+    sender.counts.rejected += 1;
+    sender.counts.lastRejection = answer.code;
   }
 }
 
@@ -176,16 +220,15 @@ async function sendBatch(sender: Sender, path: string) {
     ...sender,
     counts: { sent: 0, rejected: 0, unknown: 0 },
   };
-  await sendDecisions(
-    tally,
-    entries.filter(
-      (entry): entry is QueuedDecision => entry.type === "decision",
-    ),
-  );
+  const digest = await sendHistory(tally, entries);
   await sendOutcomes(
     tally,
     entries.filter((entry): entry is QueuedOutcome => entry.type === "outcome"),
   );
+  if (digest !== undefined)
+    await post(tally, "/heartbeat", { policy_digest: digest }).catch(
+      () => undefined,
+    );
   const { counts } = sender;
   counts.sent += tally.counts.sent;
   counts.rejected += tally.counts.rejected;
@@ -210,10 +253,16 @@ export async function sendDecisionQueue(
   let error: string | undefined;
   const ids = readIds(folder);
   try {
-    const config = reportFile.parse(JSON.parse(readFileSync(file, "utf8")));
+    const { url, credential, binding } = decisionDestination(file, env);
+    // Unbound queues from older releases and queues for previous connections
+    // stay on disk without being sent with the current credential.
+    if (basename(folder) !== binding)
+      throw new Error(
+        "the queued decisions belong to another or unbound destination",
+      );
     const sender: Sender = {
-      base: `${config.url.replace(/\/$/, "")}/api/v1/runtime`,
-      credential: secretValue(config.credential, env),
+      base: `${url}/api/v1/runtime`,
+      credential,
       send,
       counts,
       ids,

@@ -1,4 +1,4 @@
-// Mediated connections (preview, DC-02.2 provider side, DC-02.3): input is
+// Mediated connections (preview): input is
 // checked before the provider is called, a result after it returns, and the
 // two are recorded apart. Fake providers only: each counts its calls, so a
 // refused call is proven to reach it zero times and an invalid result once.

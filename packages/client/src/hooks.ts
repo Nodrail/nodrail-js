@@ -33,7 +33,7 @@ export {
   type HookResult,
 } from "@nodrail/policy-engine/actions";
 
-export const HOOK_VERSION = "0.7.0";
+export const HOOK_VERSION = "0.8.0";
 
 /** Nodrail answers at once; past this the call is denied, within the hook's own time limit. */
 const HOOK_DEADLINE_MS = 25_000;

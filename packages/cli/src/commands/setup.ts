@@ -261,8 +261,7 @@ export async function apply(command: Command) {
   // Accepted: now, and only now, each connection may start, to show it
   // offers what it declares. One that doesn't stops apply before any write.
   if (count > 0) await connectionsStart(command, reviewed, root);
-  // Published before any file is written, so a hook that asks Nodrail
-  // never runs against the rules this apply replaces.
+  // Publish before installing the hook configuration that pins this policy.
   if (policy.publish) await published(command, policy.publish);
   // Even with nothing to change: the state records what nodrail owns.
   applySetup(place, reviewed, again("apply"));

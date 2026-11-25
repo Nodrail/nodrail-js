@@ -4,7 +4,7 @@
 // stdio. A secret is never in the host's config, the arguments or a file.
 // A connection whose operations declare `input` or `output` is mediated
 // instead: every call is checked on its way to the provider and back.
-import { spawn, type StdioOptions } from "node:child_process";
+import type { StdioOptions } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import type { Readable, Writable } from "node:stream";
@@ -14,6 +14,7 @@ import type { Env } from "../config.ts";
 import type { CompiledContracts } from "../contracts/engine.ts";
 import type { Io } from "../io.ts";
 import { connectionEnv } from "../setup/connections.ts";
+import { spawn } from "../spawn.js";
 import { VERSION } from "../version.ts";
 import { serveMediated } from "./connector.ts";
 
@@ -64,7 +65,6 @@ export function startConnection(
     cwd: root,
     env: connectionEnv(spec, env, root),
     stdio,
-    shell: process.platform === "win32",
   });
 }
 

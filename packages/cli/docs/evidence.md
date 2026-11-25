@@ -49,6 +49,10 @@ Runs a check and records what it observed:
 3. Reads the revision again. If it changed while the command ran, the subject is unknown (`null`): the result is about neither revision and never meets a requirement.
 4. Validates the result against the evidence's pinned contract and appends the event.
 
+Pass the executable and its arguments after `--`. Windows package-manager
+launchers such as `npm.cmd` also work. To use pipes or redirects inside the
+check, name the shell explicitly, as in the example below.
+
 | What the command did                                     | Recorded state                                         |
 | -------------------------------------------------------- | ------------------------------------------------------ |
 | Wrote a value that follows the contract                  | `valid`, with the value (kept on this machine only)    |
@@ -114,13 +118,22 @@ curl -sS -X POST https://app.nodrail.com/api/v1/evidence \
   -d "{\"workspace\":\"$NODRAIL_WORKSPACE\",\"environment\":\"production\",\"evidence\":\"ci-tests\",\"commit\":\"$GITHUB_SHA\",\"contract\":\"sha256:…\",\"value\":$(cat result.json)}"
 ```
 
-## How the local hook reads externally verified evidence
+## How the hook reads externally verified evidence
+
+A host configured with `decide: cloud` reads evidence through
+`GET /api/v1/runtime/evidence/status` with its connect credential on Claude
+Code, Codex and Copilot. The published workspace revision must pin the
+evidence binding and gate requirement. See [the management API's workspace
+revision reference](https://nodrail.com/docs/api#workspace-revisions).
+
+For a setup without a `connect:` block, the standalone evidence path works
+as follows.
 
 When a gate reads evidence a verifier produces, `apply` writes `.nodrail/evidence.json` (`{ url, workspace_revision }`: the Nodrail URL and the lock's workspace revision) and gives the hook `--evidence` with it. For a call that a gate covers and local evidence doesn't meet, the hook asks the control plane `GET /api/v1/evidence/status` by gate id, requirement index and subject, never with a condition of its own, and waits at most 3 seconds. It sends the person's token from `NODRAIL_TOKEN` (the `read` scope) in the host's environment.
 
 - The revision asked about must be published: `nodrail workspace publish`.
 - Offline, unpublished, a token without `read`, a timeout or an error leave the requirement unmet, with the reason. A positive answer is cached for 5 minutes per requirement and subject.
-- Copilot's hook reads local evidence only.
+- On Copilot, this standalone path reads local evidence only.
 
 ## What `plan` and `contracts explain` say
 

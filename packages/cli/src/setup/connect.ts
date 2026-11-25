@@ -2,13 +2,11 @@ import type { ProjectSetup } from "@nodrail/policy-engine/yaml";
 import { secretName, secretValue } from "@nodrail/policy-engine/command-line";
 import { DEFAULT_URL } from "../api.ts";
 import { normalizeUrl, type Env } from "../config.ts";
+import { LOCK_FILE } from "../project/lockfile.ts";
 import { VERSION } from "../version.ts";
 import type { Check } from "./plan.ts";
-
-/**
- * `connect:` in plan (R383): who decides, said in words, and what this
- * version can't do yet, marked so apply refuses instead of pretending.
- */
+import type { Revision } from "./status.ts";
+import type { DesiredFile } from "./team-files.ts";
 
 type Connect = NonNullable<ProjectSetup["connect"]>;
 
@@ -19,43 +17,56 @@ export const connectUrl = (connect: Connect) =>
 const where = (connect: Connect) =>
   `${connectUrl(connect)}, workspace ${connect.workspace}, environment ${connect.environment}`;
 
+export const CONNECT_FILE = ".nodrail/connect.json";
+
+export const connectRead = (
+  setup: { connect?: Connect | null },
+  path: (file: string) => string,
+) => (setup.connect ? ` --connect ${path(CONNECT_FILE)}` : "");
+
+export function connectFile(
+  connect: Connect | null,
+  revision: Revision,
+): DesiredFile | null {
+  if (!connect) return null;
+  const { decide, enforce } = connect;
+  const settings = {
+    decide,
+    enforce,
+    ...(decide === "cloud"
+      ? {
+          url: connectUrl(connect),
+          workspace: connect.workspace,
+          environment: connect.environment,
+          credential: connect.credential,
+          workspace_revision: revision.workspace,
+          policy_digest: revision.policy,
+          lock: `../${LOCK_FILE}`,
+        }
+      : {}),
+  };
+  return {
+    path: CONNECT_FILE,
+    content: Buffer.from(`${JSON.stringify(settings, null, 2)}\n`),
+    why:
+      decide === "cloud"
+        ? "pin the policy the host pulls, and configure evidence and decision reporting"
+        : "set how the host enforces repository policy",
+  };
+}
+
 /** What plan says about the connection beside its steps. */
 export function connectNotes(setup: Pick<ProjectSetup, "connect">): string[] {
   const { connect } = setup;
   if (!connect) return [];
-  return connect.decide === "cloud"
-    ? [
-        `Connected to ${where(connect)}. Decisions: Nodrail. Views: its Runs and Activity.`,
-      ]
-    : [
-        `Connected to ${where(connect)}, but decisions stay on this machine (decide: local).`,
-      ];
-}
-
-/**
- * What this version can't do yet. Each is a check that fails, so apply
- * refuses rather than set up something that silently decides locally.
- */
-export function connectChecks(
-  setup: Pick<ProjectSetup, "connect">,
-  runtime: string,
-): Check[] {
-  const { connect } = setup;
-  if (!connect) return [];
-  const checks: Check[] = [];
-  if (connect.decide === "cloud" && runtime !== "claude-code")
-    checks.push({
-      name: "connect",
-      ok: false,
-      detail: `decide: cloud sets up Claude Code only in nodrail ${VERSION}: ${runtime} isn't connected yet. Use decide: local for it`,
-    });
-  if (connect.enforce === "watch")
-    checks.push({
-      name: "connect",
-      ok: false,
-      detail: `enforce: watch isn't available in nodrail ${VERSION} yet: nothing would record without blocking. Use enforce: on until it ships`,
-    });
-  return checks;
+  return [
+    connect.decide === "cloud"
+      ? `The host decides using the locked policy pulled from ${where(connect)}. Decisions go to Runs and Activity.`
+      : "The host decides using repository policy (decide: local).",
+    ...(connect.enforce === "watch"
+      ? ["Watch mode records policy decisions and lets the host continue."]
+      : []),
+  ];
 }
 
 type Identity = { workspace: string; environment: string; agent: string };
@@ -74,7 +85,7 @@ export async function credentialChecks(
   fetcher: typeof fetch = fetch,
 ): Promise<Check[]> {
   const { connect } = setup;
-  if (!connect?.credential) return [];
+  if (connect?.decide !== "cloud" || !connect.credential) return [];
   const name = `credential ${secretName(connect.credential)}`;
   let credential: string;
   try {
@@ -84,7 +95,7 @@ export async function credentialChecks(
       {
         name,
         ok: false,
-        detail: `${(error as Error).message}: the hook needs it to ask Nodrail. Copy it from Agents → Connect an agent`,
+        detail: `${(error as Error).message}: the hook needs it to fetch policy, read evidence and report decisions. Copy it from Agents → Connect an agent`,
       },
     ];
   }
@@ -113,6 +124,7 @@ async function askIdentity(
     response = await fetcher(`${base}/api/v1/runtime/identity`, {
       headers: { authorization: `Bearer ${credential}` },
       signal: AbortSignal.timeout(IDENTITY_TIMEOUT_MS),
+      redirect: "error",
     });
   } catch (error) {
     return unchecked(`didn't answer (${(error as Error).message})`);
@@ -127,7 +139,22 @@ async function askIdentity(
       `is older than nodrail ${VERSION} and can't say whose credential this is`,
     );
   if (!response.ok) return unchecked(`answered ${response.status}`);
-  return { identity: (await response.json()) as Identity };
+  const identity = (await response
+    .json()
+    .catch(() => null)) as Partial<Identity> | null;
+  if (
+    typeof identity?.workspace !== "string" ||
+    typeof identity.environment !== "string" ||
+    typeof identity.agent !== "string"
+  )
+    return unchecked("returned an invalid identity");
+  return {
+    identity: {
+      workspace: identity.workspace,
+      environment: identity.environment,
+      agent: identity.agent,
+    },
+  };
 }
 
 /** Whether the credential is for the workspace and environment named. */

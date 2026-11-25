@@ -2,16 +2,10 @@
 // `nodrail plugin fetch` copies exactly that commit's files into the
 // project, where the lock covers them. Nothing in the repository runs.
 import { execFileSync } from "node:child_process";
-import {
-  chmodSync,
-  mkdirSync,
-  mkdtempSync,
-  statSync,
-  symlinkSync,
-  writeFileSync,
-} from "node:fs";
+import { mkdirSync, mkdtempSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { delimiter, dirname, join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { describe, expect, test } from "vitest";
 import {
   project as bare,
@@ -20,12 +14,9 @@ import {
 } from "./support/setup-project.ts";
 
 /** A project whose PATH has git too, as the person's would. */
-const GIT = dirname(
-  execFileSync("sh", ["-c", "command -v git"]).toString().trim(),
-);
 const project = (files: Record<string, string>) => {
   const p = bare(files);
-  p.env.PATH = `${p.env.PATH}:${GIT}`;
+  p.env.PATH += `${delimiter}${process.env.PATH ?? ""}`;
   return p;
 };
 
@@ -61,7 +52,7 @@ function repository(extra: Record<string, string> = {}) {
     return sh("rev-parse", "HEAD");
   };
   const first = commit({ ...PLUGIN, ...extra }, "first");
-  return { url: `file://${repo}`, repo, first, commit, sh };
+  return { url: pathToFileURL(repo).href, repo, first, commit, sh };
 }
 
 const manifest = (
@@ -77,7 +68,7 @@ const manifest = (
           record: { resource: { kind: ledger_line, from: line } }
 `;
 
-describe.skipIf(windows)("nodrail plugin fetch", () => {
+describe("nodrail plugin fetch", () => {
   test("copies the commit's files, which plan and the lock then cover", async () => {
     const { url, first } = repository();
     const p = project({ ...RESOURCES, "nodrail.yaml": manifest(url, first) });
@@ -140,21 +131,17 @@ describe.skipIf(windows)("nodrail plugin fetch", () => {
     expect(lock.out).toContain("vendor/desk-kit/s.cjs");
   });
 
-  test("keeps the file mode, and refuses links, missing commits and branches", async () => {
+  test("refuses links, missing commits and branches", async () => {
     const withLink = repository();
-    symlinkSync("/etc/passwd", join(withLink.repo, "plugins/desk-kit/leak"));
-    chmodSync(join(withLink.repo, "plugins/desk-kit/s.cjs"), 0o755);
-    withLink.sh("add", "-A");
+    writeFileSync(join(withLink.repo, "target.txt"), "../outside.txt");
+    const blob = withLink.sh("hash-object", "-w", "target.txt");
     withLink.sh(
-      "-c",
-      "user.name=t",
-      "-c",
-      "user.email=t@t",
-      "commit",
-      "-q",
-      "-m",
-      "link",
+      "update-index",
+      "--add",
+      "--cacheinfo",
+      `120000,${blob},plugins/desk-kit/leak`,
     );
+    withLink.sh("commit", "-q", "-m", "link");
     const linked = withLink.sh("rev-parse", "HEAD");
     const p = project({
       ...RESOURCES,
@@ -166,31 +153,9 @@ describe.skipIf(windows)("nodrail plugin fetch", () => {
       "plugins/desk-kit/leak is a link; only plain files are copied.",
     );
 
-    const plain = repository();
-    chmodSync(join(plain.repo, "plugins/desk-kit/s.cjs"), 0o755);
-    plain.sh("add", "-A");
-    plain.sh(
-      "-c",
-      "user.name=t",
-      "-c",
-      "user.email=t@t",
-      "commit",
-      "-q",
-      "-m",
-      "exec",
-    );
-    const q = project({
-      ...RESOURCES,
-      "nodrail.yaml": manifest(plain.url, plain.sh("rev-parse", "HEAD")),
-    });
-    await q.run("plugin", "fetch", "--yes");
-    expect(statSync(join(q.cwd, "vendor/desk-kit/s.cjs")).mode & 0o100).toBe(
-      0o100,
-    );
-
     const missing = project({
       ...RESOURCES,
-      "nodrail.yaml": manifest(plain.url, "0".repeat(40)),
+      "nodrail.yaml": manifest(withLink.url, "0".repeat(40)),
     });
     expect((await missing.run("plugin", "fetch", "--yes")).err).toContain(
       `has no commit ${"0".repeat(40)}`,
@@ -198,11 +163,25 @@ describe.skipIf(windows)("nodrail plugin fetch", () => {
 
     const branch = project({
       ...RESOURCES,
-      "nodrail.yaml": manifest(plain.url, "main"),
+      "nodrail.yaml": manifest(withLink.url, "main"),
     });
     const planned = await branch.run("plan");
     expect(planned.out + planned.err).toContain(
       "A full commit id, 40 hex characters: a branch or tag can move",
+    );
+  });
+
+  test.skipIf(windows)("preserves the POSIX executable bit", async () => {
+    const plain = repository();
+    plain.sh("update-index", "--chmod=+x", "plugins/desk-kit/s.cjs");
+    plain.sh("commit", "-q", "-m", "exec");
+    const p = project({
+      ...RESOURCES,
+      "nodrail.yaml": manifest(plain.url, plain.sh("rev-parse", "HEAD")),
+    });
+    expect((await p.run("plugin", "fetch", "--yes")).code).toBe(0);
+    expect(statSync(join(p.cwd, "vendor/desk-kit/s.cjs")).mode & 0o100).toBe(
+      0o100,
     );
   });
 });

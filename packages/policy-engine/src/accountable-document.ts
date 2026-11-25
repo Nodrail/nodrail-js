@@ -174,7 +174,7 @@ export const numericBudget = z
   );
 export type NumericBudget = z.infer<typeof numericBudget>;
 
-/** The label a budget shows, whichever document it is in (R283 for legacy usage). */
+/** The label a budget shows, whichever document it is in. */
 export function budgetLabel(budget: PolicyBudget | NumericBudget): BudgetLabel {
   if ("measure" in budget) return budget.label;
   return budget.metric === "tool_calls"

@@ -20,7 +20,12 @@ const typescript = resolve(client, "node_modules/typescript/bin/tsc");
 // through a shell.
 const shell = process.platform === "win32";
 const run = (command, args, cwd) =>
-  execFileSync(command, args, { cwd, encoding: "utf8", stdio: "pipe", shell });
+  execFileSync(command, args, {
+    cwd,
+    encoding: "utf8",
+    stdio: "pipe",
+    shell: shell && ["npm", "pnpm"].includes(command),
+  });
 
 function fail(message) {
   console.error(`Package check failed: ${message}`);
@@ -113,7 +118,7 @@ for (const [name, outcome] of Object.entries(expected)) {
 }
 `,
   );
-  run("node", ["use.mjs"], folder);
+  run(process.execPath, ["use.mjs"], folder);
 
   writeFileSync(
     join(folder, "types.ts"),
@@ -143,7 +148,7 @@ export const wrong: string = guard((n: number) => String(n), { name: "f" })(1);
       files: ["types.ts"],
     }),
   );
-  run("node", [typescript, "-p", "tsconfig.json"], folder);
+  run(process.execPath, [typescript, "-p", "tsconfig.json"], folder);
   // The same types under Node's own resolution, which needs file extensions.
   writeFileSync(
     join(folder, "tsconfig.node.json"),
@@ -152,7 +157,7 @@ export const wrong: string = guard((n: number) => String(n), { name: "f" })(1);
       compilerOptions: { module: "nodenext", moduleResolution: "nodenext" },
     }),
   );
-  run("node", [typescript, "-p", "tsconfig.node.json"], folder);
+  run(process.execPath, [typescript, "-p", "tsconfig.node.json"], folder);
 
   const hook = join("node_modules", ".bin", "nodrail-claude-hook");
   const unconfigured = spawnSync(hook, [], {

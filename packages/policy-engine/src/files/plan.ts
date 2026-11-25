@@ -3,7 +3,8 @@
 // caller supplies (no file system here). A path that is unsafe, or named
 // twice in one request, refuses the whole request: its outcome would depend
 // on an order or a resolution this check can't see.
-import { pathKey, projectPath } from "./contracts.ts";
+import type { posix } from "node:path";
+import { pathKey, projectPath, type PathResult } from "./contracts.ts";
 import { applyClaudeEdit, type Reconstruction } from "./edit.ts";
 import { FILE_LIMITS } from "./limits.ts";
 import { applyUpdate } from "./patch-apply.ts";
@@ -37,11 +38,15 @@ export type FileChange = {
 };
 
 export type PlanContext = {
-  /** Absolute project folder, POSIX; or several spellings of that one folder. */
+  /** Absolute project folder, or several spellings of that one folder. */
   projectRoot: string | string[];
   /** Absolute folder relative tool paths resolve against. */
   cwd: string;
+  /** Explicit syntax for off-host paths whose project root is ambiguous. */
+  pathFlavor?: typeof posix;
   current: (path: string) => CurrentFile;
+  /** A disk adapter can resolve aliases before matching contracts or duplicates. */
+  locate?: (name: string) => PathResult;
 };
 
 export type Plan =
@@ -59,7 +64,9 @@ class Refusal extends Error {
 
 /** Project path of a tool path; null when outside the project. */
 function located(name: string, context: PlanContext) {
-  const found = projectPath(context.projectRoot, context.cwd, name);
+  const found =
+    context.locate?.(name) ??
+    projectPath(context.projectRoot, context.cwd, name, context.pathFlavor);
   if (found.ok) return found.path;
   if (found.code === "outside") return null;
   throw new Refusal(found.code, `a path ${found.message}`);

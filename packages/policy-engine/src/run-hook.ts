@@ -2,6 +2,7 @@
 // budgets or contracts. Rules without them never touch the ledger: see
 // hookCommand.
 import { randomUUID } from "node:crypto";
+import { existsSync } from "node:fs";
 import { deny, nonEmptyText, type HookResult } from "./actions.ts";
 import { earlierDelivery, reservationsFor, settle } from "./budget-ledger.ts";
 import { isChange } from "./changes.ts";
@@ -11,6 +12,7 @@ import {
   readRun,
   record,
   runKey,
+  runFile,
   withRunLock,
   type Environment,
 } from "./ledger.ts";
@@ -18,8 +20,10 @@ import {
   judgeToolCall,
   parseEvent,
   type LocalHookOptions,
+  type StepReport,
 } from "./local-hook.ts";
 import { hasContracts, limitsOf } from "./policies.ts";
+import { tokensOf } from "./outcome-readings.ts";
 import { fingerprint } from "./protocol.ts";
 import { agentName, MAIN_AGENT, type RunEvent } from "./runs.ts";
 import {
@@ -34,7 +38,7 @@ const quiet: HookResult = { exitCode: 0, stdout: "", stderr: "" };
 type Where = { directory: string; run: string | null; cwd: string };
 type Event = Record<string, unknown>;
 
-function where(event: Event, env: Environment): Where {
+export function runPlacement(event: Event, env: Environment): Where {
   const cwd = nonEmptyText(event.cwd) ?? process.cwd();
   return {
     directory: ledgerDirectory(cwd, env),
@@ -43,7 +47,9 @@ function where(event: Event, env: Environment): Where {
   };
 }
 
-const stepOf = (event: Event): Step | null => {
+const SUBAGENT_TOOLS = new Set(["Agent", "Task"]);
+
+export const stepOf = (event: Event): Step | null => {
   const id = nonEmptyText(event.agent_id);
   if (!id) return null;
   return { id, agent: agentName(nonEmptyText(event.agent_type) ?? "unnamed") };
@@ -54,9 +60,11 @@ function reported(
   options: Pick<LocalHookOptions, "report">,
   run: string,
   entry: RunEvent,
+  step?: StepReport,
 ) {
   try {
-    options.report?.(run, entry);
+    if (step) options.report?.(run, entry, step);
+    else options.report?.(run, entry);
   } catch {
     // Telemetry never changes a decision.
   }
@@ -123,7 +131,10 @@ function recordStep(
       const entry = stepEntry(event, step, { ...place, run }, options);
       if (!entry) return;
       record(place.directory, run, entry);
-      reported(options, run, entry);
+      reported(options, run, entry, {
+        message: stopMessage(event, options),
+        via: "stop",
+      });
     });
     return quiet;
   } catch (error) {
@@ -135,12 +146,17 @@ function recordStep(
 const wentAhead = (outcome: string, unmatched: LocalHookOptions["unmatched"]) =>
   outcome === "allow" || (outcome === "none" && unmatched === "allow");
 
+type OutcomeOptions = Pick<
+  LocalHookOptions,
+  "host" | "keyHost" | "now" | "report"
+>;
+
 type Decided = { result: HookResult; wentAhead: boolean };
 
 const KEY = /^[a-z][a-z0-9-]{0,31}:[\x21-\x7e]{1,200}$/;
 
 /** The call's key, `host:tool_use_id`, or null when the host gave no id. */
-function callKey(event: Event, options: LocalHookOptions) {
+function callKey(event: Event, options: OutcomeOptions) {
   const id = nonEmptyText(event.tool_use_id);
   const key = `${options.keyHost ?? options.host ?? "claude-code"}:${id}`;
   return id && KEY.test(key) ? key : null;
@@ -184,6 +200,49 @@ function reserve(
   });
 }
 
+function actionEntry(
+  event: Event,
+  options: LocalHookOptions,
+  call: {
+    key: string | null;
+    step: Step | null;
+    action: NonNullable<ReturnType<typeof judgeToolCall>["action"]>;
+    decision: NonNullable<ReturnType<typeof judgeToolCall>["decision"]>;
+    ahead: boolean;
+  },
+): Extract<RunEvent, { type: "action" }> {
+  const { key, step, action, decision, ahead } = call;
+  const measureTokens =
+    SUBAGENT_TOOLS.has(nonEmptyText(event.tool_name) ?? "") &&
+    limitsOf(options.document).some((limit) => limit.measure.kind === "tokens");
+  return {
+    type: "action",
+    step: step?.id ?? null,
+    agent: step?.agent ?? MAIN_AGENT,
+    at: options.now.toISOString(),
+    tool: action.tool,
+    operation: action.operation,
+    outcome: decision.outcome,
+    change: isChange(action) && ahead,
+    ...(measureTokens ? { measure_tokens: true } : {}),
+    ...(key ? { key } : {}),
+  };
+}
+
+function judgeInRun(
+  stdin: string,
+  options: LocalHookOptions,
+  run: NonNullable<LocalHookOptions["run"]>,
+  cwd: string,
+) {
+  return judgeToolCall(stdin, {
+    ...options,
+    run,
+    subject: subjectReader(options.document, cwd),
+    budgets: options.budgets ?? "local",
+  });
+}
+
 /**
  * A tool call, decided with the run's history, then recorded in it, while no
  * other hook works on the run: two calls at once can't both pass a budget's
@@ -203,27 +262,18 @@ function decideAndRecord(
   const earlier = key ? earlierDelivery(events, key) : -1;
   const history = earlier >= 0 ? events.slice(0, earlier) : events;
   const context = { run, step, events: history };
-  const { result, action, decision } = judgeToolCall(stdin, {
-    ...options,
-    run: context,
-    subject: subjectReader(options.document, cwd),
-    budgets: "local",
-  });
+  const { result, action, decision } = judgeInRun(stdin, options, context, cwd);
   if (!action || !decision) return { result, wentAhead: false };
   const ahead = wentAhead(decision.outcome, options.unmatched);
   if (earlier >= 0) return { result, wentAhead: false };
   try {
-    const entry: RunEvent = {
-      type: "action",
-      step: step?.id ?? null,
-      agent: step?.agent ?? MAIN_AGENT,
-      at: options.now.toISOString(),
-      tool: action.tool,
-      operation: action.operation,
-      outcome: decision.outcome,
-      change: isChange(action) && ahead,
-      ...(key ? { key } : {}),
-    };
+    const entry = actionEntry(event, options, {
+      key,
+      step,
+      action,
+      decision,
+      ahead,
+    });
     record(directory, run, entry);
     reported(options, run, entry);
     // Reserved in the same lock as the decision: no other call can take the
@@ -275,6 +325,7 @@ function handback(
 ) {
   const step = stepOf(event)!;
   const input = event.tool_input as { message?: unknown } | null;
+  const message = typeof input?.message === "string" ? input.message : null;
   return withRunLock(place.directory, place.run, () => {
     const done = finishedBefore(readRun(place.directory, place.run), step);
     const entry = done
@@ -282,7 +333,7 @@ function handback(
       : finishedEvent({
           document: options.document,
           step,
-          message: typeof input?.message === "string" ? input.message : null,
+          message,
           via: "handback",
           at: options.now.toISOString(),
           cwd: place.cwd,
@@ -292,25 +343,11 @@ function handback(
     const decided = decideAndRecord(stdin, event, options, place);
     if (entry && decided.wentAhead) {
       record(place.directory, place.run, entry);
-      reported(options, place.run, entry);
+      reported(options, place.run, entry, { message, via: "handback" });
     }
     return decided.result;
   });
 }
-
-/** The tokens a finished subagent used, as the host measured them; null when it didn't. */
-function tokensOf(event: Event) {
-  const response = event.tool_response as { totalTokens?: unknown } | null;
-  const total =
-    typeof response === "object" && response !== null
-      ? response.totalTokens
-      : undefined;
-  return typeof total === "number" && Number.isSafeInteger(total) && total >= 0
-    ? total
-    : null;
-}
-
-const SUBAGENT_TOOLS = new Set(["Agent", "Task"]);
 
 /**
  * A call's outcome (PostToolUse, PostToolUseFailure): its reservations are
@@ -319,14 +356,11 @@ const SUBAGENT_TOOLS = new Set(["Agent", "Task"]);
  * subagent's tokens are measured when a budget counts them; none is
  * unknown, never zero. Never blocks: the call already happened.
  */
-function settleCall(event: Event, options: LocalHookOptions, place: Where) {
+function settleCall(event: Event, options: OutcomeOptions, place: Where) {
   const { run } = place;
   const key = callKey(event, options);
-  if (!run || !key) return quiet;
+  if (!run || !key || !existsSync(runFile(place.directory, run))) return quiet;
   const failed = event.hook_event_name === "PostToolUseFailure";
-  const measures = limitsOf(options.document).some(
-    (limit) => limit.measure.kind === "tokens",
-  );
   try {
     withRunLock(place.directory, run, () => {
       const events = readRun(place.directory, run);
@@ -334,16 +368,16 @@ function settleCall(event: Event, options: LocalHookOptions, place: Where) {
       const entries: RunEvent[] = [];
       const settled = settle(events, key, failed ? "unknown" : "consumed", at);
       if (settled) entries.push(settled);
-      const step = stepOf(event);
+      const admission = events[earlierDelivery(events, key)];
       if (
-        measures &&
-        SUBAGENT_TOOLS.has(nonEmptyText(event.tool_name) ?? "") &&
+        admission?.type === "action" &&
+        admission.measure_tokens &&
         !events.some((e) => e.type === "budget.measured" && e.key === key)
       )
         entries.push({
           type: "budget.measured",
-          step: step?.id ?? null,
-          agent: step?.agent ?? MAIN_AGENT,
+          step: admission.step,
+          agent: admission.agent,
           at,
           key,
           tool: options.host === "codex" ? "codex" : "claude-code",
@@ -395,6 +429,21 @@ function decideInRun(
   }
 }
 
+/** Settle from the admission ledger even if the policy is now unavailable. */
+export function runOutcome(
+  stdin: string,
+  options: OutcomeOptions,
+  env: Environment,
+): HookResult {
+  const event = parseEvent(stdin) as Event | null;
+  if (!event) return quiet;
+  try {
+    return settleCall(event, options, runPlacement(event, env));
+  } catch (error) {
+    return { ...quiet, stderr: `Nodrail: ${(error as Error).message}\n` };
+  }
+}
+
 /**
  * PreToolUse decides; SubagentStart and SubagentStop record steps, and with
  * contracts a SubagentHandback call finishes its step. The run is
@@ -407,20 +456,14 @@ export function runHook(
 ): HookResult {
   const event = parseEvent(stdin) as Event | null;
   const name = event?.hook_event_name;
+  if (event && (name === "PostToolUse" || name === "PostToolUseFailure"))
+    return runOutcome(stdin, options, env);
   const step = name === "SubagentStart" || name === "SubagentStop";
-  const post = name === "PostToolUse" || name === "PostToolUseFailure";
-  if (event && post) {
-    try {
-      return settleCall(event, options, where(event, env));
-    } catch (error) {
-      return { ...quiet, stderr: `Nodrail: ${(error as Error).message}\n` };
-    }
-  }
   if (!event || (!step && name !== "PreToolUse"))
     return judgeToolCall(stdin, options).result;
   let place: Where;
   try {
-    place = where(event, env);
+    place = runPlacement(event, env);
   } catch (error) {
     // Where the run is kept is unknown: a call is blocked, and a step goes
     // unrecorded, so a gate that needs it stays closed.

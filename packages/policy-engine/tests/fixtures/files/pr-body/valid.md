@@ -1,6 +1,6 @@
 ## Summary
 
-Adds file-content contracts (DC-04.2). Closes [#120](https://github.com/Nodrail/nodrail/issues/120).
+Adds file-content contracts. Closes [#120](https://github.com/Nodrail/nodrail-js/issues/120).
 
 ## Test plan
 

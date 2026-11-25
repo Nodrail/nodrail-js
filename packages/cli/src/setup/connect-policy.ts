@@ -10,10 +10,10 @@ import { EFFECTIVE_FILE } from "./claude-code.ts";
 import type { Check, SetupPlan } from "./plan.ts";
 
 /**
- * With `decide: cloud`, the locked policy is what Nodrail must run (R383).
+ * With `decide: cloud`, the locked policy is what the host must pull.
  * plan compares the live version with the lock, as the person's own token
  * sees it (an agent never holds one); apply publishes it, refusing to take
- * over rules changed elsewhere unless asked to (R385).
+ * over rules changed elsewhere unless asked to.
  */
 
 type Plan = Pick<SetupPlan, "connect" | "projectId" | "revision" | "files">;
@@ -43,8 +43,8 @@ export async function livePolicy(
   options: {
     replaceLive?: boolean;
     /**
-     * apply: what can't be checked blocks, so the hook that asks Nodrail is
-     * never installed against rules nobody compared with the lock.
+     * apply: block installation if the published policy could not be
+     * compared with the lock.
      */
     required?: boolean;
   } = {},
@@ -58,7 +58,7 @@ export async function livePolicy(
         ? {
             name: check.name,
             ok: false,
-            detail: `${check.detail}. apply needs it checked before it installs the hook that asks Nodrail`,
+            detail: `${check.detail}. apply needs it checked before it installs the connected policy hook`,
           }
         : check,
     ),
@@ -74,10 +74,10 @@ async function liveState(
   if (connect?.decide !== "cloud") return { checks: [], publish: null };
   if (!plan.projectId)
     return fail(
-      "decide: cloud ties the policy Nodrail runs to this project: add `id: <uuid>` to nodrail.yaml, lock and commit",
+      "decide: cloud ties the policy hosts download to this project: add `id: <uuid>` to nodrail.yaml, lock and commit",
     );
   const effective = plan.files.find((file) => file.path === EFFECTIVE_FILE);
-  if (!effective || !plan.revision.workspace)
+  if (!effective || !plan.revision.workspace || !plan.revision.policy)
     return fail(
       "there's no locked policy to publish: run `nodrail policy lock`",
     );
@@ -148,7 +148,7 @@ async function compare(
     return fail(
       `${connect.environment} would refuse the locked policy: ${preview.issues[0]!.message} (line ${preview.issues[0]!.line})`,
     );
-  const inSync = live.managed?.revision === managed.revision;
+  const inSync = publishedLock(live, managed);
   const writer = me.can.rules_write
     ? null
     : "your token can't publish (it needs rules:write)";
@@ -158,13 +158,22 @@ async function compare(
         name: "live policy",
         ok: inSync || writer === null,
         detail: inSync
-          ? `in sync: ${connect.environment} runs lock ${short(managed.revision)} (v${live.policy_revision}, ${live.published_by ?? "someone"})`
+          ? `in sync: ${connect.environment} serves lock ${short(managed.revision)} (v${live.policy_revision}, ${live.published_by ?? "someone"})`
           : (writer ??
             `apply publishes lock ${short(managed.revision)} to ${connect.environment}: ${preview.added.length} added, ${preview.changed.length} changed, ${preview.removed.length} removed${drift ? `, replacing rules changed elsewhere (${drift})` : ""}`),
       },
     ],
     publish: inSync ? null : { api, yaml, preview, managed },
   };
+}
+
+function publishedLock(live: LiveRules, managed: ManagedSource) {
+  return (
+    live.managed?.project_id === managed.project_id &&
+    live.managed.revision === managed.revision &&
+    live.managed.policy_revision === managed.policy_revision &&
+    live.source_digest === managed.policy_revision
+  );
 }
 
 /** Why the live rules aren't this project's to replace, or null. */

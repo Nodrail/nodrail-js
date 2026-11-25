@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { readFile, readdir, stat } from "node:fs/promises";
 import { extname, join } from "node:path";
@@ -14,15 +15,11 @@ import { sendSpool } from "./telemetry.ts";
 
 // Node-only helpers the nodrail command uses for a setup.
 export { hasSecret, secretName, secretValue } from "./secret-refs.ts";
-export { connectedGuard } from "./hook-command.ts";
 // The spool and its sender, for `nodrail observe` too.
 export * from "./telemetry.ts";
-// Decision reporting to the control plane (R388), for `nodrail` to install.
-export {
-  decisionSink,
-  reportFile,
-  type DecisionSink,
-} from "./decision-report.ts";
+// Decision reporting to the control plane, for `nodrail` to install.
+export { decisionSink, type DecisionSink } from "./decision-report.ts";
+export { reportFile } from "./decision-destination.ts";
 export { sendDecisionQueue } from "./decision-sender.ts";
 export type { SpanRecord } from "./otlp.ts";
 export { machineId } from "./reporting-spans.ts";
@@ -52,12 +49,14 @@ Commands:
   test --cases <file>  Check expected outcomes, for use in CI
   check -- <program> [args]  Exit 0 only if the rules allow this command
   exec -- <program> [args]   Run it only if the rules allow it
-  hook                 Claude Code hook; reads the event from stdin
+  hook                 Host policy hook; reads the event from stdin
     --unmatched deny|allow When no rule covers a call (default deny)
     --protect-list <file>  Also keep the files it lists from being changed
     --connections <file>   Read calls to the setup's tool connections as declared
     --telemetry <file>     Send each decision as an OpenTelemetry span
-    --report <file>        Record each decision and outcome in Nodrail ({ url,
+    --connect <file>       Read policy source, enforcement and lock pins from
+                           the setup (as .nodrail/connect.json)
+    --report <file>        Check shared budgets and report decisions in Nodrail ({ url,
                            credential }, as .nodrail/connect.json has them)
     --evidence <file>      Ask Cloud about externally verified evidence ({ url,
                            workspace_revision }; the token is NODRAIL_TOKEN)
@@ -69,7 +68,7 @@ Commands:
   runs [list | show <run> | report]   What the run ledger recorded
 
 Files are loaded in the order given; a folder loads its .yaml files by name.
-Anything other than an allow is blocked. Nothing here issues a permit.`;
+Enforcing hooks block anything other than an allow. Nothing here issues a permit.`;
 
 const yamlFile = (name: string) => [".yaml", ".yml"].includes(extname(name));
 
@@ -98,13 +97,22 @@ async function compileOrReport(
 ): Promise<{
   document: PolicyDocument;
   count: number;
+  policyDigest: string | null;
 } | null> {
-  const result = compilePolicies(await loadSources(paths));
+  const sources = await loadSources(paths);
+  const result = compilePolicies(sources);
   if (!quietWarnings)
     for (const warning of result.warnings)
       io.error(`warning: ${show(warning)}`);
   if (result.ok)
-    return { document: result.document, count: result.rules.length };
+    return {
+      document: result.document,
+      count: result.rules.length,
+      policyDigest:
+        paths.length === 1 && sources[0]?.name === paths[0]
+          ? createHash("sha256").update(sources[0]!.text).digest("hex")
+          : null,
+    };
   for (const issue of result.issues) io.error(`error: ${show(issue)}`);
   return null;
 }
@@ -167,6 +175,9 @@ export type Io = {
   write: (text: string) => void;
   writeError: (text: string) => void;
   readStdin: () => Promise<string>;
+  env?: Record<string, string | undefined>;
+  home?: string;
+  fetch?: typeof fetch;
   /** How to run this command line again, as `nodrail policy` or alone. */
   self?: readonly string[];
 };
@@ -202,6 +213,8 @@ const options = {
   connections: { type: "string" },
   telemetry: { type: "string" },
   report: { type: "string" },
+  connect: { type: "string" },
+  "legacy-connect": { type: "boolean" },
   evidence: { type: "string" },
   host: { type: "string" },
   help: { type: "boolean", short: "h" },
@@ -342,7 +355,6 @@ const commands = new Map<string, (run: Run) => number | Promise<number>>([
   ["test", testCommand],
   ["check", gateCommand],
   ["exec", gateCommand],
-  ["hook", (run: Run) => hookCommand(run, io)],
 ]);
 
 function printPack(name: string | undefined) {
@@ -372,14 +384,19 @@ export async function runCli(
   const [command = "", ...paths] = positionals;
   if (command === "init") return printPack(paths[0]);
   if (command === "runs") return runsCommand(paths, io);
+  if (command === "hook") {
+    const base = { values, now: new Date(values.now ?? Date.now()), paths };
+    return hookCommand(base, io, async () =>
+      paths.length ? await compileOrReport(paths, true) : null,
+    );
+  }
   const handler = commands.get(command);
   if (!handler || !paths.length) {
     io.error(usage);
     return 2;
   }
-  const compiled = await compileOrReport(paths, command === "hook");
-  // A hook that cannot load its rules has to block, and 2 is what blocks.
-  if (!compiled) return command === "hook" ? 2 : 1;
+  const compiled = await compileOrReport(paths);
+  if (!compiled) return 1;
   return handler({
     command,
     values,

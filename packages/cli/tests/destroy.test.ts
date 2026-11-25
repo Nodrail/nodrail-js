@@ -20,7 +20,7 @@ const both = {
   ),
 };
 
-describe.skipIf(windows)("nodrail destroy", () => {
+describe("nodrail destroy", () => {
   test("takes out nodrail's files and entries, keeps the person's and the project's", async () => {
     const p = await locked();
     const before = Object.keys(filesUnder(p.cwd)).sort();
@@ -87,29 +87,39 @@ describe.skipIf(windows)("nodrail destroy", () => {
     ).toBe(false);
   });
 
-  test("one host out, the files the other needs stay; then the other", async () => {
-    const p = await locked(both, codexTools());
-    expect(
-      (await p.run("apply", "--runtime", "claude-code", "--yes")).code,
-    ).toBe(0);
-    await p.run("apply", "--runtime", "codex", "--yes");
-    expect(existsSync(join(p.cwd, ".codex/config.toml"))).toBe(true);
+  test.skipIf(windows)(
+    "one host out, the files the other needs stay; then the other",
+    async () => {
+      const p = await locked(both, codexTools());
+      expect(
+        (await p.run("apply", "--runtime", "claude-code", "--yes")).code,
+      ).toBe(0);
+      await p.run("apply", "--runtime", "codex", "--yes");
+      expect(existsSync(join(p.cwd, ".codex/config.toml"))).toBe(true);
 
-    const claude = await p.run("destroy", "--runtime", "claude-code", "--yes");
-    expect(claude.code).toBe(0);
-    expect(claude.out).toMatch(/= \.nodrail\/effective\.yaml\s+kept for Codex/);
-    expect(claude.out).toContain("Codex stays set up.");
-    expect(existsSync(join(p.cwd, ".claude"))).toBe(false);
-    expect(existsSync(join(p.cwd, ".nodrail/effective.yaml"))).toBe(true);
-    expect(
-      Object.keys(JSON.parse(p.read(".nodrail/setup-state.json")).hosts),
-    ).toEqual(["codex"]);
+      const claude = await p.run(
+        "destroy",
+        "--runtime",
+        "claude-code",
+        "--yes",
+      );
+      expect(claude.code).toBe(0);
+      expect(claude.out).toMatch(
+        /= \.nodrail\/effective\.yaml\s+kept for Codex/,
+      );
+      expect(claude.out).toContain("Codex stays set up.");
+      expect(existsSync(join(p.cwd, ".claude"))).toBe(false);
+      expect(existsSync(join(p.cwd, ".nodrail/effective.yaml"))).toBe(true);
+      expect(
+        Object.keys(JSON.parse(p.read(".nodrail/setup-state.json")).hosts),
+      ).toEqual(["codex"]);
 
-    expect((await p.run("destroy", "--yes")).code).toBe(0);
-    expect(existsSync(join(p.cwd, ".codex"))).toBe(false);
-    expect(existsSync(join(p.cwd, ".nodrail"))).toBe(false);
-    expect(existsSync(join(p.cwd, "nodrail.lock.yaml"))).toBe(true);
-  });
+      expect((await p.run("destroy", "--yes")).code).toBe(0);
+      expect(existsSync(join(p.cwd, ".codex"))).toBe(false);
+      expect(existsSync(join(p.cwd, ".nodrail"))).toBe(false);
+      expect(existsSync(join(p.cwd, "nodrail.lock.yaml"))).toBe(true);
+    },
+  );
 
   test("names each connection's data, which it keeps", async () => {
     const p = await locked();

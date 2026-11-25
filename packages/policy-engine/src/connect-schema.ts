@@ -3,9 +3,11 @@ import { secretRef } from "./connections.ts";
 
 /**
  * `connect:` in nodrail.yaml: the Nodrail (Cloud or self-hosted) this
- * project is connected to, and who decides its calls (R383). Without it,
+ * project is connected to, and where the host gets its policy. Without it,
  * nothing changes: the local engine decides and nothing is sent.
  */
+
+export const DEFAULT_CONTROL_PLANE_URL = "https://app.nodrail.com";
 
 const slug = z
   .string()
@@ -34,9 +36,8 @@ export const connectField = z
     /** The environment's slug, such as development or production. */
     environment: slug,
     /**
-     * Who decides each call: `cloud` (Nodrail, with its runs, receipts and
-     * shared budgets) or `local` (the engine on this machine, as without
-     * `connect:`). Said explicitly, so nobody is surprised by who decides.
+     * The policy source for the host engine: `cloud` fetches the locked
+     * policy and reports decisions; `local` uses the repository policy.
      */
     decide: z.enum(["cloud", "local"]),
     /** `on` blocks what the policy blocks; `watch` records it and blocks nothing. */

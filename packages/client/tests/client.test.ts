@@ -272,7 +272,7 @@ describe("digests", () => {
   });
 });
 
-describe("the live policy (R388)", () => {
+describe("the live policy", () => {
   test("is read with the credential, as the host's data plane does", async () => {
     const live = {
       policy_revision: 7,
@@ -295,6 +295,38 @@ describe("the live policy (R388)", () => {
     expect(new Headers(init.headers).get("authorization")).toBe("Bearer ndr_c");
   });
 
+  test("conditionally reads the policy using its ETag", async () => {
+    const policy = {
+      policy_revision: 1,
+      published_at: null,
+      managed: null,
+      source: null,
+    };
+    const tag = '"policy-1"';
+    const client = new NodrailClient({
+      url: "https://nodrail.test",
+      credential: "ndr_c",
+      fetch: async (_input, init) => {
+        const headers = new Headers(init?.headers);
+        expect(headers.get("authorization")).toBe("Bearer ndr_c");
+        return headers.has("if-none-match")
+          ? new Response(null, {
+              status: headers.get("if-none-match") === tag ? 304 : 400,
+            })
+          : Response.json(policy, { headers: { etag: tag } });
+      },
+    });
+    expect(await client.policyIfChanged()).toEqual({
+      changed: true,
+      etag: tag,
+      policy,
+    });
+    expect(await client.policyIfChanged(tag)).toEqual({
+      changed: false,
+      etag: tag,
+    });
+  });
+
   test("a refusal surfaces as the server's code", async () => {
     const client = new NodrailClient({
       url: "https://nodrail.test",
@@ -308,7 +340,7 @@ describe("the live policy (R388)", () => {
   });
 });
 
-describe("host decisions (R388)", () => {
+describe("host decisions", () => {
   const decision = {
     idempotency_key: "claude-code:abc",
     tool: "files",

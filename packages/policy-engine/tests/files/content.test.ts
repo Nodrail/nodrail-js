@@ -1,4 +1,4 @@
-// File-content contracts (S07, DC-04.2): complete files read against their
+// File-content contracts: complete files read against their
 // contract. Every artifact the wave names has a valid fixture and rejected
 // ones; byte, encoding, YAML and Markdown edge cases follow.
 import { describe, expect, test } from "vitest";

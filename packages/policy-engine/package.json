@@ -1,6 +1,6 @@
 {
   "name": "@nodrail/policy-engine",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "description": "The open Nodrail policy engine. Compile, test and evaluate rules locally; it decides allow or deny for every agent action on the host. Includes the CLI, TypeScript evaluator and local hook.",
   "keywords": [
     "ai",

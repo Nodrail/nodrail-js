@@ -1,4 +1,4 @@
-// A mediated connection (preview, DC-02.2 provider side and DC-02.3): Nodrail
+// A mediated connection (preview): Nodrail
 // sits between the agent and the provider, so it checks what a host hook
 // can't. Hosts hand hooks a lossy copy of a tool's result (Claude passes
 // only `structuredContent`; both hosts swap a large result for a "saved to

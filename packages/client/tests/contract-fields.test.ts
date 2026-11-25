@@ -1,7 +1,7 @@
 // What Cloud receives of a declared brief or input: the started agent's
 // brief as its reporting projection in `params.brief`, and an operation's
 // input with classified fields as `[classified]`, checked where the value is
-// seen. Cloud reads `where` only from these (R317), so without them an allow
+// seen. Cloud reads `where` only from these, so without them an allow
 // with `where brief.*` never matches there.
 import { compilePolicies } from "@nodrail/policy-engine/yaml";
 import { describe, expect, test } from "vitest";

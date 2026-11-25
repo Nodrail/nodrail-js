@@ -1,6 +1,6 @@
 {
   "name": "@nodrail/cli",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Nodrail, the open control plane for AI agent development: declare agents and rules in nodrail.yaml, then plan and apply them on Claude Code, Codex and Copilot.",
   "keywords": [
     "ai",
@@ -41,8 +41,8 @@
     "verify": "pnpm check && pnpm lint && pnpm test && pnpm test:pack"
   },
   "dependencies": {
-    "@nodrail/client": "workspace:^",
     "@nodrail/policy-engine": "workspace:^",
+    "cross-spawn": "7.0.6",
     "yaml": "^2.9.1",
     "zod": "^4.6.7"
   },

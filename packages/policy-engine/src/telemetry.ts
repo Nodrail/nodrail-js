@@ -131,7 +131,7 @@ const STATUS = "status.json";
 
 /** Adds a record (a span, a decision) to the queue, or counts it as dropped when the queue is full. */
 export function enqueue(folder: string, span: object) {
-  mkdirSync(folder, { recursive: true });
+  mkdirSync(folder, { recursive: true, mode: 0o700 });
   const line = `${JSON.stringify(span)}\n`;
   let size = 0;
   try {
@@ -139,9 +139,12 @@ export function enqueue(folder: string, span: object) {
   } catch {
     // No queue yet.
   }
-  if (size + line.length > MAX_SPOOL)
-    appendFileSync(join(folder, DROPPED), "x");
-  else appendFileSync(join(folder, SPOOL), line);
+  if (size + line.length > MAX_SPOOL) {
+    appendFileSync(join(folder, DROPPED), "x", { mode: 0o600 });
+    return false;
+  }
+  appendFileSync(join(folder, SPOOL), line, { mode: 0o600 });
+  return true;
 }
 
 export type TelemetryStatus = {

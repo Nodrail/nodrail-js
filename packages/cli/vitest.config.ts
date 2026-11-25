@@ -4,14 +4,16 @@ export default defineConfig({
   test: {
     environment: "node",
     include: ["tests/**/*.test.ts"],
+    // Real git, Node and CLI subprocesses can take longer on shared runners.
+    testTimeout: 30_000,
+    hookTimeout: 30_000,
     coverage: {
       provider: "v8",
       include: ["src/**"],
-      // Process wiring around the tested modules: the real terminal and entry.
-      exclude: ["src/bin.ts", "src/terminal.ts"],
+      // Cover executable source, excluding the real terminal and entry.
+      exclude: ["src/**/*.d.ts", "src/bin.ts", "src/terminal.ts"],
       reporter: ["text-summary"],
-      // Measured where the whole suite runs. On Windows the Codex tests are
-      // skipped, as Codex isn't set up there, so the rest runs unmeasured.
+      // Thresholds apply where all supported hosts are exercised.
       thresholds:
         process.platform === "win32"
           ? undefined

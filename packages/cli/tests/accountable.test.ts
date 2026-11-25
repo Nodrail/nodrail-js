@@ -233,7 +233,7 @@ describe("plan and activation", () => {
       "Publications per run: 3 calls per day (Europe/Madrid), across environment · Enforced allowance",
     );
     expect(out).toContain(
-      "! Budget publications is across: environment: shared budgets are enforced only on a Cloud-managed connection",
+      "! Budget publications is across: environment: shared budgets need a shared budget authority; the hook would deny every call they cover",
     );
     expect((await p.run("apply", "--yes")).code).toBe(1);
     expect(existsSync(join(p.cwd, ".claude/settings.json"))).toBe(false);
@@ -337,21 +337,28 @@ describe("plan and activation", () => {
 });
 
 describe("nodrail evidence run", () => {
-  const script = (body: string) => [
+  const script = (body: string, ...args: string[]) => [
     process.execPath,
     "-e",
-    `const fs = require("node:fs"); ${body}`,
+    `const fs = require("node:fs");\n${body}`,
+    "--",
+    ...args,
   ];
 
   test("records a valid value with the revision it is about", async () => {
     const p = await repoProject(LOCAL);
+    const args = ["two words", 'a "quote"', "", "line\nbreak", "%PATH% & | >"];
     const { code, err } = await p.run(
       "evidence",
       "run",
       "ci-tests",
       "--",
       ...script(
-        `fs.writeFileSync(process.env.NODRAIL_EVIDENCE_OUT, JSON.stringify({ status: "passed", tests: 12 }))`,
+        `
+          require("node:assert/strict").deepEqual(process.argv.slice(1), ${JSON.stringify(args)});
+          fs.writeFileSync(process.env.NODRAIL_EVIDENCE_OUT, JSON.stringify({ status: "passed", tests: 12 }));
+        `,
+        ...args,
       ),
     );
     expect(err).toContain("recorded ci-tests: valid, subject");
@@ -373,6 +380,25 @@ describe("nodrail evidence run", () => {
     expect(shown.out).toContain("met here");
   });
 
+  test.runIf(windows)("runs a .cmd launcher found on PATH", async () => {
+    const p = await repoProject(LOCAL);
+    p.write(
+      "check tools/check.cmd",
+      '@echo off\r\nif not "%~1"=="two words" exit /b 7\r\n> "%NODRAIL_EVIDENCE_OUT%" echo {"status":"passed","tests":12}\r\n',
+    );
+    p.env.PATH += `;${join(p.cwd, "check tools")}`;
+    const ran = await p.run(
+      "evidence",
+      "run",
+      "ci-tests",
+      "--",
+      "check",
+      "two words",
+    );
+    expect(ran.err).toContain("recorded ci-tests: valid");
+    expect(ran.code).toBe(0);
+  });
+
   test("nothing written to $NODRAIL_EVIDENCE_OUT is missing, whatever the exit code", async () => {
     const p = await repoProject(LOCAL);
     const { code, err } = await p.run(
@@ -389,6 +415,7 @@ describe("nodrail evidence run", () => {
     const [event] = readEvidence(join(p.cwd, ".git/nodrail/runs"), "ci-tests");
     expect(event!.validation).toEqual({ state: "missing", issues: [] });
     expect(event!.value).toBeNull();
+    expect(event!.observed.exit_code).toBe(0);
     const shown = await p.run("evidence", "show", "ci-tests");
     expect(shown.out).toContain(
       "not met: the latest ci-tests for this revision has no result",
@@ -694,7 +721,7 @@ describe("the outbox end to end, through nodrail policy hook", () => {
   });
 });
 
-describe("an agent can't forge local evidence (R364)", () => {
+describe("an agent can't forge local evidence", () => {
   // The audit's repro: a rule allows Write anywhere, the person's run
   // failed, and the agent appends a passed event to the ledger, then pushes.
   const WRITES = `- rule: Write files
@@ -791,7 +818,7 @@ describe("an agent can't forge local evidence (R364)", () => {
     expect(refused.out).toContain("or write the run ledger");
     const status = await p.run("status");
     expect(`${status.out}${status.err}`).toContain(
-      ".claude/settings.json sets disableAllHooks, so no hook runs",
+      `${join(p.cwd, ".claude/settings.json")} sets disableAllHooks, so no hook runs`,
     );
     expect(status.out).not.toContain("Since apply: nothing changed");
     expect(status.out).toContain(

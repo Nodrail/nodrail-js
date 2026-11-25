@@ -92,18 +92,21 @@ export const isSecretName = (part: string) =>
 const MAX_GLOB = 256;
 const MAX_ALTERNATIVES = 64;
 
-/** {a,b}c → [ac, bc]. Null when there would be too many to check. */
-function expandBraces(pattern: string): string[] | null {
-  const open = pattern.indexOf("{");
+/** {a,b}c → [ac, bc]. Null for unsupported syntax or too many alternatives. */
+export function expandBraces(pattern: string, start = 0): string[] | null {
+  const open = pattern.indexOf("{", start);
   if (open < 0) return [pattern];
   const close = pattern.indexOf("}", open);
   if (close < 0) return [pattern];
   const inner = pattern.slice(open + 1, close);
   if (inner.includes("{")) return null;
+  if (!inner.includes(","))
+    return inner.includes("..") ? null : expandBraces(pattern, close + 1);
   const results: string[] = [];
   for (const choice of inner.split(",")) {
     const rest = expandBraces(
       pattern.slice(0, open) + choice + pattern.slice(close + 1),
+      open + choice.length,
     );
     if (!rest) return null;
     results.push(...rest);
@@ -176,6 +179,13 @@ function matchesPart(pattern: Token[], name: string) {
     row = next;
   }
   return row[name.length] ?? false;
+}
+
+/** Compile a segment once, with bounded matching instead of regex backtracking. */
+export function globSegment(segment: string, foldCase = true) {
+  const pattern = tokens(foldCase ? segment.toLowerCase() : segment);
+  return (name: string) =>
+    matchesPart(pattern, foldCase ? name.toLowerCase() : name);
 }
 
 /** Examples of each place, including the forms nameForms recognises. */

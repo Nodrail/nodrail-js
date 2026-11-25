@@ -56,21 +56,25 @@ export function told(judged: Judged) {
   }
 }
 
-/**
- * The hook's observer for `--telemetry <file>`: each decision becomes a span
- * in the queue, and a sender is woken. Telemetry never changes or delays a
- * decision: a file that can't be read only turns it off, with a warning.
- */
-export function telemetryObserver(input: {
+export type HookReporting = {
   file: string;
   host: string;
   document: PolicyDocument;
   /** The rules the hook was given, for the policy's full revision. */
   paths?: readonly string[];
+  policyDigest?: string | null;
   /** How to run this command line again, for the sender. */
   self: readonly string[];
   warn: (text: string) => void;
-}): Reporter | null {
+  home?: string;
+};
+
+/**
+ * The hook's observer for `--telemetry <file>`: each decision becomes a span
+ * in the queue, and a sender is woken. Telemetry never changes or delays a
+ * decision: a file that can't be read only turns it off, with a warning.
+ */
+export function telemetryObserver(input: HookReporting): Reporter | null {
   let folder: string;
   let machine: string;
   // Reporting never decides: anything that keeps it from starting, the
@@ -78,7 +82,7 @@ export function telemetryObserver(input: {
   // policy's answer stands.
   try {
     telemetryFile.parse(JSON.parse(readFileSync(input.file, "utf8")));
-    folder = spoolFolder(homedir(), input.file);
+    folder = spoolFolder(input.home ?? homedir(), input.file);
   } catch (error) {
     input.warn(
       `Nodrail: telemetry is off: can't read ${input.file}: ${(error as Error).message}\n`,
@@ -86,7 +90,7 @@ export function telemetryObserver(input: {
     return null;
   }
   try {
-    machine = machineId(homedir());
+    machine = machineId(input.home ?? homedir());
   } catch (error) {
     input.warn(
       `Nodrail: telemetry is off: can't keep this machine's id in ~/.nodrail: ${(error as Error).message}\n`,
@@ -97,7 +101,7 @@ export function telemetryObserver(input: {
     .update(JSON.stringify(input.document))
     .digest("hex")
     .slice(0, 16);
-  const policy = policyRevision(input.paths ?? []);
+  const policy = input.policyDigest ?? policyRevision(input.paths ?? []);
   const started = now();
   const queue = (span: SpanRecord) => {
     try {

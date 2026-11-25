@@ -257,10 +257,10 @@ skills/release-notes
     expect(out).toContain("Nothing to change. Nothing was changed.");
   });
 
-  test.skipIf(windows)("never writes through a link", async () => {
+  test("never writes through a link", async () => {
     const p = await locked();
     const outside = mkdtempSync(join(tmpdir(), "nodrail-outside-"));
-    symlinkSync(outside, join(p.cwd, ".claude"));
+    symlinkSync(outside, join(p.cwd, ".claude"), "junction");
     expect(action(p, ".claude/agents/lead.md")).toBe("conflict");
   });
 
@@ -285,11 +285,16 @@ skills/release-notes
       expect(out).toContain("! nodrail: not on PATH; the policy hook runs it");
   });
 
-  test.skipIf(windows)("a link inside a skill is refused", async () => {
+  test("a link inside a skill is refused", async () => {
     const p = await locked();
-    symlinkSync("/etc/hosts", join(p.cwd, "skills/release-notes/hosts"));
+    const outside = mkdtempSync(join(tmpdir(), "nodrail-outside-"));
+    symlinkSync(
+      outside,
+      join(p.cwd, "skills/release-notes/linked"),
+      "junction",
+    );
     expect(p.plan().problems).toEqual([
-      "skills/release-notes/hosts is a link; skills are copied without links.",
+      "skills/release-notes/linked is a link; skills are copied without links.",
     ]);
   });
 
@@ -406,14 +411,18 @@ describe("nodrail apply", () => {
       action: "conflict",
       why: "start as lead; the policy hook; disableAllHooks is on, so no hook would run",
     });
-    if (windows) return;
     const dotfiles = mkdtempSync(join(tmpdir(), "nodrail-dotfiles-"));
     writeFileSync(join(dotfiles, "settings.json"), "{}");
-    rmSync(join(p.cwd, ".claude/settings.json"));
-    symlinkSync(
-      join(dotfiles, "settings.json"),
-      join(p.cwd, ".claude/settings.json"),
-    );
+    if (windows) {
+      rmSync(join(p.cwd, ".claude"), { recursive: true });
+      symlinkSync(dotfiles, join(p.cwd, ".claude"), "junction");
+    } else {
+      rmSync(join(p.cwd, ".claude/settings.json"));
+      symlinkSync(
+        join(dotfiles, "settings.json"),
+        join(p.cwd, ".claude/settings.json"),
+      );
+    }
     expect(action(p, ".claude/settings.json")).toBe("conflict");
   });
 
@@ -574,23 +583,20 @@ describe("nodrail apply", () => {
     expect(replayJournal(root, folder)).toEqual(["a.txt"]);
   });
 
-  test.skipIf(windows)(
-    "never writes through a link planted after the plan",
-    () => {
-      const root = mkdtempSync(join(tmpdir(), "nodrail-journal-"));
-      const folder = mkdtempSync(join(tmpdir(), "nodrail-stage-"));
-      const outside = mkdtempSync(join(tmpdir(), "nodrail-outside-"));
-      const hash = createHash("sha256").update("x").digest("hex");
-      stageJournal(
-        folder,
-        [{ path: ".claude/x.md", before: null, after: hash }],
-        new Map([[".claude/x.md", Buffer.from("x")]]),
-      );
-      symlinkSync(outside, join(root, ".claude"));
-      expect(() => replayJournal(root, folder)).toThrow("goes through a link");
-      expect(readdirSync(outside)).toEqual([]);
-    },
-  );
+  test("never writes through a link planted after the plan", () => {
+    const root = mkdtempSync(join(tmpdir(), "nodrail-journal-"));
+    const folder = mkdtempSync(join(tmpdir(), "nodrail-stage-"));
+    const outside = mkdtempSync(join(tmpdir(), "nodrail-outside-"));
+    const hash = createHash("sha256").update("x").digest("hex");
+    stageJournal(
+      folder,
+      [{ path: ".claude/x.md", before: null, after: hash }],
+      new Map([[".claude/x.md", Buffer.from("x")]]),
+    );
+    symlinkSync(outside, join(root, ".claude"), "junction");
+    expect(() => replayJournal(root, folder)).toThrow("goes through a link");
+    expect(readdirSync(outside)).toEqual([]);
+  });
 
   test.each(["rename:2", "rename:5"])(
     "killed partway (%s), the next nodrail finishes the apply",

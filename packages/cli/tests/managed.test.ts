@@ -7,12 +7,7 @@ import { join } from "node:path";
 import { describe, expect, test } from "vitest";
 import { claudeManaged, codexManagedChecks } from "../src/setup/managed.ts";
 import { planSetup } from "../src/setup/plan.ts";
-import {
-  codexTools,
-  locked,
-  RESOURCES,
-  windows,
-} from "./support/setup-project.ts";
+import { codexTools, locked, RESOURCES } from "./support/setup-project.ts";
 
 const folder = (files: Record<string, string>) => {
   const at = mkdtempSync(join(tmpdir(), "nodrail-admin-"));
@@ -61,7 +56,7 @@ describe("reading an administrator's Claude Code settings", () => {
   });
 });
 
-describe.skipIf(windows)("plan with an administrator's settings", () => {
+describe("plan with an administrator's settings", () => {
   const checks = async (managed: Record<string, string>, extra?: string) => {
     const p = await desk(extra);
     const plan = planSetup({
@@ -135,7 +130,8 @@ describe.skipIf(windows)("plan with an administrator's settings", () => {
       "marketplace nodrail-release: managed strictKnownMarketplaces doesn't allow a marketplace in this folder, so Claude Code won't load it. Ask your administrator, or take it out of nodrail.yaml",
     ]);
     const pattern = await checks({
-      "managed-settings.json": `{"strictKnownMarketplaces":[{"source":"pathPattern","pathPattern":"^/"}]}`,
+      "managed-settings.json":
+        '{"strictKnownMarketplaces":[{"source":"pathPattern","pathPattern":"nodrail-project-"}]}',
     });
     expect(pattern.failed).toEqual([]);
     const off = await checks({

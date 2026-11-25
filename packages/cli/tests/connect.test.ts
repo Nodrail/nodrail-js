@@ -1,9 +1,7 @@
-// `connect:` in nodrail.yaml (R383, connected mode PR 1): plan says who
-// decides and checks the credential; what isn't built yet is refused, so
-// apply never sets up a project that silently decides on this machine.
+// Plan explains the policy source and checks the connected credential.
 import { describe, expect, test } from "vitest";
 import { credentialChecks } from "../src/setup/connect.ts";
-import { locked, RESOURCES, windows } from "./support/setup-project.ts";
+import { locked, RESOURCES } from "./support/setup-project.ts";
 
 const connected = (block: string) =>
   locked({
@@ -11,7 +9,7 @@ const connected = (block: string) =>
     "nodrail.yaml": `${RESOURCES["nodrail.yaml"]}connect:\n${block}`,
   });
 
-describe.skipIf(windows)("connect: in plan and apply", () => {
+describe("connect: in plan and apply", () => {
   test("decide: local says so, and apply goes ahead as before", async () => {
     const p = await connected(
       "  workspace: acme\n  environment: development\n  decide: local\n",
@@ -19,7 +17,7 @@ describe.skipIf(windows)("connect: in plan and apply", () => {
     const plan = await p.run("plan");
     expect(plan.code).toBe(0);
     expect(plan.out).toContain(
-      "Connected to https://app.nodrail.com, workspace acme, environment development, but decisions stay on this machine (decide: local)",
+      "The host decides using repository policy (decide: local).",
     );
     expect((await p.run("apply", "--yes")).code).toBe(0);
   });
@@ -31,9 +29,7 @@ describe.skipIf(windows)("connect: in plan and apply", () => {
     p.env.NODRAIL_CREDENTIAL = "ndr_000000000000_" + "A".repeat(43);
     const plan = await p.run("plan");
     expect(plan.code).toBe(1);
-    expect(plan.out).toContain(
-      "Decisions: Nodrail. Views: its Runs and Activity.",
-    );
+    expect(plan.out).toContain("Decisions go to Runs and Activity.");
     expect(plan.out).not.toMatch(/Approvals|Reviews/);
     expect(plan.out).toContain("add `id: <uuid>` to nodrail.yaml");
     // Offline here: the credential is set but couldn't be checked.
@@ -46,25 +42,14 @@ describe.skipIf(windows)("connect: in plan and apply", () => {
     expect(() => p.read(".claude/settings.json")).toThrow();
   });
 
-  test("decide: cloud on another host is refused for now", async () => {
-    const p = await locked({
-      ...RESOURCES,
-      "nodrail.yaml": `${RESOURCES["nodrail.yaml"].replace("runtime: claude-code", "runtime: copilot")}connect:\n  workspace: acme\n  environment: development\n  decide: cloud\n  credential: { fromEnv: NODRAIL_CREDENTIAL }\n`,
-    });
-    const plan = await p.run("plan");
-    expect(plan.code).toBe(1);
-    expect(plan.out).toMatch(
-      /! connect: decide: cloud sets up Claude Code only/,
-    );
-  });
-
-  test("enforce: watch is refused until it ships", async () => {
+  test("enforce: watch is planned and applied", async () => {
     const p = await connected(
       "  workspace: acme\n  environment: development\n  decide: local\n  enforce: watch\n",
     );
     const plan = await p.run("plan");
-    expect(plan.code).toBe(1);
-    expect(plan.out).toMatch(/! connect: enforce: watch isn't available/);
+    expect(plan.code).toBe(0);
+    expect(plan.out).toContain("Watch mode records policy decisions");
+    expect((await p.run("apply", "--yes")).code).toBe(0);
   });
 
   test("works beside declared contracts in the same nodrail.yaml", async () => {
@@ -74,7 +59,7 @@ describe.skipIf(windows)("connect: in plan and apply", () => {
     const plan = await p.run("plan");
     expect(plan.err).toBe("");
     expect(plan.code).toBe(0);
-    expect(plan.out).toContain("Connected to https://app.nodrail.com");
+    expect(plan.out).toContain("decide: local");
   });
 
   test("without connect:, plan says nothing about it", async () => {

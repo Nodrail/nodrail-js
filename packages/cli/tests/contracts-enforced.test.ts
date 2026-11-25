@@ -1,20 +1,19 @@
-// Briefs and operation inputs enforced by the local hook (DC-02.1, DC-02.2):
+// Briefs and operation inputs enforced by the local hook:
 // the effective policy carries them with the rules' `where`, so the hook
 // that `apply` sets up refuses a dispatch without a valid brief and a call
 // whose arguments don't conform, and rules read the checked values. Also:
 // the object form of spec.brief, header briefs and header findings counts
 // in render/validate/explain, and plan's warning for a `where` Cloud can't
-// read (R317).
+// read.
 import { join } from "node:path";
 import { parse } from "yaml";
-import { describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import {
   fileOf,
   hookDocument,
   locked,
   planFor,
   RESOURCES,
-  windows,
 } from "./support/setup-project.ts";
 
 const api = "apiVersion: nodrail.com/v1alpha1";
@@ -119,9 +118,12 @@ describe("the effective policy", () => {
   });
 });
 
-describe.skipIf(windows)("the hook enforces briefs and inputs", () => {
+describe("the hook enforces briefs and inputs", () => {
+  afterEach(() => vi.unstubAllEnvs());
+
   test("a dispatch needs a valid brief, and a call conforming arguments; where reads both", async () => {
     const { p } = await setUp();
+    vi.stubEnv("NODRAIL_LEDGER", join(p.cwd, ".ledger"));
     const decide = async (tool: string, input: object) => {
       const { out, code } = await p.runWith(
         {

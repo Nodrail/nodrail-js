@@ -12,7 +12,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, toNamespacedPath } from "node:path";
 import { afterAll, describe, expect, test } from "vitest";
 import {
   checkWriteOnDisk,
@@ -24,6 +24,7 @@ import { CONTRACTS, fixture } from "./support";
 const base = mkdtempSync(join(tmpdir(), "nodrail-files-"));
 const root = join(base, "project");
 const outside = join(base, "outside");
+const alias = join(base, "alias");
 afterAll(() => rmSync(base, { recursive: true, force: true }));
 
 const put = (path: string, content: string | Buffer) => {
@@ -36,8 +37,9 @@ put(join(outside, "secret.md"), "secret\n");
 put(join(root, "big.md"), Buffer.alloc(FILE_LIMITS.maxBytes + 1, 0x61));
 symlinkSync(join(outside, "secret.md"), join(root, "docs/adr/link.md"));
 mkdirSync(join(root, "memory"));
-symlinkSync(join(root, "docs/adr"), join(root, "memory/adr"));
-symlinkSync(outside, join(root, "escape"));
+symlinkSync(join(root, "docs/adr"), join(root, "memory/adr"), "junction");
+symlinkSync(outside, join(root, "escape"), "junction");
+symlinkSync(root, alias, "junction");
 linkSync(join(outside, "secret.md"), join(root, "hard.md"));
 mkdirSync(join(root, "folder.md"));
 
@@ -55,6 +57,10 @@ describe("reading current files", () => {
   test.each([
     ["docs/adr/missing.md", { state: "absent" }],
     ["nowhere/at/all.md", { state: "absent" }],
+    [
+      "../outside/secret.md",
+      { state: "unsafe", reason: "isn't a normalized project-relative path" },
+    ],
     ["docs/adr/1.md/below.md", { state: "absent" }],
     [
       "docs/adr/link.md",
@@ -83,6 +89,13 @@ describe("reading current files", () => {
       state: "unsafe",
     });
   });
+
+  test("the reader requires the normalized spelling of a project path", () => {
+    expect(readCurrentFile(root, "./docs/adr/1.md")).toEqual({
+      state: "unsafe",
+      reason: "isn't a normalized project-relative path",
+    });
+  });
 });
 
 describe("checking a write on disk", () => {
@@ -92,6 +105,27 @@ describe("checking a write on disk", () => {
     contracts: CONTRACTS,
     agent: "scribe",
   };
+
+  test.runIf(process.platform !== "win32")(
+    "a double-slash POSIX root does not treat backslashes as separators",
+    () => {
+      const projectRoot = `/${root}`;
+      const result = checkWriteOnDisk({
+        ...input,
+        projectRoot,
+        cwd: projectRoot,
+        request: {
+          tool: "write",
+          path: String.raw`docs\adr\1.md`,
+          content: fixture("adr", "valid.md"),
+        },
+      });
+      expect(result).toMatchObject({
+        decision: "deny",
+        reason: expect.stringContaining("backslash"),
+      });
+    },
+  );
 
   test("an Edit of a real file is reconstructed and validated", () => {
     const result = checkWriteOnDisk({
@@ -128,12 +162,14 @@ describe("checking a write on disk", () => {
   });
 
   test("the resolved spelling of the project folder is still inside it", () => {
-    const real = realpathSync.native(root);
+    const real = realpathSync.native(alias);
     const result = checkWriteOnDisk({
       ...input,
+      projectRoot: alias,
+      cwd: alias,
       request: {
         tool: "write",
-        path: join(real, "docs/adr/2.md"),
+        path: toNamespacedPath(join(real, "docs/adr/2.md")),
         content: "no sections\n",
       },
     });
