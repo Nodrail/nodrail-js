@@ -6,6 +6,10 @@
 
 - Preserve the agent pause reason when a retried action returns redacted digests.
 
+## 0.9.1
+
+- Ship the policy engine fix that keeps machine identity stable across enrollment and hook telemetry.
+
 ## 0.9.0
 
 Uses `@nodrail/policy-engine` 0.9.0.

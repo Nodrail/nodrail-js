@@ -266,6 +266,11 @@ It runs as the project's only writer, like `add` and `lock`: a second `nodrail` 
 
 Run it again after changing a resource, a skill or a binding, and lock the policy first: it updates only the files that changed and removes the ones no longer needed, such as a member who left the team. With nothing to change it leaves the files as they are. In a connected project, `apply` sends the first setup report to Inventory with the enrolled machine credential. Session starts refresh the report.
 
+The CLI and hook share `~/.nodrail/machine-id`. Upgrades preserve existing
+legacy hex and UUID files. If the file is damaged, run
+`rm ~/.nodrail/machine-id` (PowerShell: `Remove-Item ~/.nodrail/machine-id`)
+and then `nodrail apply` to enroll with a new ID.
+
 With `start: true` in `nodrail.yaml` and a terminal, it then opens the host. Otherwise run `claude` or `codex` in the folder: it starts as the entry agent, behind the policy hook. For Codex, `apply` is done only once Codex runs nodrail's hook; see above.
 
 A session that is already open keeps the agent files, skills and settings it started with, and `apply` says when it changed any: start a new session to use them. The policy is different: the hook reads it at every tool call, so a policy change applies to open sessions from their next call.

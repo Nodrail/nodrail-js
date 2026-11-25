@@ -293,8 +293,10 @@ describe("sending the observation (W3.3)", () => {
       join(p.home, ".nodrail/machine-id"),
       "utf8",
     ).trim();
-    expect(span!.attributes["nodrail.machine"]).toBe(machine);
-    expect(machine).toMatch(/^[0-9a-f]{32}$/);
+    expect(span!.attributes["nodrail.machine"]).toBe(
+      machine.replaceAll("-", ""),
+    );
+    expect(span!.attributes["nodrail.machine"]).toMatch(/^[0-9a-f]{32}$/);
     expect(span!.attributes["nodrail.unmanaged.names"]).toBeUndefined();
     const text = JSON.stringify(queued(p));
     for (const hidden of [p.cwd, p.home, "github", SECRET])

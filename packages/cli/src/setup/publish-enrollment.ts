@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import {
   readHostCredential,
+  saveMachineId,
   writeHostCredential,
 } from "@nodrail/policy-engine/command-line";
 import { CliError } from "../io.ts";
@@ -16,7 +17,6 @@ import {
   type EnrollmentIntent,
 } from "./applied-enrollment.ts";
 import type { Publication } from "./connect-policy.ts";
-import { saveMachineId } from "./machine.ts";
 
 function enrollmentIntent(
   place: Place,
@@ -36,6 +36,13 @@ function enrollmentIntent(
   return intent;
 }
 
+function confirmMachineId(home: string, id: string) {
+  if (saveMachineId(home, id) !== id)
+    throw new CliError(
+      "The machine ID changed during preflight. Run nodrail apply again.",
+    );
+}
+
 /** Persist the revocation secret before the server can activate its digest. */
 export async function publishPolicy(
   { api, body, binding }: Publication,
@@ -45,7 +52,7 @@ export async function publishPolicy(
   const machine = body.machine;
   if (!machine) return { ...(await api.applyProject(body)), enrolled: false };
   return withEnrollmentLock(place, binding, async (lock) => {
-    await saveMachineId(place.home, machine.id);
+    confirmMachineId(place.home, machine.id);
     const previous = await readHostCredential(place.home, binding);
     const intent = lock.commit(() =>
       enrollmentIntent(

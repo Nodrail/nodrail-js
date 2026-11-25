@@ -14,6 +14,10 @@
 
 - Support removing an origin-bound machine credential during destroy. Show a pause message that covers both machine and caller access.
 
+## 0.9.1
+
+- Keep UUID machine IDs intact in hooks and derive a matching enrollment and telemetry identity from legacy hex files.
+
 ## 0.9.0
 
 One login, then `apply`: connected projects enroll each machine with its own

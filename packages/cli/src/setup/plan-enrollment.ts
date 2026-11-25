@@ -1,8 +1,10 @@
 import { randomUUID } from "node:crypto";
-import { readHostCredential } from "@nodrail/policy-engine/command-line";
+import {
+  enrollmentId,
+  readHostCredential,
+} from "@nodrail/policy-engine/command-line";
 import type { NodrailApi } from "../api.ts";
 import { generationOf } from "./applied-enrollment.ts";
-import { readMachineId } from "./machine.ts";
 import type { SetupPlan } from "./plan.ts";
 
 export async function planEnrollment(
@@ -13,7 +15,7 @@ export async function planEnrollment(
   runtime: SetupPlan["runtime"],
   home: string,
 ) {
-  const id = await readMachineId(home);
+  const id = enrollmentId(home);
   const saved = await readHostCredential(home, binding);
   const machine = {
     id: id ?? randomUUID(),
