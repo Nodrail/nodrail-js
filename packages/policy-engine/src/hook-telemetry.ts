@@ -12,12 +12,8 @@ import {
 } from "./telemetry.ts";
 import { telemetryFile } from "./telemetry-schema.ts";
 import type { SpanRecord } from "./otlp.ts";
-import {
-  machineId,
-  policyRevision,
-  runEventSpan,
-  runRef,
-} from "./reporting-spans.ts";
+import { telemetryId } from "./machine-id.ts";
+import { policyRevision, runEventSpan, runRef } from "./reporting-spans.ts";
 import type { RunEvent } from "./runs.ts";
 
 /** What the hook hands its observer once a call is judged. */
@@ -98,7 +94,7 @@ export function telemetryObserver(input: HookReporting): Reporter | null {
     return null;
   }
   try {
-    machine = machineId(input.home ?? homedir());
+    machine = telemetryId(input.home ?? homedir());
   } catch (error) {
     input.warn(
       `Nodrail: telemetry is off: can't keep this machine's id in ~/.nodrail: ${(error as Error).message}\n`,

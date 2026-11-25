@@ -11,7 +11,7 @@ import {
 import { basename, join } from "node:path";
 import {
   enqueue,
-  machineId,
+  telemetryId,
   spoolFolder,
   startSender,
   wakeSender,
@@ -364,7 +364,7 @@ export function sendObservation(
   const file = join(root, TELEMETRY_FILE);
   if (!existsSync(file)) return false;
   const folder = spoolFolder(home, file);
-  for (const span of observationSpans(record, machineId(home)))
+  for (const span of observationSpans(record, telemetryId(home)))
     enqueue(folder, span);
   wakeSender(folder, () => startSender(self, folder, file));
   return true;

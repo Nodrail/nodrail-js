@@ -3,28 +3,9 @@
 // come from. Counts and names only: never a finding's text, an argument or
 // anything a person or agent wrote.
 import { createHash, randomBytes } from "node:crypto";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { readFileSync } from "node:fs";
 import type { SpanRecord } from "./otlp.ts";
 import type { RunEvent } from "./runs.ts";
-
-/**
- * This machine, to a team view: a random id kept in the home folder, made
- * once. Never the hostname or anything that says who or where.
- */
-export function machineId(home: string) {
-  const file = join(home, ".nodrail", "machine-id");
-  try {
-    const kept = readFileSync(file, "utf8").trim();
-    if (/^[0-9a-f]{32}$/.test(kept)) return kept;
-  } catch {
-    // Not made yet.
-  }
-  const made = randomBytes(16).toString("hex");
-  mkdirSync(join(file, ".."), { recursive: true });
-  writeFileSync(file, `${made}\n`, { mode: 0o600 });
-  return made;
-}
 
 /** The policy file's full SHA-256, the same digest the lock records. */
 export function policyRevision(paths: readonly string[]) {

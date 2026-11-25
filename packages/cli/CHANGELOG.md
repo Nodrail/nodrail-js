@@ -26,6 +26,10 @@
 - Send the first Inventory observation at apply time. On destroy, revoke and remove the enrolled credential and provide server-side cleanup instructions if it could not be revoked.
 - Only show the legacy migration notice for detected legacy configuration.
 
+## 0.7.1
+
+- Make connect, plan, and apply accept legacy hex machine IDs. Preserve valid machine ID files and show how to repair malformed files.
+
 ## 0.7.0
 
 Uses `@nodrail/policy-engine` 0.9.0, published with it. `nodrail login` opens

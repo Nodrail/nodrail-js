@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { z } from "zod";
 import {
   controlPlaneOrigin,
+  enrollmentId,
   readHostCredential,
   removeHostCredential,
 } from "@nodrail/policy-engine/command-line";
@@ -19,7 +20,6 @@ import {
   type EnrollmentIntent,
 } from "./applied-enrollment.ts";
 import { CONNECT_FILE } from "./connect.ts";
-import { readMachineId } from "./machine.ts";
 import type { DestroyPlan } from "./destroy.ts";
 
 const legacyRecovery = () =>
@@ -87,7 +87,7 @@ async function reconcileIntent(io: Io, binding: EnrollmentIntent) {
     binding.origin,
     binding.workspace,
   );
-  const machineId = binding.machineId ?? (await readMachineId(io.home));
+  const machineId = binding.machineId ?? enrollmentId(io.home);
   if (!token || !machineId) return null;
   const api = new NodrailApi({
     url: binding.origin,

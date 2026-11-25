@@ -3,26 +3,14 @@
 // it names the project by a stable id; decisions carry the full policy
 // revision; a run's steps and actions are reported too, as counts only.
 import { createHash } from "node:crypto";
-import {
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readdirSync,
-  readFileSync,
-  writeFileSync,
-} from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test } from "vitest";
 import { decodeSpans } from "../src/otlp-decode";
 import type { SpanRecord } from "../src/otlp";
 import { deliveryOf } from "../src/otlp-response";
-import {
-  machineId,
-  policyRevision,
-  runEventSpan,
-  runRef,
-} from "../src/reporting-spans";
+import { policyRevision, runEventSpan, runRef } from "../src/reporting-spans";
 import { runHook } from "../src/run-hook";
 import type { RunEvent } from "../src/runs";
 import { enqueue, readStatus, sendSpool, spoolFolder } from "../src/telemetry";
@@ -333,11 +321,8 @@ describe("what a run reports", () => {
     expect(started.attributes["nodrail.usage.tokens"]).toBeUndefined();
   });
 
-  test("the machine id is made once; the policy revision is the file's full digest", () => {
+  test("the policy revision is the file's full digest", () => {
     const home = mkdtempSync(join(tmpdir(), "nodrail-home-"));
-    const id = machineId(home);
-    expect(id).toMatch(/^[0-9a-f]{32}$/);
-    expect(machineId(home)).toBe(id);
     const file = join(home, "effective.yaml");
     writeFileSync(file, "version: 1\n");
     expect(policyRevision([file])).toBe(
@@ -345,10 +330,6 @@ describe("what a run reports", () => {
     );
     expect(policyRevision([home])).toBeNull();
     expect(policyRevision([file, file])).toBeNull();
-    expect(existsSync(join(home, ".nodrail", "machine-id"))).toBe(true);
-    expect(
-      readFileSync(join(home, ".nodrail", "machine-id"), "utf8").trim(),
-    ).toBe(id);
   });
 });
 
