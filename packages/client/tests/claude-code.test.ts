@@ -447,11 +447,13 @@ describe("runs and steps", () => {
       {
         run: { key: "session:s1" },
         step: { id: "a1", agent: "qa" },
+        agent: "qa",
         event: "started",
       },
       {
         run: { key: "session:s1" },
         step: { id: "a1", agent: "qa" },
+        agent: "qa",
         event: "finished",
         receipt: { text: receipt },
       },

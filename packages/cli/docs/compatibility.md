@@ -17,10 +17,10 @@ On that profile, the support-desk example passed every check in the workspace ac
 
 - the lock records the workspace, and plan starts nothing;
 - both hosts load the agents and the skill, and the hook is active;
-- denied and held calls had no effect at the provider;
+- denied calls had no effect at the provider;
 - updates, your own edits, concurrent applies, rollback and secrets all behaved as described.
 
-The example's `nodrail.yaml` names these versions under `tested:`. Other versions aren't refused: `plan` marks them `?`, unverified. The minimums are still enforced: Claude Code 2.1.295 and Codex 0.169.0. Windows runs the automated tests for Claude Code only; Codex on Windows isn't set up.
+The example's `nodrail.yaml` names these versions under `tested:`. Other versions aren't refused: `plan` marks them `?`, unverified. The minimums are still enforced: Claude Code 2.1.295 and Codex 0.169.0. Declarative setup on Windows supports Claude Code.
 
 ## What each host proves
 
@@ -45,8 +45,7 @@ What the policy hook sees and how each host behaves when it can't run. Verified 
 | MCP tools               | yes                                                                                                                                  | yes                                                                                                                                                  | yes                                                                                                                              |
 | Starting a subagent     | yes                                                                                                                                  | yes                                                                                                                                                  | yes (`task`); the subagent's own calls not observed yet                                                                          |
 | If the hook can't run   | blocked (`onFailure: block`)                                                                                                         | blocked (the shell answers deny)                                                                                                                     | blocked (a failing hook denies); a hook timeout lets the call through, so the hook keeps to 20 s                                 |
-| A review                | asks you                                                                                                                             | denied                                                                                                                                               | denied                                                                                                                           |
-| Run gates (`requires:`) | yes: `apply` adds the policy hook on `SubagentStart` and `SubagentStop` when the policy has gates or budgets, which record each step | no: Codex 0.170.0 has no subagent start/stop events, so a gate's steps are never recorded and it denies (fails closed); budgets count calls as usual | not set up yet: `apply` registers no step events, so a gate denies (fails closed)                                                |
+| Run gates (`requires:`) | yes: `apply` adds the policy hook on `SubagentStart` and `SubagentStop` when the policy has gates or budgets, which record each step | no: Codex 0.170.0 has no subagent start/stop events, so a gate's steps are never recorded and it denies (fails closed); budgets count calls as usual | `apply` registers subagent start and stop for connected setups and policies that use run history. Tool calls keep the session agent identity.                                                |
 | Trust step              | trust the folder                                                                                                                     | trust the folder and the hook in `/hooks`                                                                                                            | trust the folder                                                                                                                 |
 | Switched off by         | `disableAllHooks`, managed hooks only                                                                                                | `requirements.toml` (`?`)                                                                                                                            | `disableAllHooks` in `.github/copilot/settings*.json`, `.claude/settings*.json` or `~/.copilot/settings.json` (`plan` shows `!`) |
 
@@ -64,10 +63,12 @@ An organization can turn off, on a machine, what a project sets up. `plan` reads
 
 ## Migration
 
+Follow [Upgrade to connect](cli.md#upgrade-to-connect) for the standalone plugin and CLI 0.4/0.5 cutover.
+
 - **Lock format 2.** A project with a setup moves from `lock: 1` to `lock: 2`, which records the workspace. Until you run `nodrail policy lock`, `plan` says so and `apply` waits; `policy export --frozen` keeps working. A project with only a policy stays at `lock: 1`. An older `nodrail` refuses `lock: 2` with a message.
 - **New Team rules.** Teams now let each member load its own skills, which adds one allow per member and skill. Run `nodrail policy lock` to review and record them.
 - **The workspace digest** covers the effective policy too, so a setup's lock changes once more. Run `nodrail policy lock` again.
-- **`plan --json`** keeps `ready` and `active`, and adds `activation`, `revision` and `applied`. The exit code still means "apply could go ahead". `--require-active` is the opt-in that also requires the policy to be enforced.
+- **`plan --json`** keeps `ready` and `active`, and adds `activation`, `revision` and `applied`. The exit code still means "apply could go ahead". `--require-active` also requires a current hook configured for enforcement. On Claude Code, it reads settings. For a connected project, a matching first-check decision in Activity confirms that the hook ran and reported.
 - **`tested:`** is a proposed field: its name and shape may still change.
 
 ## Limits

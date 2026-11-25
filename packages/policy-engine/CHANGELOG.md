@@ -1,5 +1,34 @@
 # Changelog
 
+## Unreleased
+
+- Exercise Windows DPAPI, POSIX permissions, Keychain and stale lock recovery on every test host.
+
+- Read machine credentials through the shared secret store with per-user Windows DPAPI and private POSIX permissions.
+
+- Attach the server's per-call admission evidence to connected hook decision reports.
+
+- Report project check tokens and redacted pause denials from connected hooks. Paused calls leave the local run and session pin unchanged.
+
+- Show the control plane’s named pause reason in connected hooks. Preserve catalog provenance when rendering effective policy.
+
+- Support removing an origin-bound machine credential during destroy. Show a pause message that covers both machine and caller access.
+
+## 0.9.0
+
+One login, then `apply`: connected projects enroll each machine with its own
+origin-bound credential, detect the calling agent per session, and report to
+Inventory without extra tokens.
+
+- Use one validated control-plane origin for enrollment and hooks, and report when a different project takes over the live policy.
+
+- Added an origin-scoped machine credential store and allowed local mode without control-plane coordinates.
+
+- Connected hooks use the configured entry agent when caller metadata is absent, validate project and revision admission, and surface environment takeovers.
+
+- Connected hooks use origin-bound enrollment, check pause on every covered call, and keep deciding with a verified lock during rollout. Decision reports omit arguments by default and distinguish would-deny verdicts.
+- Record the connected hook's latest policy check locally for nodrail status, including when it used cache or could not obtain policy.
+
 ## 0.8.0
 
 The connected hook: a host decides with the control plane's published

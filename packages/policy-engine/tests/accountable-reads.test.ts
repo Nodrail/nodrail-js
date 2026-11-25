@@ -17,7 +17,7 @@ import {
 } from "../src/budget-ledger";
 import { evidenceFile, readEvidence, recordEvidence } from "../src/evidence";
 import { readRemoteConfig, remoteStatuses } from "../src/evidence-remote";
-import { runPolicyCommandLine } from "../src/command-line";
+import { evidencePins, runPolicyCommandLine } from "../src/command-line";
 import { hookEvidence } from "../src/hook-evidence";
 import { budgetAspects, evidenceAspects } from "../src/permission-budgets";
 import { permissionChanges } from "../src/permission-changes";
@@ -143,6 +143,7 @@ describe("Cloud's answers in the hook", { timeout: GIT_TESTS }, () => {
       env: {
         HOME: repo,
         HOST_TOKEN: "host-test",
+        NODRAIL_URL: destination.url,
         NODRAIL_TOKEN: "person-test",
       },
       fetch: async (input, init) => {
@@ -153,6 +154,14 @@ describe("Cloud's answers in the hook", { timeout: GIT_TESTS }, () => {
         );
         if (url.pathname.endsWith("/policy"))
           return Response.json({ source: { digest, text: VERIFIED } });
+        if (url.pathname.endsWith("/access"))
+          return Response.json({
+            agent: "host-test",
+            paused: false,
+            workspace: "acme",
+            environment: "development",
+            project_id: null,
+          });
         expect(url.searchParams.get("workspace_revision")).toBe(workspace);
         expect(url.searchParams.get("gate")).toBe("tested");
         return Response.json({
@@ -168,6 +177,7 @@ describe("Cloud's answers in the hook", { timeout: GIT_TESTS }, () => {
     expect(out).toEqual([]);
     expect(paths).toEqual([
       "/api/v1/runtime/policy",
+      "/api/v1/runtime/access",
       "/api/v1/runtime/evidence/status",
     ]);
   });
@@ -478,6 +488,33 @@ const BUDGET = `- required_engine_version: 5
   per: run
   otherwise: deny
 `;
+test("publication pins the gate addresses and sorted external verifier names", () => {
+  const policy = VERIFIED.replace(
+    "[{ class: externally-verified, verifier: github-actions }]",
+    "[{ class: externally-verified, verifier: other }, { class: runtime-observed }, { class: externally-verified, verifier: github-actions }]",
+  );
+  expect(evidencePins(documentOf(policy))).toMatchObject({
+    bindings: [
+      {
+        evidence: "ci-tests",
+        verifiers: ["github-actions", "other"],
+        subject: "revision",
+      },
+    ],
+    requirements: expect.arrayContaining([
+      {
+        gate: "tested",
+        index: 0,
+        evidence: "ci-tests",
+        authority: "externally-verified",
+        subject: "revision",
+        where: [],
+      },
+    ]),
+  });
+  expect(evidencePins(documentOf(BUDGET))).toBeUndefined();
+  expect(evidencePins(documentOf("[]"))).toBeUndefined();
+});
 const limitsOf = (document: PolicyDocument) =>
   document.version === 4 ? document.limits : [];
 const [publications] = limitsOf(documentOf(BUDGET)) as [NumericBudget];

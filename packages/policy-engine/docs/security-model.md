@@ -13,6 +13,10 @@ This page says what the engine guarantees, and what it leaves to you. Read it be
 - Gates and budgets only make the rules' decision stricter: an action no rule covers stays blocked.
 - The Claude Code hook never lets a file tool write, edit, patch or delete the rule files it loaded, whatever the rules say.
 
+## What pause guarantees
+
+The hook on an enrolled host is part of the trusted data plane, like the kubelet. The caller name it reports is host-asserted. In Claude Code, the root session runs as the project's entry agent declared in `nodrail.yaml`. The hook identifies subagents from host metadata. A pause on a different agent leaves calls by the entry agent subject to their usual rules. Pausing a declared agent is an operational stop for normally behaving hosts. It does not contain a compromised or malicious host. To contain a machine, pause its installation or revoke its credential. The server enforces both regardless of the reported caller. Unidentified callers are blocked while any applicable declared agent is paused.
+
 ## What it doesn't guarantee
 
 **It decides; it doesn't enforce.** Something has to act on the answer. Calls that don't go through the hook or your code aren't seen.

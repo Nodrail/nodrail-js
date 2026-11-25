@@ -16,7 +16,37 @@ export function parseFlags<T extends NonNullable<ParseArgsConfig["options"]>>(
   }
 }
 
-export type Subcommand = (rest: string[], io: Io) => Promise<number> | number;
+type Subcommand = {
+  validate(rest: string[]): unknown;
+  run(rest: string[], io: Io): Promise<number> | number;
+};
+
+export function parsedSubcommand<T>(
+  parse: (rest: string[]) => T,
+  run: (input: T, io: Io) => Promise<number> | number,
+): Subcommand {
+  return { validate: parse, run: (rest, io) => run(parse(rest), io) };
+}
+
+function subcommandOf(
+  table: Record<string, Subcommand>,
+  name: string | undefined,
+) {
+  return name !== undefined && Object.hasOwn(table, name)
+    ? table[name]
+    : undefined;
+}
+
+export function checkSubcommand(
+  table: Record<string, Subcommand>,
+  usage: string,
+  [name, ...rest]: string[],
+) {
+  if (name === "--help" || name === "-h") return;
+  const command = subcommandOf(table, name);
+  if (!command) throw new UsageError(usage);
+  command.validate(rest);
+}
 
 /** Runs `<what> …` from the table; usage when there is no such subcommand. */
 export async function runSubcommand(
@@ -26,14 +56,13 @@ export async function runSubcommand(
   io: Io,
 ): Promise<number> {
   const [what, ...rest] = args;
-  const command =
-    what !== undefined && Object.hasOwn(table, what) ? table[what] : undefined;
+  const command = subcommandOf(table, what);
   try {
     if (!command) {
       io.out(usage);
       return what === "--help" || what === "-h" ? 0 : 2;
     }
-    return await command(rest, io);
+    return await command.run(rest, io);
   } catch (error) {
     io.err(`nodrail: ${describeFailure(error)}`);
     if (error instanceof UsageError) io.err(usage);

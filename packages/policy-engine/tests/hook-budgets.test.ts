@@ -140,6 +140,7 @@ function setup(
     NODRAIL_LEDGER: ledger,
     NODRAIL_RUN: "shared",
     HOST_TOKEN: "test-token",
+    NODRAIL_URL: destination.url,
   };
   const event = { ...call, cwd: root, hook_event_name: "PreToolUse" };
   const run = async (input: Record<string, unknown> = event) => {
@@ -204,6 +205,7 @@ test("checks a shared budget before the run lock and warns when the cache differ
     call_fingerprint: callKey("claude-code", event),
     policy_digest: digest,
     calls: [{ tool: "outbox", operation: "publish" }],
+    budget_ids: ["daily"],
     run: { key: "shared" },
   });
   expect(fetch.mock.calls[1]?.[0]).toBe(
@@ -294,7 +296,10 @@ function successfulOutcome(
 }
 
 function queuedOutcomes(root: string, file: string) {
-  const { binding } = decisionDestination(file, { HOST_TOKEN: "test-token" });
+  const { binding } = decisionDestination(file, {
+    HOST_TOKEN: "test-token",
+    NODRAIL_URL: "http://127.0.0.1:9",
+  });
   const path = join(decisionFolder(root, file, binding), "spool.jsonl");
   return readFileSync(path, "utf8")
     .trim()
@@ -543,8 +548,17 @@ test.each(["on", "watch"] as const)(
       );
       if (url.endsWith("/policy"))
         return Response.json({ source: { text: RULES, digest: policyDigest } });
+      if (new URL(url).pathname.endsWith("/access"))
+        return Response.json({
+          agent: "host-test",
+          paused: false,
+          workspace: "example",
+          environment: "dev",
+          project_id: null,
+        });
       const body = JSON.parse(init.body as string);
       expect(body.policy_digest).toBe(policyDigest);
+      expect(body.agent).toBe("host-test");
       if (url.endsWith("/reserve")) return response("ok", until);
       return Response.json({
         claim_id: body.claim_id,
@@ -561,10 +575,11 @@ test.each(["on", "watch"] as const)(
       enforcing
         ? [
             "/api/v1/runtime/policy",
+            "/api/v1/runtime/access",
             "/api/v1/runtime/budgets/reserve",
             "/api/v1/runtime/budgets/start",
           ]
-        : ["/api/v1/runtime/policy"],
+        : ["/api/v1/runtime/policy", "/api/v1/runtime/access"],
     );
     expect(queuedOutcomes(root, file)).toContainEqual(
       successfulOutcome(event, enforcing ? policyDigest : undefined),
@@ -577,7 +592,7 @@ test("settles declared measurements from the admitted claim when policy is unava
   const key = callKey("claude-code", event)!;
   const sink = decisionSink({
     file,
-    env: { HOST_TOKEN: "test-token" },
+    env: { HOST_TOKEN: "test-token", NODRAIL_URL: "http://127.0.0.1:9" },
     home: root,
     host: "claude-code",
     document: { version: 1, rules: [] },

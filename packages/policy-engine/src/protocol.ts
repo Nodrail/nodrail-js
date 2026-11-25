@@ -7,12 +7,37 @@ export { isPlainJson, type JsonValue } from "./json.ts";
 export const SCHEMA_VERSION = 1;
 export const CANONICALIZER_VERSION = 1;
 
+/**
+ * How a hand-back is named to the rules: `claude-code subagenthandback`.
+ * It delivers the subagent's final report to its caller, as a stop does,
+ * and acts on nothing else, so when no rule covers it it goes ahead: a rule
+ * may still deny it or send it to a person, and a receipt contract refuses
+ * an invalid receipt. Blocking it by default would strand every subagent
+ * that ends this way.
+ */
+export const HANDBACK_ACTION = {
+  tool: "claude-code",
+  operation: "subagenthandback",
+} as const;
+
 export type ActionDescriptor = {
   tool: string;
   operation: string;
   resource: { kind: string; id: string };
   params: Record<string, JsonValue>;
 };
+
+/** The descriptor visible in a pause denial. */
+export function redactPausedAction(
+  descriptor: ActionDescriptor,
+): ActionDescriptor {
+  return {
+    tool: descriptor.tool,
+    operation: descriptor.operation,
+    resource: { kind: descriptor.resource.kind, id: "redacted" },
+    params: {},
+  };
+}
 
 const sha256 = (text: string) =>
   `sha256:${createHash("sha256").update(text).digest("hex")}`;

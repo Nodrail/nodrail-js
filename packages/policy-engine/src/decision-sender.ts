@@ -3,6 +3,8 @@
 // credential. A batch file stays until every decision and outcome in it is
 // in or refused, so a failure retries it whole, with the same keys: the
 // control plane answers a retried key with the same row.
+import { readHookConnection } from "./hook-connection.ts";
+import { hookCredential } from "./hook-credential.ts";
 import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import {
@@ -39,6 +41,7 @@ type Sender = {
   send: typeof fetch;
   counts: Counts;
   ids: Record<string, string>;
+  includeArguments?: boolean;
 };
 
 async function post(sender: Sender, path: string, body: unknown) {
@@ -124,13 +127,22 @@ async function sendDecisions(sender: Sender, decisions: QueuedDecision[]) {
   }
 }
 
+function redactDecision(item: QueuedDecision["item"]) {
+  const { params: _params, resource, reason: _reason, ...safe } = item;
+  const kind = (resource as { kind?: unknown } | null)?.kind;
+  return { ...safe, params: {}, resource: { kind, id: "redacted" } };
+}
+
 /** Keep each recorded step in order with the decisions around it. */
 async function sendHistory(sender: Sender, entries: Queued[]) {
   let decisions: QueuedDecision[] = [];
   let digest: unknown;
   for (const entry of entries) {
     if (entry.type === "decision") {
-      decisions.push(entry);
+      const item = sender.includeArguments
+        ? entry.item
+        : redactDecision(entry.item);
+      decisions.push({ ...entry, item });
       digest = entry.item.policy_digest;
     }
     if (entry.type !== "step") continue;
@@ -156,13 +168,14 @@ function actionsForOutcome(ids: Sender["ids"], key: string) {
 async function sendOutcomes(sender: Sender, outcomes: QueuedOutcome[]) {
   for (const {
     key,
+    agent,
     outcome,
     measured,
     tokens,
     settlements,
     cancellation,
   } of outcomes) {
-    const body = { outcome, measured, tokens };
+    const body = { outcome, measured, tokens, agent };
     for (const target of settlements ?? [])
       await sendOutcome(sender, "/budgets/settle", {
         call_fingerprint: target.key,
@@ -225,6 +238,11 @@ async function sendBatch(sender: Sender, path: string) {
     tally,
     entries.filter((entry): entry is QueuedOutcome => entry.type === "outcome"),
   );
+  const observation = entries
+    .filter((entry) => entry.type === "inventory")
+    .at(-1);
+  if (observation)
+    await post(tally, "/inventory", observation.item).catch(() => undefined);
   if (digest !== undefined)
     await post(tally, "/heartbeat", { policy_digest: digest }).catch(
       () => undefined,
@@ -253,7 +271,22 @@ export async function sendDecisionQueue(
   let error: string | undefined;
   const ids = readIds(folder);
   try {
-    const { url, credential, binding } = decisionDestination(file, env);
+    const config = JSON.parse(readFileSync(file, "utf8")) as {
+      decide?: string;
+    };
+    const connected =
+      config.decide === "cloud" ||
+      (config.decide === undefined && basename(file) === "connect.json");
+    const settings = connected ? readHookConnection(file, true) : null;
+    const verified =
+      settings?.decide === "cloud"
+        ? { config: settings, token: await hookCredential(settings, env) }
+        : undefined;
+    const { url, credential, binding } = decisionDestination(
+      file,
+      env,
+      verified,
+    );
     // Unbound queues from older releases and queues for previous connections
     // stay on disk without being sent with the current credential.
     if (basename(folder) !== binding)
@@ -266,6 +299,8 @@ export async function sendDecisionQueue(
       send,
       counts,
       ids,
+      includeArguments:
+        settings?.decide === "cloud" && settings.report_arguments,
     };
     let waiting = batches(folder);
     while (waiting.length > 0 && Date.now() < until) {

@@ -12,7 +12,7 @@ import { connectionsField } from "@nodrail/policy-engine/yaml";
 import { z } from "zod";
 import type { Env } from "../config.ts";
 import type { CompiledContracts } from "../contracts/engine.ts";
-import type { Io } from "../io.ts";
+import { UsageError, type Io } from "../io.ts";
 import { connectionEnv } from "../setup/connections.ts";
 import { spawn } from "../spawn.js";
 import { VERSION } from "../version.ts";
@@ -93,13 +93,24 @@ export async function runMediated(
   return true;
 }
 
+export function parseConnectionArgs([verb, path, name, ...rest]: string[]) {
+  if (verb !== "run" || !path || !name || rest.length > 0)
+    throw new UsageError(
+      "Usage: nodrail connection run <connections file> <name>",
+    );
+  return { path, name };
+}
+
 /** Runs `nodrail connection <args>` and answers its exit code. */
 export async function connection(args: string[], io: Io): Promise<number> {
-  const [verb, path, name, ...rest] = args;
-  if (verb !== "run" || !path || !name || rest.length > 0) {
-    io.err("Usage: nodrail connection run <connections file> <name>");
+  let target: ReturnType<typeof parseConnectionArgs>;
+  try {
+    target = parseConnectionArgs(args);
+  } catch (error) {
+    io.err((error as Error).message);
     return 2;
   }
+  const { path, name } = target;
   try {
     const streams = { stdin: process.stdin, stdout: process.stdout };
     if (await runMediated(path, name, io.env, streams)) return 0;

@@ -170,17 +170,24 @@ async function answered(
   return SUBMIT_EXIT.stored;
 }
 
-export async function submit(rest: string[], io: Io) {
+export function parseSubmitArgs(rest: string[]) {
   const { values, positionals } = parseEvidenceArgs(rest);
   const [name, extra] = positionals;
   if (!name || extra !== undefined || !values.result)
     throw new UsageError(
       "Usage: nodrail evidence submit <name> --result <file> --workspace <id> -e <environment>",
     );
+  return { name, values, result: values.result };
+}
+
+export async function submitEvidence(
+  { name, values, result }: ReturnType<typeof parseSubmitArgs>,
+  io: Io,
+) {
   const { workspace, environment, key } = target(values, io);
   const document = policyHere({ cwd: io.cwd, home: io.home, ...values });
   const contract = contractOf(document, name, "externally-verified");
-  const value = readValue(io, values.result);
+  const value = readValue(io, result);
   // Cloud validates again against the published contract; this says early.
   const checked = checkValue(contract.shape, value, PAYLOAD_BYTES.evidence);
   if (checked.state === "invalid")

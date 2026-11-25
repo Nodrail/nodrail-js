@@ -320,7 +320,6 @@ describe("guard", () => {
     const server = fakeNodrail();
     const env: Record<string, string | undefined> = {};
     const nodrail = createNodrail({
-      url: "https://nodrail.test",
       fetch: server.fetch,
       env,
     });
@@ -328,6 +327,7 @@ describe("guard", () => {
     const send = nodrail.guard(work, { name: "send" });
     await expect(send({})).resolves.toContain("not configured");
     env.NODRAIL_CREDENTIAL = "c";
+    env.NODRAIL_URL = "https://nodrail.test";
     await expect(send({})).resolves.toBe("ran");
     expect(work).toHaveBeenCalledTimes(1);
   });
@@ -369,6 +369,7 @@ describe("guard", () => {
       return server.fetch(url, init);
     }) as unknown as typeof fetch;
     const nodrail = createNodrail({
+      url: "https://nodrail.test",
       credential: "c",
       fetch: send,
       env: {},
@@ -410,8 +411,24 @@ describe("configuration", () => {
     expect(work).not.toHaveBeenCalled();
   });
 
+  test("an SDK URL override cannot inherit a credential from another origin", async () => {
+    const server = fakeNodrail();
+    const nodrail = createNodrail({
+      url: "https://other.example",
+      env: { NODRAIL_URL: "https://issuer.example", NODRAIL_CREDENTIAL: "c" },
+      fetch: server.fetch,
+    });
+    const work = vi.fn();
+    await expect(nodrail.guard(work, { name: "send" })()).resolves.toContain(
+      "Pair NODRAIL_URL",
+    );
+    expect(server.seen()).toHaveLength(0);
+    expect(work).not.toHaveBeenCalled();
+  });
+
   test("the service being unreachable blocks", async () => {
     const nodrail = createNodrail({
+      url: "https://nodrail.test",
       credential: "c",
       env: {},
       fetch: (() =>

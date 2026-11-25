@@ -146,6 +146,31 @@ describe("everything else blocks", () => {
     },
   );
 
+  test("preserves a pause denial with redacted digests while requiring full digests for READY", async () => {
+    const redacted = descriptorDigest(INSTALL, {
+      ...descriptor,
+      resource: { ...descriptor.resource, id: "redacted" },
+      params: {},
+    });
+    const reply = {
+      reason: "agent_paused",
+      descriptor_digest: redacted,
+      action_digest: actionDigest(ACTION, redacted),
+    };
+    await expect(
+      run(
+        fakeFetch({ submit: { body: status({ ...reply, code: "DENIED" }) } }),
+      ),
+    ).resolves.toMatchObject({
+      allowed: false,
+      code: "DENIED",
+      reason: "agent_paused",
+    });
+    await expect(
+      run(fakeFetch({ submit: { body: status(reply) } })),
+    ).resolves.toMatchObject(blockedWith("DIGEST_MISMATCH"));
+  });
+
   test("the server describing a different call", async () => {
     await expect(
       run(

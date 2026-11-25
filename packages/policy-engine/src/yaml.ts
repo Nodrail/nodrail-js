@@ -1,3 +1,4 @@
+export { evidencePins } from "./evidence-pins.ts";
 export { compilePolicies } from "./compile.ts";
 export { renderPolicies } from "./render.ts";
 export {
@@ -104,3 +105,5 @@ export type {
 } from "./policies.ts";
 
 export { DEFAULT_CONTROL_PLANE_URL } from "./connect-schema.ts";
+
+export { catalogRuleIds, catalogRuleMarker } from "./catalog-provenance.ts";

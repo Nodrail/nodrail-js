@@ -15,6 +15,7 @@ import { readSubject, type SubjectReader } from "./subject.ts";
 export type AuthorizeOptions = {
   /** The run this call belongs to, so gates and budgets can see its history. */
   run?: RunRef;
+  agent?: string;
   /**
    * Reads the work revision, sent with the run at submit and read again at
    * permit. Only read when there is a run; unreadable is sent as null
@@ -37,13 +38,18 @@ async function resolve(
   client: NodrailClient,
   descriptor: ActionDescriptor,
   key: string,
-  { run, subject }: AuthorizeOptions,
+  { run, subject, agent }: AuthorizeOptions,
 ): Promise<Decision> {
   if (!isPlainJson(descriptor.params)) throw new Blocked("INVALID_ACTION");
   const read = () =>
     run && subject !== undefined ? readSubject(subject) : undefined;
-  const status = await client.submit(descriptor, key, run, read());
-  assertSameCall(status, descriptor);
+  const status = await client.submit(descriptor, key, run, {
+    subject: read(),
+    agent,
+  });
+  // Pause denials can carry redacted digests. A READY response still requires the full descriptor.
+  if (status.code !== "DENIED" || status.reason !== "agent_paused")
+    assertSameCall(status, descriptor);
   // Only READY goes on. Anything else, a hold an older server still answers
   // with included, is a deny with its reason: nothing here waits for it.
   if (status.code !== "READY")

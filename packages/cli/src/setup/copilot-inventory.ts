@@ -1,3 +1,4 @@
+import { json } from "./hook-settings.ts";
 import { readdirSync } from "node:fs";
 import { join } from "node:path";
 import type { Env } from "../config.ts";
@@ -5,7 +6,6 @@ import { COPILOT_HOOKS, COPILOT_MCP } from "./copilot.ts";
 import {
   definitions,
   hostPlaces,
-  json,
   userDefinitions,
   type Unmanaged,
 } from "./inventory.ts";

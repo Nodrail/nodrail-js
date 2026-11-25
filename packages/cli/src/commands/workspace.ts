@@ -71,9 +71,16 @@ function projectOf(root: string) {
   return { id, name: projectName(root) };
 }
 
-function revisionBody(root: string) {
-  const project = projectOf(root);
-  const lock = lockOf(root);
+export function revisionBody(
+  root: string,
+  proposed?: { lock: Lock; projectId: string },
+) {
+  const project = proposed
+    ? { id: proposed.projectId, name: projectName(root) }
+    : projectOf(root);
+  const lock = proposed?.lock ?? lockOf(root);
+  if (!lock.workspace)
+    throw new CliError(`${LOCK_FILE} must lock a workspace.`);
   const files = [lock.manifest, ...lock.files, ...lock.workspace.files];
   const unique = [...new Map(files.map((file) => [file.path, file])).values()];
   return {
@@ -97,7 +104,7 @@ async function publish(command: Command, root: string) {
       "Publishing needs a person to confirm. Run it at a terminal, or pass --yes.",
     );
   const body = revisionBody(root);
-  const api = await command.api();
+  const api = await command.api(root);
   const { revision: current } = await api.intendedRevision(body.project_id);
   if (current?.revision === body.revision) {
     command.print(
@@ -139,7 +146,7 @@ function hostLines(root: string, intended: IntendedRevision | null) {
 
 async function show(command: Command, root: string) {
   const { id, name: project } = projectOf(root);
-  const { revision } = await (await command.api()).intendedRevision(id);
+  const { revision } = await (await command.api(root)).intendedRevision(id);
   const locked = lockOf(root).workspace.sha256;
   command.print({ project, intended: revision, locked }, () =>
     [

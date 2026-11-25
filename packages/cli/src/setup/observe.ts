@@ -1,3 +1,4 @@
+import { json } from "./hook-settings.ts";
 import { createHash, randomBytes } from "node:crypto";
 import {
   existsSync,
@@ -17,7 +18,7 @@ import {
   type SpanRecord,
 } from "@nodrail/policy-engine/command-line";
 import type { Env } from "../config.ts";
-import { OBSERVE_PREFIX } from "./claude-code.ts";
+import { isObserveHook } from "./claude-code.ts";
 import { TELEMETRY_FILE } from "./connections.ts";
 import { codexHooks, hookActivation } from "./codex.ts";
 import { copilotActivation, COPILOT_HOOKS } from "./copilot.ts";
@@ -29,7 +30,6 @@ import {
   codexUnmanaged,
   fileDrift,
   hookAgent,
-  json,
   type Drift,
   type Unmanaged,
 } from "./inventory.ts";
@@ -140,7 +140,7 @@ async function hostStatus(
     (hook) =>
       hook.source === "project" &&
       hook.eventName === "sessionStart" &&
-      (hook.command ?? "").startsWith(OBSERVE_PREFIX),
+      isObserveHook(hook.command ?? ""),
   );
   return {
     host,
@@ -173,9 +173,7 @@ function copilotEntry(root: string) {
 
 /** Whether nodrail's Copilot hook file runs the observation at session start. */
 const copilotObserving = (root: string): Observing =>
-  (copilotHook(root, "sessionStart") ?? "").startsWith(OBSERVE_PREFIX)
-    ? "on"
-    : "off";
+  isObserveHook(copilotHook(root, "sessionStart") ?? "") ? "on" : "off";
 
 function copilotHook(root: string, event: string) {
   const hooks = (json(join(root, COPILOT_HOOKS))?.hooks ?? {}) as Record<
@@ -194,9 +192,7 @@ function claudeObserving(root: string): Observing {
       hooks?: { SessionStart?: { hooks?: { command?: string }[] }[] };
     };
     return (settings.hooks?.SessionStart ?? []).some((group) =>
-      (group.hooks ?? []).some((hook) =>
-        (hook.command ?? "").startsWith(OBSERVE_PREFIX),
-      ),
+      (group.hooks ?? []).some((hook) => isObserveHook(hook.command ?? "")),
     )
       ? "on"
       : "off";

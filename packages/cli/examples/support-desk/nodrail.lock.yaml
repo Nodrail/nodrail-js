@@ -5,7 +5,7 @@ lock: 2
 engine: 5
 manifest:
   path: nodrail.yaml
-  sha256: "e72c6d558cf83d3fe37d273edd0352242181c49b97ad5c3492c096e0a366d7b9"
+  sha256: "001e490348958d70db04839d4a08327ae3dec367bf0603b0f737d34fad87a12a"
 modules:
   - id: "@nodrail/read-only"
     version: 1.0.1
@@ -37,7 +37,7 @@ order:
 effective:
   sha256: "07ced3c72aecbc65744828db50d8021a13ea19b040a46a85d8e298490cfa951f"
 workspace:
-  sha256: "8b472d71f0740f8de8880130df93b8f9595f531ed9a2c3646fc0e0b06c7acff0"
+  sha256: "f89600cd841920abcde43c1eaa355faa12ea6b9933b98f825e951d86345e0f50"
   files:
     - path: resources/marketing.md
       sha256: "8f75f09d1de60638a6119fd151831d0e1ebcabea5f6dbba73b4afc080d6e27a6"

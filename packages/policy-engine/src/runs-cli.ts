@@ -90,11 +90,22 @@ function report(runs: { run: string; events: RunEvent[] }[], out: Out) {
   }
 }
 
+export function checkRunsArgs([what = "list", run, ...rest]: string[]) {
+  if (
+    rest.length > 0 ||
+    !["list", "show", "report"].includes(what) ||
+    (what === "show" ? !run : run !== undefined)
+  )
+    throw new Error("Usage: nodrail-policy runs [list | show <run> | report]");
+  return { what, run };
+}
+
 export function runsCommand(
-  [what = "list", run]: string[],
+  args: string[],
   out: Out,
   env: Environment = process.env,
 ) {
+  const { what, run } = checkRunsArgs(args);
   const directory = ledgerDirectory(process.cwd(), env);
   if (what === "show" && run) {
     const events = readRun(directory, run);
@@ -107,10 +118,6 @@ export function runsCommand(
   }
   const runs = readRuns(directory);
   if (what === "report") return (report(runs, out), 0);
-  if (what !== "list") {
-    out.error("Usage: nodrail-policy runs [list | show <run> | report]");
-    return 2;
-  }
   if (!runs.length) out.log(`No runs recorded in ${directory}.`);
   for (const { run: key, events } of runs) {
     const steps = events.filter(

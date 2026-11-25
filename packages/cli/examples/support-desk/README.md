@@ -1,6 +1,6 @@
-# Support desk: one setup, two hosts
+# Support desk: one setup, three hosts
 
-A two-agent team, set up on Claude Code or Codex from the same files. **marketing** starts every session and writes from the handbook. **support** answers from the handbook's internal collection too. Who may do what is in the policy, not in the agents' instructions, and each tool call is checked before it runs.
+A two-agent team, set up on Claude Code, Codex or Copilot from the same files. **marketing** starts every session and writes from the handbook. **support** answers from the handbook's internal collection too. Who may do what is in the policy, not in the agents' instructions, and each tool call is checked before it runs.
 
 | | marketing | support |
 |---|---|---|
@@ -10,11 +10,14 @@ A two-agent team, set up on Claude Code or Codex from the same files. **marketin
 | Publish to any other channel | denied | denied |
 | Hand work to the other | may start support | can't start anyone |
 
-You need the `nodrail` that ships this example, Node 22 or later, and Claude Code 2.1.295 or Codex 0.169.0 or later, signed in with your own account. No Nodrail account and no other credentials.
+You need the `nodrail` that ships this example, Node 22 or later, and Claude Code 2.1.295 or Codex 0.169.0 or GitHub Copilot CLI 1.0.114 or later, signed in with your own account. On Windows, use Claude Code. This example needs no Nodrail account.
 
 `nodrail.yaml` names the versions this example was last run with (`tested:`); see [Compatibility](../../docs/compatibility.md) for what was verified and the limits. `plan` shows `✓ tested` when yours match, and `? tested: unverified here: …` when they don't. That is information, not an error: newer hosts are expected to work, but nobody has shown it yet.
 
 ## Set it up
+
+Use one host per checkout for this walkthrough. Copy the example, then run
+the plan and apply pair for your host.
 
 ```sh
 nodrail example support-desk ./desk
@@ -22,18 +25,21 @@ nodrail plan  ./desk --runtime claude-code
 nodrail apply ./desk --runtime claude-code
 nodrail plan  ./desk --runtime codex
 nodrail apply ./desk --runtime codex
+nodrail plan  ./desk --runtime copilot
+nodrail apply ./desk --runtime copilot
 ```
 
 `plan` only reads: it shows the revision it sets up, the files each host gets, the two connections with the exact command each runs, and the checks. It starts nothing and reads no secret. `apply` shows the same plan, asks, and only then starts each connection once to check it offers what it declares, before writing.
 
-Codex runs a project's hooks only once you trust them. After `apply --runtime codex`, open `codex` in `./desk`, trust the folder, run `/hooks` and trust nodrail's hook, and quit. Then check that both hosts enforce the policy:
+Codex runs a project's hooks only once you trust them. After `apply --runtime codex`, open `codex` in `./desk`, trust the folder, run `/hooks` and trust nodrail's hook, and quit. For Copilot, open `copilot --agent marketing` in `./desk` and choose to remember the folder. For each host you set up, check the installed hook:
 
 ```sh
 nodrail plan ./desk --runtime claude-code --require-active   # Policy hook: configured
 nodrail plan ./desk --runtime codex --require-active         # Policy hook: verified
+nodrail plan ./desk --runtime copilot --require-active       # Policy hook: configured
 ```
 
-Each exits with 1 until its host runs the hook. Claude Code can't be asked which hooks it runs, so it says `configured`: the hook is in place and no settings file turns hooks off. Codex is asked, so it says `verified`.
+`--require-active` requires the current, enforcing hook. For Claude Code and Copilot, `configured` means the hook is present and enabled in settings. For Codex, `verified` means Codex confirmed hook trust. To verify Claude Code at runtime, try the calls below. For a connected project, use **Verify the first check-in** in **Agents → Connect a project** and look for the matching Activity decision.
 
 The lock records the whole workspace: the policy, the agents' instructions and every skill file. If you change any of them, `plan` names the file and `apply` waits until you run `nodrail policy lock` in `./desk` and review the change.
 
@@ -51,6 +57,15 @@ find desk/outbox -name '*.md' ! -name README.md | wc -l   # 0 publications
 ```
 
 Both agents are set up with the `cite-sources` skill, which asks them to end an answer from the handbook with a `Sources: …` line.
+
+For Copilot, open `copilot --agent marketing` in `./desk` and ask for a
+public search and an internal search. The public search is allowed and the
+internal one is denied. Copilot checks tool calls against the session's entry
+agent, including calls from subagents.
+
+## Share the project
+
+Commit `.gitignore`, `nodrail.yaml`, `nodrail.lock.yaml`, and the project sources such as rules, resources, skills, and handbook files. Each teammate runs `nodrail apply` to recreate host files. The example ignores generated host settings, hooks, MCP configuration, and `.nodrail/` state, along with local reads and publications.
 
 ## Swap the handbook for your own search service
 

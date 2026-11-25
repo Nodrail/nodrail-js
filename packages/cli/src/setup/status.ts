@@ -2,7 +2,7 @@ import { HOST_NAMES } from "./state.ts";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Env } from "../config.ts";
-import { readLock } from "../project/lockfile.ts";
+import { readLock, type Lock } from "../project/lockfile.ts";
 import { claudeManaged, MANAGED_FOLDERS, pluginOnly } from "./managed.ts";
 import { EFFECTIVE_FILE } from "./team-files.ts";
 import type { Runtime, SetupState } from "./state.ts";
@@ -14,20 +14,22 @@ import type { Runtime, SetupState } from "./state.ts";
 export type Revision = { policy: string | null; workspace: string | null };
 
 /** The revision nodrail.lock.yaml records, as it is on disk. */
-export function lockedRevision(root: string): Revision {
-  let text: string;
-  try {
-    text = readFileSync(join(root, "nodrail.lock.yaml"), "utf8");
-  } catch {
-    return { policy: null, workspace: null };
-  }
-  const lock = readLock(text);
+export function lockedRevision(root: string, proposed?: Lock): Revision {
+  const lock = proposed ?? readLockedRevision(root);
   return typeof lock === "string"
     ? { policy: null, workspace: null }
     : {
         policy: lock.effective?.sha256 ?? null,
         workspace: lock.workspace?.sha256 ?? null,
       };
+}
+
+function readLockedRevision(root: string) {
+  try {
+    return readLock(readFileSync(join(root, "nodrail.lock.yaml"), "utf8"));
+  } catch {
+    return "";
+  }
 }
 
 /**
@@ -43,9 +45,21 @@ export type ActivationState =
   "verified" | "configured" | "inactive" | "unknown";
 export type Activation = { state: ActivationState; detail: string };
 
-/** Whether automation may count on the policy being enforced. */
+/** Whether the hook is configured and the host settings allow it to run. */
 export const enforced = (activation: Activation) =>
   activation.state === "verified" || activation.state === "configured";
+
+/** Render what the host has established, and how to observe real enforcement. */
+export function hookStatus(active: Activation, connected: boolean) {
+  if (active.state === "configured") {
+    const proof = connected
+      ? "Confirm it runs with the first-check decision in Agents → Connect a project."
+      : "Start a host session and try a tool call covered by your policy to confirm.";
+    return `Hook configured: ${active.detail}. ${proof}`;
+  }
+  if (active.state === "verified") return `Hook active: ${active.detail}.`;
+  return `Hook status: ${active.detail}.`;
+}
 
 /** A settings file's JSON object, or null when there is none or it isn't one. */
 function settingsAt(path: string): Record<string, unknown> | null {
@@ -151,6 +165,6 @@ export const missingStateNote = (
 ) =>
   state === null && conflicted.some((path) => path.startsWith(".nodrail/"))
     ? [
-        ".nodrail/setup-state.json is missing, so nodrail owns none of the files marked !. If an earlier apply wrote them, restore the state from git; otherwise move them aside. Nothing is overwritten meanwhile.",
+        ".nodrail/setup-state.json is missing, so nodrail owns none of the files marked !. If an earlier apply wrote them, restore the state from a local backup; otherwise move them aside. Nothing is overwritten meanwhile.",
       ]
     : [];

@@ -99,6 +99,24 @@ describe("receipts on the Cloud hook", () => {
     });
   });
 
+  test.each([
+    { receipt: { state: "missing", reason: "" } },
+    { receipt: { state: "missing", reason: 42 } },
+  ])(
+    "a refused receipt with no usable reason reports its state",
+    async (answer) => {
+      const fake = server(answer);
+      const result = await runHook(handback("Done."), env, {
+        fetch: fake.fetch,
+      });
+      expect(result.stdout).toContain(
+        "your receipt can't be accepted: missing",
+      );
+      expect(fake.requests.map((request) => request.path)).toEqual(["/steps"]);
+      expect(fake.requests[0]?.body).not.toHaveProperty("receipt");
+    },
+  );
+
   test("a receipt Cloud refuses denies the hand-back with its reason", async () => {
     const fake = server({
       recorded: false,

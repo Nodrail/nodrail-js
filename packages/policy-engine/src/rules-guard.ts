@@ -238,6 +238,7 @@ export const wordPath = (word: string, cwd: string) =>
 
 const NODRAIL_PROGRAMS = new Set([
   "nodrail",
+  "nodrail.mjs",
   "nodrail-policy",
   "nodrail-claude-hook",
 ]);

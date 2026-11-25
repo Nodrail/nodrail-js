@@ -32,16 +32,19 @@ export function sinkOf(
 ) {
   const report =
     settings?.decide === "cloud" ? run.values.connect : run.values.report;
-  const sink = report
-    ? decisionSink({
-        ...reportingFrom(run, io, report),
-        env: io.env,
-        verified:
-          settings?.decide === "cloud"
-            ? { config: settings, token }
-            : undefined,
-      })
-    : null;
+  const sink =
+    report && (settings?.decide !== "cloud" || token)
+      ? decisionSink({
+          ...reportingFrom(run, io, report),
+          env: io.env,
+          includeArguments:
+            settings?.decide === "cloud" && settings.report_arguments,
+          verified:
+            settings?.decide === "cloud"
+              ? { config: settings, token }
+              : undefined,
+        })
+      : null;
   return sink;
 }
 

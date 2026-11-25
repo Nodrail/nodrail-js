@@ -1,28 +1,26 @@
-import { allowQuietly, deny, type HookResult } from "./actions.ts";
+import { homedir } from "node:os";
+import { recordPolicyCheck } from "./hook-policy-status.ts";
+import { spoolFolder } from "./telemetry.ts";
+import { hookCredential } from "./hook-credential.ts";
+import { allowQuietly } from "./actions.ts";
 import { readHookConnection, type HookConnection } from "./hook-connection.ts";
 import { loadHookPolicy, type HookPolicy } from "./hook-policy.ts";
-import { budgetExecution } from "./hook-budget-execution.ts";
-import type { ConnectionCalls } from "./connections.ts";
 import {
-  claudeAnswerFor,
-  copilotAnswer,
-  copilotEvents,
-  copilotFromClaude,
-  copilotRefusal,
-  copilotSettleEvent,
-  copilotStepEvent,
-} from "./copilot-hook.ts";
-import { hookEvidence } from "./hook-evidence.ts";
+  answer,
+  decideForHost,
+  hostEvent,
+  hookRefusal,
+  isOutcome,
+  type HostEvent,
+} from "./hook-host-event.ts";
+import { evaluateHook, hookOptions } from "./hook-evaluate.ts";
 import { hookIsStep } from "./hook-guard.ts";
 import { hostName, reporterOf, sinkOf } from "./hook-reporting.ts";
-import { policyDigestWarning } from "./hook-policy-digest.ts";
-import { told, type Observed } from "./hook-telemetry.ts";
-import { decideToolCall, toolIntegrity } from "./local-hook.ts";
+import { toolIntegrity } from "./local-hook.ts";
 import type { PolicyDocument } from "./policies.ts";
 import type { Environment } from "./run-key.ts";
 import { hookGuards, type Guards } from "./hook-setup.ts";
-import { protectedPaths } from "./rules-guard.ts";
-import { runHook, runOutcome } from "./run-hook.ts";
+import { runOutcome } from "./run-hook.ts";
 import { recordWatchFailure } from "./watch-audit.ts";
 
 /**
@@ -64,113 +62,23 @@ export type HookIo = {
   fetch?: typeof fetch;
 };
 
-const identityOf = (values: HookRun["values"]) => ({
-  agent: values.agent,
-  installation: values.installation,
-});
-
-type PrepareTool = (event: string) => Promise<() => HookResult>;
-
-/** Read remote conditions together, then judge the patch's parts in host order. */
-async function copilotHook(
-  stdin: string,
-  connections: ConnectionCalls | null,
-  prepare: PrepareTool,
-) {
-  const events = copilotEvents(stdin, Object.keys(connections ?? {}));
-  if (typeof events === "string") return copilotRefusal(events);
-  const prepared = await Promise.all(events.map(prepare));
-  return copilotAnswer(prepared.map((judge) => judge()));
-}
-
-function hookOptions(run: HookRun, guards: Guards) {
-  const { values, document, now, paths } = run;
-  return {
-    document,
-    now,
-    protect: [...protectedPaths(paths), ...(guards.setup?.paths ?? [])],
-    ...guards,
-    host:
-      values.host === "codex" ? ("codex" as const) : ("claude-code" as const),
-    unmatched:
-      values.unmatched === "allow" ? ("allow" as const) : ("deny" as const),
-    ...identityOf(values),
-  };
-}
-
-/** PostToolUse and PostToolUseFailure: a call's outcome, never judged. */
-function isOutcome(stdin: string) {
-  try {
-    const name = (JSON.parse(stdin) as { hook_event_name?: unknown })
-      .hook_event_name;
-    return name === "PostToolUse" || name === "PostToolUseFailure";
-  } catch {
-    return false;
-  }
-}
-
-/** Copilot also runs Claude Code's hooks: the call is Copilot's then. */
-function copilotMode(host: string | undefined, env: Record<string, unknown>) {
-  if (host === "copilot") return "own" as const;
-  return env.COPILOT_HOOK_DEPTH !== undefined &&
-    hostName(host) === "claude-code"
-    ? ("as-claude" as const)
-    : null;
-}
-
-function answer(io: HookIo, result: HookResult) {
-  if (result.stdout) io.write(result.stdout);
-  if (result.stderr) io.writeError(result.stderr);
-  return result.exitCode;
-}
-
-function hostEvent(stdin: string, host: string | undefined, env: Environment) {
-  const copilot = copilotMode(host, env);
-  return {
-    stdin,
-    copilot,
-    step:
-      copilotStepEvent(stdin) ??
-      (copilot ? copilotSettleEvent(stdin) : isOutcome(stdin) ? stdin : null),
-  };
-}
-
-function hookRefusal(event: ReturnType<typeof hostEvent>, reason: string) {
-  if (event.step) return { ...allowQuietly, stderr: reason };
-  return event.copilot === "own"
-    ? copilotRefusal(reason.trim())
-    : deny(reason.trim());
-}
-
-type HostEvent = ReturnType<typeof hostEvent>;
 type RepositoryPolicy = {
   document: PolicyDocument;
   policyDigest: string | null;
 };
 type LoadRepositoryPolicy = () => Promise<RepositoryPolicy | null>;
 
-async function decideForHost(
-  event: HostEvent,
-  connections: ConnectionCalls | null,
-  prepare: PrepareTool,
-  finish = (result: HookResult, _copilot: boolean) => result,
-) {
-  const { stdin, copilot } = event;
-  if (!copilot) return finish((await prepare(stdin))(), false);
-  const copilotInput = copilot === "own" ? stdin : copilotFromClaude(stdin);
-  const result = finish(
-    await copilotHook(copilotInput, connections, prepare),
-    true,
-  );
-  return copilot === "own" ? result : claudeAnswerFor(result);
-}
-
 const emptyPolicy: PolicyDocument = { version: 1, rules: [] };
 
 async function watchFailure(
   run: Omit<HookRun, "document">,
   io: HookIo,
-  failure: { event: HostEvent; guards: Guards; reason: string },
+  failure: {
+    event: HostEvent;
+    guards: Guards;
+    reason: string;
+    block?: boolean;
+  },
 ) {
   const { event, guards, reason } = failure;
   recordWatchFailure({
@@ -182,6 +90,10 @@ async function watchFailure(
     reason,
     warn: (text) => io.writeError(text),
   });
+  if (failure.block) {
+    const refusal = hookRefusal(event, reason);
+    return answer(io, { ...refusal, stderr: refusal.stderr || reason });
+  }
   const base = hookOptions({ ...run, document: emptyPolicy }, guards);
   const result = event.step
     ? allowQuietly
@@ -229,6 +141,25 @@ function connectionFor(values: HookRun["values"]) {
   }
 }
 
+function evaluationFailure(
+  input: Omit<HookRun, "document">,
+  io: HookIo,
+  failure: {
+    event: HostEvent;
+    guards: Guards;
+    settings: HookConnection | null;
+    reason: string;
+  },
+) {
+  const { event, settings, reason } = failure;
+  const block = settings?.decide === "cloud";
+  if (settings?.enforce === "watch")
+    return watchFailure(input, io, { ...failure, block });
+  if (block) return answer(io, hookRefusal(event, reason));
+  io.writeError(reason);
+  return event.step ? 0 : 2;
+}
+
 async function resolveAndEvaluate(
   input: Omit<HookRun, "document">,
   io: HookIo,
@@ -246,31 +177,71 @@ async function resolveAndEvaluate(
     env,
     io.home,
   );
-  const watch = settings?.enforce === "watch";
-  const failure = (reason: string, reply: () => number) =>
-    watch ? watchFailure(input, io, { event, guards, reason }) : reply();
-  const warning = (reason: string) => () => {
-    io.writeError(reason);
-    return event.step ? 0 : 2;
-  };
-  if (error) return failure(error, warning(error));
+  const fail = (reason: string) =>
+    evaluationFailure(input, io, {
+      event,
+      guards,
+      settings,
+      reason,
+    });
+  if (error) return fail(error);
 
-  const file = input.values.connect;
-  const connected =
-    file && settings ? await loadHookPolicy(file, settings, env, io) : null;
+  const { connected, policy } = await resolvePolicy(
+    input.values.connect,
+    { settings, env },
+    io,
+    local,
+  );
   if (typeof connected === "string")
-    return failure(connected, () => answer(io, hookRefusal(event, connected)));
-  const policy = await effectivePolicy(connected, local, io, watch);
-  if (!policy) {
-    const reason = "Nodrail: the hook has no repository policy.\n";
-    return failure(reason, warning(reason));
-  }
+    return answer(io, hookRefusal(event, connected));
+  if (!policy)
+    return fail(
+      connected?.digest
+        ? `Nodrail: locked policy ${connected.digest} is unavailable. Restore connectivity or run nodrail apply to regenerate the matching policy.\n`
+        : "Nodrail: the hook has no repository policy.\n",
+    );
+  if (connected?.warning) io.writeError(connected.warning);
   const run: HookRun = {
     ...input,
     ...policy,
     values: event.copilot ? { ...input.values, host: "copilot" } : input.values,
   };
   return evaluateHook(run, io, { env, event, guards, connected, settings });
+}
+
+async function resolvePolicy(
+  file: string | undefined,
+  { settings, env }: { settings: HookConnection | null; env: Environment },
+  io: HookIo,
+  local: LoadRepositoryPolicy,
+) {
+  const connected =
+    file && settings ? await loadHookPolicy(file, settings, env, io) : null;
+  let policy: RepositoryPolicy | null = null;
+  try {
+    if (typeof connected !== "string")
+      policy = await effectivePolicy(
+        connected,
+        local,
+        io,
+        settings?.enforce === "watch",
+      );
+  } finally {
+    if (file && settings?.decide === "cloud")
+      await recordPolicyCheck(
+        spoolFolder(io.home ?? homedir(), file, "policies"),
+        settings,
+        policy && typeof connected !== "string"
+          ? (connected?.state ?? "cached")
+          : "unavailable",
+        typeof connected === "string"
+          ? connected.trim()
+          : policy
+            ? undefined
+            : "No usable policy matches the lock.",
+      );
+  }
+  return { connected, policy };
 }
 
 async function effectivePolicy(
@@ -285,7 +256,10 @@ async function effectivePolicy(
       policyDigest: connected.digest ?? null,
     };
   try {
-    return await local();
+    const policy = await local();
+    return connected?.digest && policy?.policyDigest !== connected.digest
+      ? null
+      : policy;
   } catch (error) {
     if (!watch) throw error;
     io.writeError(`Nodrail: ${(error as Error).message}\n`);
@@ -293,7 +267,7 @@ async function effectivePolicy(
   }
 }
 
-function finishOutcome(
+async function finishOutcome(
   input: Omit<HookRun, "document">,
   io: HookIo,
   context: {
@@ -311,7 +285,11 @@ function finishOutcome(
       settings?.decide === "cloud" ? settings.policy_digest : undefined,
     values: copilot ? { ...input.values, host: "copilot" } : input.values,
   };
-  const sink = sinkOf(run, io, settings);
+  const token =
+    settings?.decide === "cloud"
+      ? await hookCredential(settings, env, io.home).catch(() => undefined)
+      : undefined;
+  const sink = sinkOf(run, io, settings, token);
   sink?.outcome(event);
   const { report } = reporterOf(run, io, sink);
   return answer(
@@ -327,107 +305,4 @@ function finishOutcome(
       env,
     ),
   );
-}
-
-function warnPolicySkew(run: HookRun, io: HookIo) {
-  if (run.values.report && run.policyDigest && run.paths[0]) {
-    const warning = policyDigestWarning(run.paths[0], run.policyDigest);
-    if (warning) io.writeError(warning);
-  }
-}
-
-async function evaluateHook(
-  run: HookRun,
-  io: HookIo,
-  input: {
-    env: Environment;
-    event: ReturnType<typeof hostEvent>;
-    guards: Guards;
-    connected: HookPolicy | null;
-    settings: HookConnection | null;
-  },
-) {
-  const {
-    env,
-    event: { step, copilot },
-    guards,
-    connected,
-  } = input;
-  const sink = sinkOf(run, io, input.settings, connected?.evidence?.token);
-  warnPolicySkew(run, io);
-  const base = {
-    ...hookOptions(run, guards),
-    ...reporterOf(run, io, sink),
-    ...(copilot ? { keyHost: "copilot" } : {}),
-  };
-  const runs =
-    run.document.version !== 1 ||
-    connected?.digest !== undefined ||
-    connected?.watch === true;
-  if (step) return answer(io, runs ? runHook(step, base, env) : allowQuietly);
-  const watch = connected?.watch === true;
-  const execution = budgetExecution(watch ? null : sink, {
-    env,
-    policyDigest: run.policyDigest ?? null,
-    fetch: io.fetch,
-  });
-  const notices: Observed[] = [];
-  const prepare: PrepareTool = async (event) => {
-    const integrity = watch ? toolIntegrity(event, base) : null;
-    const evidence = integrity
-      ? null
-      : await hookEvidence(event, base, {
-          env,
-          file: run.values.evidence,
-          config: connected ? connected.evidence : undefined,
-        });
-    const options = await execution.prepare(event, {
-      ...base,
-      evidence,
-      observe: copilot ? (item) => notices.push(item) : base.observe,
-    });
-    return () => {
-      const result = runs
-        ? runHook(event, options, env)
-        : decideToolCall(event, options);
-      return watch
-        ? { ...(integrity ?? allowQuietly), stderr: result.stderr }
-        : result;
-    };
-  };
-  return answer(
-    io,
-    await decideForHost(
-      input.event,
-      guards.connections,
-      prepare,
-      (result, patch) => {
-        const final = execution.finish(result, patch);
-        for (const item of notices)
-          base.observe?.(
-            final.stdout && told(item.judged) === "allow"
-              ? deniedPatch(item, final)
-              : item,
-          );
-        return final;
-      },
-    ),
-  );
-}
-
-function deniedPatch(item: Observed, result: HookResult): Observed {
-  const { decision } = item.judged;
-  return {
-    ...item,
-    judged: {
-      ...item.judged,
-      result,
-      decision: decision && {
-        ...decision,
-        outcome: "deny",
-        matchedRuleId: null,
-        explanation: "Another change in the same Copilot patch was denied.",
-      },
-    },
-  };
 }

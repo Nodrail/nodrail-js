@@ -5,6 +5,7 @@ import {
   cpSync,
   existsSync,
   mkdtempSync,
+  mkdirSync,
   readFileSync,
   writeFileSync,
 } from "node:fs";
@@ -41,7 +42,14 @@ describe("nodrail example", () => {
     const copied = await run(parent, ["example", "support-desk", "desk"]);
     expect(copied.code).toBe(0);
     expect(copied.out).toContain("nodrail plan ./desk --runtime claude-code");
-    expect(readFileSync(join(parent, "desk/nodrail.yaml"), "utf8")).toBe(
+    expect(copied.out).not.toContain("Legacy Nodrail setup");
+    const copiedManifest = readFileSync(
+      join(parent, "desk/nodrail.yaml"),
+      "utf8",
+    );
+    const [id, ...source] = copiedManifest.split("\n");
+    expect(id).toMatch(/^id: [a-f0-9-]{36}$/);
+    expect(source.join("\n")).toBe(
       readFileSync(join(SOURCE, "nodrail.yaml"), "utf8"),
     );
     const again = await run(parent, ["example", "support-desk", "desk"]);
@@ -88,6 +96,25 @@ describe("the example, planned and deciding", () => {
     },
     30_000,
   );
+
+  test("an example with a disabled standalone plugin does not need migration", async () => {
+    const home = mkdtempSync(join(tmpdir(), "nodrail-desk-home-"));
+    mkdirSync(join(home, ".claude"));
+    const settings = join(home, ".claude", "settings.json");
+    const terminal = fakeIo({ cwd: desk, home, env });
+    writeFileSync(
+      settings,
+      JSON.stringify({ enabledPlugins: { "nodrail@nodrail": false } }),
+    );
+    await terminal.run("plan", "--runtime", "claude-code");
+    expect(terminal.stdout()).not.toContain("Legacy Nodrail setup");
+    writeFileSync(
+      settings,
+      JSON.stringify({ enabledPlugins: { "nodrail@nodrail": true } }),
+    );
+    await terminal.run("plan", "--runtime", "claude-code");
+    expect(terminal.stdout()).toContain("Legacy Nodrail setup");
+  });
 
   test("decides each call as the README's table says", async () => {
     const policy = await run(desk, ["policy", "export", "--frozen"]);

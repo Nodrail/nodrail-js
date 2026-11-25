@@ -110,7 +110,7 @@ function computeKey(cwd: string, sessionId: string | null) {
  * every later one reuses it, so switching branch can't move work to a run
  * with no history. The first writer wins: a file created only if missing.
  */
-function pinned(file: string, key: () => string | null) {
+function pinned(file: string, key: () => string | null, write: boolean) {
   try {
     const kept = readFileSync(file, "utf8").trim();
     if (kept) return kept.slice(0, MAX_KEY);
@@ -118,7 +118,7 @@ function pinned(file: string, key: () => string | null) {
     // Not pinned yet.
   }
   const computed = key()?.slice(0, MAX_KEY) ?? null;
-  if (!computed) return null;
+  if (!computed || !write) return computed;
   try {
     writeFileSync(file, computed, { flag: "wx" });
     return computed;
@@ -141,18 +141,21 @@ export function runKey(
   cwd: string,
   sessionId: string | null,
   env: Environment = process.env,
+  { pin = true } = {},
 ): string | null {
   const named = env.NODRAIL_RUN?.trim();
   if (named) return named.slice(0, MAX_KEY);
   if (!sessionId) return computeKey(cwd, null)?.slice(0, MAX_KEY) ?? null;
   const directory = sessionsDirectory(cwd, env);
   try {
-    mkdirSync(directory, { recursive: true });
+    if (pin) mkdirSync(directory, { recursive: true });
   } catch {
     // Unpinned, the key is still the right one for this event.
   }
   const name = createHash("sha256").update(sessionId).digest("hex");
-  return pinned(join(directory, name.slice(0, 32)), () =>
-    computeKey(cwd, sessionId),
+  return pinned(
+    join(directory, name.slice(0, 32)),
+    () => computeKey(cwd, sessionId),
+    pin,
   );
 }

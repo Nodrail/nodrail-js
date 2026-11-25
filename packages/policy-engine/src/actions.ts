@@ -483,3 +483,5 @@ export function deny(reason: string): HookResult {
     exitCode: 0,
   };
 }
+
+export { canonicalOrigin } from "./control-plane-origin.ts";

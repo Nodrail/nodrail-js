@@ -184,6 +184,9 @@ describe("fail closed", () => {
     ["not JSON", "{"],
     ["another version", JSON.stringify({ version: 2 })],
     ["briefs not an object", JSON.stringify({ version: 1, briefs: [] })],
+    ["inputs not an object", JSON.stringify({ version: 1, inputs: [] })],
+    ["null record", "null"],
+    ["oversized file", " ".repeat(1024 * 1024 + 1)],
   ])("an unreadable file (%s) blocks", async (_label, text) => {
     const { root } = project(text);
     const fields = await hookContractFields(action, input, {
@@ -195,6 +198,13 @@ describe("fail closed", () => {
         `${CONTRACTS_FILE} can't be read`,
       ) as string,
     });
+  });
+
+  test("a valid empty contracts file leaves an action unchanged", async () => {
+    const { root } = project('{"version":1}');
+    expect(
+      await hookContractFields(action, input, { cwd: root, env: {} }),
+    ).toEqual({ action });
   });
 
   test("a covered call whose checker can't load blocks; an uncovered one never loads it", async () => {

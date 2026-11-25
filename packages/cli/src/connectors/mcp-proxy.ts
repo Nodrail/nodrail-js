@@ -2,9 +2,10 @@
 // server and calls it, so a connection to any provider can be mediated
 // (mediate.ts). Only what a tool client needs: initialize, tools/list and
 // tools/call. A call is sent once; Nodrail never sends it again.
-import { spawn, type ChildProcessByStdio } from "node:child_process";
+import type { ChildProcessByStdio } from "node:child_process";
 import { createInterface } from "node:readline";
 import type { Readable, Writable } from "node:stream";
+import { spawn } from "../spawn.js";
 import {
   mediateTools,
   ProviderUnavailable,

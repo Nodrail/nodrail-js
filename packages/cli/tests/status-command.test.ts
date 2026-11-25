@@ -31,7 +31,7 @@ describe("nodrail status", () => {
     expect(code).toBe(0);
     expect(out).toContain("Claude Code: starts as lead");
     expect(out).toMatch(/Revision: workspace [0-9a-f]{12}, as locked/);
-    expect(out).toContain("Policy hook: configured");
+    expect(out).toContain("Hook configured:");
     expect(out).toContain("Since apply: nothing changed.");
     expect(filesUnder(p.cwd)).toEqual(before);
     const json = JSON.parse((await p.run("status", "--json")).out) as {
@@ -129,7 +129,7 @@ describe("nodrail status", () => {
     const { code, out } = await p.run("status");
     expect(code).toBe(1);
     expect(out).toMatch(
-      /applied from workspace [0-9a-f]{12}; the lock is at [0-9a-f]{12}: run `nodrail plan`, then `nodrail apply`/,
+      /applied from workspace [0-9a-f]{12}; the lock is at [0-9a-f]{12}: run `nodrail plan --runtime claude-code`, then `nodrail apply --runtime claude-code`/,
     );
   });
 
@@ -180,9 +180,7 @@ describe("nodrail status", () => {
       expect(out).not.toContain("MCP server old");
       expect(out).not.toContain("off@curated");
       expect(out).toContain("Codex: starts as lead");
-      expect(out).toContain(
-        "Policy hook: verified, Codex runs nodrail's hook here.",
-      );
+      expect(out).toContain("Hook active: Codex runs nodrail's hook here.");
       expect(out).toContain("hook stop: afplay done.aiff  (user)");
       expect(out).not.toContain("preToolUse: nodrail");
     },

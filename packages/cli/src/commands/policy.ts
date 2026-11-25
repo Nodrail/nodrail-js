@@ -1,11 +1,17 @@
 // `nodrail policy`: the offline rules commands, with no account. They are
 // nodrail-policy's own command line, run in-process, so both behave the same.
 import {
+  checkPolicyArgs,
   runPolicyCommandLine,
   type Io as EngineIo,
 } from "@nodrail/policy-engine/command-line";
 import type { Io } from "../io.ts";
-import { exportFrozen, lock } from "./project.ts";
+import {
+  checkExportArgs,
+  checkLockArgs,
+  exportFrozen,
+  lock,
+} from "./project.ts";
 
 /** A subcommand of `nodrail policy` that nodrail-policy doesn't have. */
 export type PolicySubcommand = (args: string[], io: Io) => Promise<number>;
@@ -16,10 +22,16 @@ export type PolicySubcommand = (args: string[], io: Io) => Promise<number>;
  * here goes to nodrail-policy: init, validate, compile, eval, test, check,
  * exec, hook and runs, with their flags, output and exit codes.
  */
-const ownSubcommands: ReadonlyMap<string, PolicySubcommand> = new Map([
-  ["lock", lock],
-  ["export", exportFrozen],
+const projectPolicy = new Map([
+  ["lock", { run: lock, validate: checkLockArgs }],
+  ["export", { run: exportFrozen, validate: checkExportArgs }],
 ]);
+
+export function checkPolicyCommand([name = "", ...rest]: string[]) {
+  const own = projectPolicy.get(name);
+  if (own) own.validate(rest);
+  else checkPolicyArgs([name, ...rest]);
+}
 
 const engineIo = (io: Io): EngineIo => ({
   log: (text) => io.out(text),
@@ -38,10 +50,12 @@ const engineIo = (io: Io): EngineIo => ({
 export function policy(
   args: string[],
   io: Io,
-  subcommands = ownSubcommands,
+  subcommands?: ReadonlyMap<string, PolicySubcommand>,
 ): Promise<number> {
   const [name = "", ...rest] = args;
-  const own = subcommands.get(name);
+  const own = subcommands
+    ? subcommands.get(name)
+    : projectPolicy.get(name)?.run;
   if (own) return own(rest, io);
   return runPolicyCommandLine(args, engineIo(io));
 }

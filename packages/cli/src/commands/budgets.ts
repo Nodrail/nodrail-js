@@ -25,7 +25,12 @@ import { visibleLines } from "../api.ts";
 import { CliError, UsageError, type Io } from "../io.ts";
 import { windowOf } from "../setup/accountable.ts";
 import { policyHere } from "./policy-here.ts";
-import { parseFlags, runSubcommand } from "./subcommands.ts";
+import {
+  checkSubcommand,
+  parseFlags,
+  parsedSubcommand,
+  runSubcommand,
+} from "./subcommands.ts";
 
 export const BUDGETS_USAGE = `Usage:
   nodrail budgets status [--run <run>] [--policy <file>] [--json]
@@ -133,7 +138,7 @@ function runsHere(io: Io, run: string | undefined): RunEvents[] {
   return [{ run, events }];
 }
 
-function status(rest: string[], io: Io) {
+function parseStatusArgs(rest: string[]) {
   const { values, positionals } = parse(rest);
   if (
     positionals.length > 0 ||
@@ -142,6 +147,10 @@ function status(rest: string[], io: Io) {
     values.note
   )
     throw new UsageError("Usage: nodrail budgets status [--run <run>]");
+  return values;
+}
+
+function status(values: ReturnType<typeof parseStatusArgs>, io: Io) {
   const limits = limitsOf(
     policyHere({ cwd: io.cwd, home: io.home, policy: values.policy }),
   );
@@ -201,7 +210,7 @@ function status(rest: string[], io: Io) {
   return 0;
 }
 
-function reconcileCommand(rest: string[], io: Io) {
+function parseReconcileArgs(rest: string[]) {
   const { values, positionals } = parse(rest);
   const [key, extra] = positionals;
   const note = values.note?.trim();
@@ -215,6 +224,13 @@ function reconcileCommand(rest: string[], io: Io) {
       "Usage: nodrail budgets reconcile <key> --consumed|--released --note <why>",
     );
   const word = values.consumed ? ("consumed" as const) : ("released" as const);
+  return { key, note, word, values };
+}
+
+function reconcileCommand(
+  { key, note, word, values }: ReturnType<typeof parseReconcileArgs>,
+  io: Io,
+) {
   const ledger = ledgerDirectory(io.cwd, io.env);
   const holding = runsHere(io, values.run).filter((run) =>
     run.events.some((e) => e.type === "budget.reserved" && e.key === key),
@@ -258,11 +274,14 @@ function reconcileCommand(rest: string[], io: Io) {
   return 0;
 }
 
+const subcommands = {
+  status: parsedSubcommand(parseStatusArgs, status),
+  reconcile: parsedSubcommand(parseReconcileArgs, reconcileCommand),
+};
+
+export const checkBudgetArgs = (args: string[]) =>
+  checkSubcommand(subcommands, BUDGETS_USAGE, args);
+
 /** `nodrail budgets <status|reconcile> …`; answers its exit code. */
 export const budgets = (args: string[], io: Io) =>
-  runSubcommand(
-    { status, reconcile: reconcileCommand },
-    BUDGETS_USAGE,
-    args,
-    io,
-  );
+  runSubcommand(subcommands, BUDGETS_USAGE, args, io);

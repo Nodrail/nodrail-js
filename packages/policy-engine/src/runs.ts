@@ -366,8 +366,7 @@ export type BudgetState = {
 const stepOf = (event: RunEvent) => event.step;
 
 /** Whether this budget covers the action being decided, and what it counts. */
-function inScope(budget: PolicyBudget, run: RunContext) {
-  const agent = run.step?.agent ?? MAIN_AGENT;
+function inScope(budget: PolicyBudget, run: RunContext, agent: string) {
   if (budget.agent !== null && budget.agent !== agent) return null;
   const step = run.step?.id ?? null;
   return (event: RunEvent) =>
@@ -384,9 +383,10 @@ function inScope(budget: PolicyBudget, run: RunContext) {
 export function budgetState(
   budget: PolicyBudget,
   run: RunContext | null,
+  caller = run?.step?.agent ?? MAIN_AGENT,
 ): BudgetState | null {
-  if (!run) return budgetWithoutRun(budget);
-  const counts = inScope(budget, run);
+  if (!run) return budgetWithoutRun(budget, caller);
+  const counts = inScope(budget, run, caller);
   if (!counts) return null;
   const events = run.events.filter(counts);
   const { metric } = budget;
@@ -415,8 +415,11 @@ export function budgetState(
 }
 
 /** Without a run the action is the main agent's, outside any step. */
-function budgetWithoutRun(budget: PolicyBudget): BudgetState | null {
-  if (budget.agent !== null && budget.agent !== MAIN_AGENT) return null;
+function budgetWithoutRun(
+  budget: PolicyBudget,
+  caller: string,
+): BudgetState | null {
+  if (budget.agent !== null && budget.agent !== caller) return null;
   return {
     id: budget.id,
     name: budget.name,

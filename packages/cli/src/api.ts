@@ -28,7 +28,13 @@ export const visible = (text: string) => escapeControls(text, new Set());
 export const visibleLines = (text: string) =>
   escapeControls(text, new Set(["\n", "\t"]));
 
-export type Scope = "read" | "rules:write" | "inventory:write";
+export type Scope =
+  | "read"
+  | "rules:write"
+  | "agents:manage"
+  | "members:manage"
+  | "workspace:settings"
+  | "inventory:write";
 
 export type Me = {
   token: {
@@ -43,6 +49,7 @@ export type Me = {
   person: { name: string };
   workspace: { id: string; name: string; slug: string };
   role: string;
+  effective_scopes?: Scope[];
   can: { read: boolean; rules_write: boolean };
   environments: { slug: string; name: string; default: boolean }[];
 };
@@ -82,6 +89,16 @@ export type Run = {
 };
 
 export type Preview = {
+  pins_current?: boolean;
+  catalog_removed?: string[];
+  agent_changes?: { added: string[]; changed: string[]; removed: string[] };
+  publishes_policy?: boolean;
+  workspace_lock_current?: boolean;
+  policy_counts?: { added: number; changed: number; removed: number };
+  takeover?: {
+    project_id: string;
+    hosts: { id: string; name: string }[];
+  } | null;
   issues: { line: number; column: number; message: string }[];
   warnings: { line: number; column: number; message: string }[];
   policy_revision: number;
@@ -106,6 +123,8 @@ export type LiveRules = {
   published_by: string | null;
   managed: ManagedSource | null;
   source_digest: string | null;
+  managed_agent_keys?: string[] | null;
+  workspace_lock_current?: boolean;
 };
 
 export type Published = {
@@ -117,6 +136,7 @@ export type Published = {
 
 /** The workspace revision a team intends for a project, in an environment. */
 export type IntendedRevision = {
+  entry_agent?: string;
   project: string;
   project_id: string;
   revision: string;
@@ -139,23 +159,63 @@ export type Verifier = {
   [field: string]: unknown;
 };
 
+export type Declarations = {
+  project_id: string;
+  agents: { key: string; description: string | null }[];
+};
+export type Machine = {
+  id: string;
+  runtime: "claude-code" | "codex" | "copilot";
+  credential?: string;
+};
+export type ProjectApply = {
+  yaml: string;
+  policy_revision: number;
+  file_digest?: string;
+  replace_live?: boolean;
+  intended: ReturnType<
+    typeof import("./project/revision-bindings.ts").revisionBindings
+  > &
+    Pick<
+      IntendedRevision,
+      | "project"
+      | "project_id"
+      | "revision"
+      | "policy_revision"
+      | "files"
+      | "entry_agent"
+    >;
+  declarations: Declarations;
+  machine?: Machine & {
+    expected_credential: string | null;
+    proposed_credential?: { prefix: string; digest: string };
+  };
+};
+
 export type Query = Record<string, string | number | undefined>;
 
 /** An answer from the API that isn't a success, with its code and request id. */
 export class ApiError extends Error {
+  readonly detail?: string;
+  readonly origin?: string;
+
   constructor(
     readonly status: number,
     readonly code: string,
     readonly requestId: string | null,
+    { detail, origin }: { detail?: string; origin?: string } = {},
   ) {
     super(`${code}${requestId ? ` (request ${requestId})` : ""}`);
     this.name = "ApiError";
+    this.detail = detail;
+    this.origin = origin;
   }
 }
 
 export type ApiOptions = {
   token: string;
   url?: string;
+  workspace?: string;
   /** An environment's slug; the workspace's default when left out. */
   environment?: string;
   fetch?: typeof fetch;
@@ -171,13 +231,15 @@ function parseJson(text: string): unknown {
   }
 }
 
-function failure(status: number, body: unknown) {
-  const error = (body as { error?: { code?: string; request_id?: string } })
-    ?.error;
+function failure(status: number, body: unknown, origin: string) {
+  const error = (
+    body as { error?: { code?: string; request_id?: string; message?: string } }
+  )?.error;
   return new ApiError(
     status,
     error?.code ?? `HTTP_${status}`,
     error?.request_id ?? null,
+    { detail: error?.message, origin },
   );
 }
 
@@ -194,6 +256,7 @@ export function withoutTrailingSlashes(url: string) {
 export class NodrailApi {
   readonly url: string;
   private readonly token: string;
+  private readonly workspace: string | undefined;
   private readonly environment: string | undefined;
   private readonly fetcher: typeof fetch;
 
@@ -201,6 +264,7 @@ export class NodrailApi {
     this.url = withoutTrailingSlashes(options.url ?? DEFAULT_URL);
     this.token = options.token;
     this.environment = options.environment;
+    this.workspace = options.workspace;
     this.fetcher = options.fetch ?? fetch;
   }
 
@@ -209,11 +273,13 @@ export class NodrailApi {
     path: string,
     options: { query?: Query; body?: object; scoped?: boolean } = {},
   ): Promise<T> {
-    const query = { ...options.query };
+    const query: Query = { workspace: this.workspace, ...options.query };
     if (options.scoped !== false && this.environment)
       query.environment = this.environment;
     const response = await this.fetcher(this.target(path, query), {
       method,
+      redirect: "error",
+      signal: AbortSignal.timeout(10_000),
       headers: {
         authorization: `Bearer ${this.token}`,
         accept: "application/json",
@@ -222,7 +288,7 @@ export class NodrailApi {
       body: options.body ? JSON.stringify(options.body) : undefined,
     });
     const parsed = parseJson(await response.text());
-    if (!response.ok) throw failure(response.status, parsed);
+    if (!response.ok) throw failure(response.status, parsed, this.url);
     return parsed as T;
   }
 
@@ -264,8 +330,57 @@ export class NodrailApi {
     return this.call<{ environment: string; yaml: string }>("GET", "/rules");
   }
 
-  previewRules(yaml: string) {
-    return this.call<Preview>("POST", "/rules/preview", { body: { yaml } });
+  previewRules(
+    yaml: string,
+    declarations?: Declarations,
+    intended?: ProjectApply["intended"],
+  ) {
+    return this.call<Preview>("POST", "/rules/preview", {
+      body: { yaml, declarations, intended },
+    });
+  }
+
+  enrollmentStatus(project_id: string, machine: Machine) {
+    return this.call<{
+      valid: boolean;
+      fresh: boolean;
+      installation_id: string | null;
+      current_credential: string | null;
+    }>("POST", "/projects/enrollment", { body: { project_id, machine } });
+  }
+
+  reconcileEnrollment(
+    project_id: string,
+    machine_id: string,
+    generation: string,
+  ) {
+    return this.call<{ status: "revoked" | "never_activated" }>(
+      "POST",
+      "/projects/enrollment/reconcile",
+      { body: { project_id, machine_id, generation } },
+    );
+  }
+
+  cliWorkspaces() {
+    return this.call<Page<{ slug: string }>>("GET", "/cli/workspaces", {
+      scoped: false,
+      query: { workspace: undefined },
+    });
+  }
+
+  applyProject(body: ProjectApply) {
+    return this.call<{
+      published: Published | null;
+      enrollment: {
+        installation_id: string;
+        credential: string | null;
+        credential_generation?: string | null;
+      } | null;
+    }>("POST", "/projects/apply", { body });
+  }
+
+  logout() {
+    return this.call<{ ok: true }>("POST", "/cli/logout", { scoped: false });
   }
 
   /** Evidence verifiers, revoked ones too (`read`). */
@@ -311,8 +426,10 @@ export class NodrailApi {
   }
 
   /** What is live in the environment, and the project and lock it came from. */
-  liveRules() {
-    return this.call<LiveRules>("GET", "/rules/live");
+  liveRules(workspaceRevision?: string) {
+    return this.call<LiveRules>("GET", "/rules/live", {
+      query: { workspace_revision: workspaceRevision },
+    });
   }
 }
 

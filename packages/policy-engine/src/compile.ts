@@ -2,7 +2,7 @@
 // Reading and checking the files themselves is in rules-file.ts.
 import type { z } from "zod";
 import { classifyCommand } from "./commands.ts";
-import { reportSchemaIssues } from "./compile-issues.ts";
+import { reportSchemaIssues, warnUnused } from "./compile-issues.ts";
 import { compileGateContracts, documentOf } from "./compile-contracts.ts";
 import {
   compileBudgets,
@@ -377,15 +377,6 @@ function compileRule(name: string, rule: RuleEntry, compiling: Compiling) {
   );
 }
 
-function warnUnused({ state, used, collector }: Compiling) {
-  for (const [name, list] of state.lists)
-    if (!used.lists.has(name))
-      collector.warn(list, `List "${name}" is not used.`);
-  for (const [name, macro] of state.macros)
-    if (!used.macros.has(name))
-      collector.warn(macro, `Macro "${name}" is not used.`);
-}
-
 const ruleCompiler: RuleCompiler = {
   problem: (name, rule) => ruleProblem(name, rule as RuleEntry),
   compile: (name, rule, compiling) =>
@@ -443,5 +434,11 @@ export function compilePolicies(sources: PolicySource[]): CompileResult {
 
   const { issues, warnings } = collector;
   if (issues.length || !parsed.success) return { ok: false, issues, warnings };
-  return { ok: true, document: parsed.data, rules: compiled, warnings };
+  return {
+    ok: true,
+    document: parsed.data,
+    rules: compiled,
+    gates: gates.map((gate) => gate.compiled),
+    warnings,
+  };
 }
