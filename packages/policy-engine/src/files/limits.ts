@@ -1,4 +1,4 @@
-// The numbers of file-content contracts (S07, DC-04.2). Sizes come from the
+// The numbers of file-content contracts. Sizes come from the
 // frozen grammar (PAYLOAD_BYTES.file, fileMax); the rest bound what reading
 // a proposed file or a patch may cost. docs/contracts.md describes S07.
 import { PAYLOAD_BYTES } from "../shapes/limits.ts";

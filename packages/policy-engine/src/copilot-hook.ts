@@ -173,7 +173,10 @@ export function copilotEvents(
       // a repeated delivery of the first, given the first's decision.
       const id =
         typeof event.toolCallId === "string" && files.length > 1
-          ? { tool_use_id: `${event.toolCallId}#${index}` }
+          ? {
+              tool_use_id: `${event.toolCallId}#${index}`,
+              nodrail_call_part: { id: event.toolCallId, index },
+            }
           : {};
       return as({
         ...(adds
@@ -320,7 +323,8 @@ export function copilotSettleEvent(stdin: string): string | null {
   if (!said) return null;
   const name = text(said.hook_event_name);
   if (name === "PostToolUse" || name === "PostToolUseFailure") return stdin;
-  const result = said.toolResult as { resultType?: unknown } | undefined;
+  const result = said.toolResult as
+    { resultType?: unknown; textResultForLlm?: unknown } | undefined;
   if (typeof result !== "object" || result === null) return null;
   return JSON.stringify({
     hook_event_name:
@@ -329,6 +333,8 @@ export function copilotSettleEvent(stdin: string): string | null {
     cwd: said.cwd,
     tool_use_id: said.toolCallId,
     tool_name: text(said.toolName),
+    tool_input: argsOf(said.toolArgs) ?? {},
+    tool_response: result.textResultForLlm,
   });
 }
 

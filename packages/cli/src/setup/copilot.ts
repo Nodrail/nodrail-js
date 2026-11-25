@@ -5,6 +5,7 @@ import { stringify } from "yaml";
 import type { Env } from "../config.ts";
 import type { CompiledContracts } from "../contracts/engine.ts";
 import { observeCommand, usesLimits, usesRuns } from "./claude-code.ts";
+import { connectRead } from "./connect.ts";
 import { hookReads, mcpServerEntries } from "./connections.ts";
 import type { Check } from "./plan.ts";
 import type { Activation } from "./status.ts";
@@ -40,7 +41,8 @@ export function copilotHookCommand(
   setup: ProjectSetup,
 ) {
   const real = realpathSync(root);
-  const reads = hookReads(setup, (file) => quoted(join(real, file)));
+  const path = (file: string) => quoted(join(real, file));
+  const reads = hookReads(setup, path) + connectRead(setup, path);
   return `nodrail policy hook ${quoted(join(real, EFFECTIVE_FILE))} --protect-list ${quoted(join(real, PROTECT_LIST))}${reads} --host copilot --agent ${entry}`;
 }
 
@@ -66,17 +68,20 @@ function hooksFile(
     { type: "command", bash: command, timeoutSec: 20 },
   ];
   const policy = copilotHookCommand(root, entry, setup);
+  const connected = setup.connect?.decide === "cloud";
   const hooks = {
     preToolUse: hook(policy),
     // A run's steps, when the policy has gates, budgets or receipts: the
     // same hook reads Copilot's subagentStart and subagentStop, the final
     // text and its receipt in `response`.
-    ...(usesRuns(effective)
+    ...(connected || usesRuns(effective)
       ? { subagentStart: hook(policy), subagentStop: hook(policy) }
       : {}),
     // Numeric budgets settle on a call's outcome: postToolUse carries it,
     // success or not, in `toolResult.resultType`.
-    ...(usesLimits(effective) ? { postToolUse: hook(policy) } : {}),
+    ...(connected || usesLimits(effective)
+      ? { postToolUse: hook(policy) }
+      : {}),
     // Copilot asks the person to trust the folder once, then runs both.
     ...(setup.observe.sessionStart
       ? {

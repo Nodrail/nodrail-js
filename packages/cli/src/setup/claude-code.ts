@@ -7,7 +7,7 @@ import {
 } from "@nodrail/policy-engine/yaml";
 import { evidenceRead } from "./accountable.ts";
 import { hookReads, mcpServerEntries } from "./connections.ts";
-import { connectUrl } from "./connect.ts";
+import { connectRead } from "./connect.ts";
 import type { Env } from "../config.ts";
 import type { CompiledContracts } from "../contracts/engine.ts";
 import {
@@ -56,8 +56,6 @@ type HookGroup = {
     type: "command";
     command: string;
     onFailure?: "block";
-    /** Seconds the host gives the connected hook before giving up on it. */
-    timeout?: number;
   }[];
 };
 
@@ -100,11 +98,8 @@ export const HOOK_PREFIX = `nodrail policy hook "$CLAUDE_PROJECT_DIR/.nodrail/`;
 /** How the session-start observation's command starts, on both hosts. */
 export const OBSERVE_PREFIX = "nodrail observe ";
 
-/** How the connected hook's command starts (`decide: cloud`, R383). */
-export const CONNECT_PREFIX = `nodrail connect hook "$CLAUDE_PROJECT_DIR/.nodrail/`;
-
-/** Where apply writes what the connected hook needs: references, never a secret. */
-export const CONNECT_FILE = ".nodrail/connect.json";
+/** Recognize pre-switch-over hooks so apply replaces them in place. */
+const CONNECT_PREFIX = `nodrail connect hook "$CLAUDE_PROJECT_DIR/.nodrail/`;
 
 /** Whether a command is nodrail's policy hook, local or connected. */
 export const isPolicyHook = (command: string) =>
@@ -168,19 +163,12 @@ export function claudeCodeSetup(input: {
     });
   const connections = input.setup.connections;
   const cloud = input.setup.connect?.decide === "cloud";
-  const reads = hookReads(
-    input.setup,
-    (file) => `"$CLAUDE_PROJECT_DIR/${file}"`,
-    { telemetry: !cloud },
-  );
-  const evidence = evidenceRead(
-    input,
-    (file) => `"$CLAUDE_PROJECT_DIR/${file}"`,
-  );
-  if (cloud) files.push(connectFile(input.setup.connect!));
-  const command = cloud
-    ? `${CONNECT_PREFIX}connect.json" --protect-list "$CLAUDE_PROJECT_DIR/${PROTECT_LIST}"${reads}`
-    : `${HOOK_PREFIX}effective.yaml" --protect-list "$CLAUDE_PROJECT_DIR/${PROTECT_LIST}"${reads}${evidence} --agent ${team.entry}`;
+  const path = (file: string) => `"$CLAUDE_PROJECT_DIR/${file}"`;
+  const reads = hookReads(input.setup, path);
+  const policy = input.setup.connect
+    ? connectRead(input.setup, path)
+    : evidenceRead(input, path);
+  const command = `${HOOK_PREFIX}effective.yaml" --protect-list ${path(PROTECT_LIST)}${reads}${policy} --agent ${team.entry}`;
   // Claude Code starts a project server in the project folder; the runner
   // finds the file by its full path anyway.
   const mcpServers = mcpServerEntries(root, connections, { type: "stdio" });
@@ -210,8 +198,7 @@ export function claudeCodeSetup(input: {
 
 /**
  * The policy hook on each event it needs: every call, and the steps and
- * outcomes when the policy keeps runs or numeric budgets, or when Nodrail
- * decides (it keeps the run and settles budgets itself).
+ * outcomes when the policy keeps runs or numeric budgets, or for connected reporting.
  */
 function policyHooks(
   command: string,
@@ -226,11 +213,9 @@ function policyHooks(
           type: "command",
           command,
           onFailure: "block",
-          ...(cloud ? { timeout: CONNECTED_TIMEOUT } : {}),
         },
       ],
     },
-    // Nodrail keeps the run's steps and settles its budgets when it decides.
     steps:
       cloud || usesRuns(effective)
         ? { hooks: [{ type: "command", command }] }
@@ -240,30 +225,6 @@ function policyHooks(
       cloud || usesLimits(effective)
         ? { matcher: "*", hooks: [{ type: "command", command }] }
         : null,
-  };
-}
-
-/**
- * A little longer than the connected hook takes at most to hear from Nodrail
- * (it denies a call not answered in 25 seconds); nothing waits for a person.
- */
-const CONNECTED_TIMEOUT = 30;
-
-/** The connected hook's settings: where Nodrail is, and whose credential. */
-function connectFile(
-  connect: NonNullable<ProjectSetup["connect"]>,
-): DesiredFile {
-  const settings = {
-    url: connectUrl(connect),
-    workspace: connect.workspace,
-    environment: connect.environment,
-    enforce: connect.enforce,
-    credential: connect.credential,
-  };
-  return {
-    path: CONNECT_FILE,
-    content: Buffer.from(`${JSON.stringify(settings, null, 2)}\n`),
-    why: `ask ${settings.url} (${connect.workspace}/${connect.environment}) for each call`,
   };
 }
 

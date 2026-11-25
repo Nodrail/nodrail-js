@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.8.0
+
+Uses `@nodrail/policy-engine` 0.8.0. 0.7.0 was never published to npm;
+0.8.0 includes its changes.
+
+- Add `policyIfChanged(etag?)` for conditional reads of the live policy.
+  Existing SDK and standalone plugin authorization endpoints remain available.
+
 ## 0.7.0
 
 Uses `@nodrail/policy-engine` 0.7.0. Nothing waits for a person any more:
@@ -42,7 +50,7 @@ Uses `@nodrail/policy-engine` 0.6.0.
 ### Added
 
 - The hook reads `.nodrail/contracts.json`, which `nodrail apply` writes
-  with the compiled brief and input contracts (R344), from
+  with the compiled brief and input contracts, from
   `CLAUDE_PROJECT_DIR` or the nearest folder above the call's `cwd`. A
   dispatch it covers sends its brief's reported fields as `params.brief`,
   an operation it covers sends classified inputs as `[classified]`, and

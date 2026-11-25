@@ -1,4 +1,4 @@
-// A write checked against file contracts before it runs (DC-04.2): every
+// A write checked against file contracts before it runs: every
 // file a request touches is planned and judged before any decision, so a
 // multi-file patch passes only when each governed file passes. A governed
 // file must be written by an allowed agent, have content that can be
@@ -17,8 +17,8 @@ import { readFileContent, type FileReading } from "./parse.ts";
 import {
   planWrite,
   type ChangeOperation,
-  type CurrentFile,
   type FileChange,
+  type PlanContext,
 } from "./plan.ts";
 import type { WriteRequest } from "./requests.ts";
 import type { FileIssue } from "./text.ts";
@@ -54,13 +54,9 @@ export type WriteCheck = {
   expected: ExpectedRevision[];
 };
 
-export type WriteCheckInput = {
+export type WriteCheckInput = PlanContext & {
   request: WriteRequest;
-  /** Absolute project folder, POSIX; or several spellings of that one folder. */
-  projectRoot: string | string[];
-  cwd: string;
   contracts: FileContract[];
-  current: (path: string) => CurrentFile;
   /** The writing agent; null for the main session, which no `writers` list names. */
   agent: string | null;
   /** Paths existing guards protect (`data:` paths); a content contract doesn't open them. */

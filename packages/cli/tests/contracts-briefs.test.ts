@@ -19,7 +19,6 @@ import {
   project,
   planFor,
   RESOURCES,
-  windows,
 } from "./support/setup-project.ts";
 
 const api = "apiVersion: nodrail.com/v1alpha1";
@@ -394,7 +393,7 @@ connections:
   });
 });
 
-describe.skipIf(windows)("a mediated connection", () => {
+describe("a mediated connection", () => {
   /** Speaks MCP to `connection run` over in-memory streams. */
   async function session(p: ReturnType<typeof project>) {
     const stdin = new PassThrough();

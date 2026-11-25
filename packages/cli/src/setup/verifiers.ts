@@ -1,4 +1,4 @@
-// Verifier resolution for plan (DC-03.1): an evidence requirement a verifier
+// Verifier resolution for plan: an evidence requirement a verifier
 // produces names it, and Cloud is where verifiers live. A missing or revoked
 // verifier fails activation for every requirement that depends on it; with
 // no token for Cloud here, plan says it couldn't check, and Cloud checks

@@ -1,4 +1,4 @@
-// What a shell line writes onto a protected root without naming it (R376):
+// What a shell line writes onto a protected root without naming it:
 // a link pointing at one or above one, and a tree copied, moved, synced or
 // extracted where it would create or overwrite one. Best effort, like every
 // read of a shell line: a control, not a sandbox.
@@ -84,7 +84,7 @@ type Destination = (args: string[], cwd: string) => TreeCopy | null;
 /**
  * What a command copies as a tree, or null when it copies none: a
  * recursive `cp`, an `mv`, `install` or `ditto`, a recursive `rsync` to
- * this machine, and what `tar -x` or `unzip` extract into (R376).
+ * this machine, and what `tar -x` or `unzip` extract into.
  */
 const TREE_COPIES = new Map<string, Destination>([
   ["cp", (args) => (recursive(args, /[rRa]/) ? copyOf(args) : null)],
@@ -143,7 +143,7 @@ function landingNames(source: string, cwd: string, copy: TreeCopy) {
 }
 
 /**
- * Whether a tree copy could create or overwrite a protected root (R376):
+ * Whether a tree copy could create or overwrite a protected root:
  * into a root, always; into a folder holding one, when a name it lands
  * under is the name the root has there, or when that can't be told (an
  * archive, an unreadable source).
@@ -184,11 +184,11 @@ const nearRoot = (path: string, roots: string[]) =>
 
 /**
  * What a line writes onto the protected roots by other means than naming
- * them (R376): a link pointing at a root or above one, and a tree copy,
+ * them: a link pointing at a root or above one, and a tree copy,
  * move, sync or extraction into a root or a folder holding one. A tree
  * copy into such a folder after another part of the line is refused
  * whatever its sources: an earlier part can change them before it runs,
- * so what is on disk now proves nothing (R377).
+ * so what is on disk now proves nothing.
  */
 export function writesOntoRoot(command: string, cwd: string, roots: string[]) {
   let later = false;

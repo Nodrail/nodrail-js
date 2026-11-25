@@ -3,7 +3,11 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
   test: {
     environment: "node",
+    pool: "forks",
     include: ["tests/**/*.test.ts"],
+    // Real git, Node and CLI subprocesses can take longer on shared runners.
+    testTimeout: 30_000,
+    hookTimeout: 30_000,
     // A little under today's coverage, so a real drop fails CI.
     coverage: {
       provider: "v8",

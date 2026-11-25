@@ -188,7 +188,7 @@ describe("a run through the Claude Code hook", { timeout: 30_000 }, () => {
     const third = decision((await s.bash("ls", dev)).stdout);
     expect(third).toMatchObject({ permissionDecision: "deny" });
     expect(third.permissionDecisionReason).toContain(
-      "Budget builder-step is at 3 of 2 tool calls. Over the limit, shell command.run on ls is denied.",
+      "Budget builder-step is at 3 of 2 tool calls. So shell command.run on ls is denied.",
     );
     // Another step of the same agent starts with a fresh budget.
     expect((await s.bash("ls", { id: "d2", type: "dev" })).stdout).toBe("");

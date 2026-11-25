@@ -1,6 +1,5 @@
-// Mediated calls in the run ledger and in budgets (R316; WAVE3-DESIGN §3.3,
-// §5 K). The ledger is the engine's own (its writer, reader and lock, read
-// from its source as the engine's tests do); providers are fakes that count
+// Mediated calls in the run ledger and in budgets. This uses the engine's own
+// ledger writer, reader and lock. The fake providers count
 // every call they get, so "never reached" is a count of zero, not a claim.
 import { existsSync, mkdtempSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";

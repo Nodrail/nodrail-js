@@ -1,7 +1,14 @@
 // Paths as rules see them: resolved, canonical, and split into named parts.
-import { lstatSync, readlinkSync, realpathSync } from "node:fs";
+import { lstatSync, readlinkSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
-import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
+import native, {
+  basename,
+  dirname,
+  isAbsolute,
+  join,
+  resolve,
+  win32,
+} from "node:path";
 import { nameForms } from "./secrets.ts";
 
 /**
@@ -59,14 +66,21 @@ export const fileName = (path: string) => path.split(/[\\/]/).pop() ?? "";
 /** Longer or deeper paths aren't real, and would only make checking slow. */
 const MAX_PATH = 4096;
 const MAX_DEPTH = 256;
+const separator = native === win32 ? /[\\/]/ : /\//;
+
+export const pathWithinLimits = (path: string) =>
+  path.length <= MAX_PATH &&
+  path.split(separator).filter(Boolean).length <= MAX_DEPTH;
 
 export function fullPath(raw: string, cwd: string | null) {
-  if (raw.length > MAX_PATH) return null;
-  const expanded = /^~(?=$|\/)/.test(raw) ? `${homedir()}${raw.slice(1)}` : raw;
+  if (!pathWithinLimits(raw)) return null;
+  const expanded = (native === win32 ? /^~(?=$|[\\/])/ : /^~(?=$|\/)/).test(raw)
+    ? `${homedir()}${raw.slice(1)}`
+    : raw;
   // Resolved, so src/../.claude can't pass as a path inside src/.
   if (!isAbsolute(expanded) && !cwd) return null;
   const absolute = resolve(cwd ?? "/", expanded);
-  if (absolute.split(/[\\/]/).length > MAX_DEPTH) return null;
+  if (!pathWithinLimits(absolute)) return null;
   return canonicalPath(absolute);
 }
 
@@ -79,12 +93,56 @@ export function insideCwd(
   cwd: string | null,
 ): Record<string, boolean> {
   const root = cwd ? fullPath(cwd, null) : null;
-  return root ? { inside_cwd: isWithin(path, root) } : {};
+  return root ? { inside_cwd: isWithinOnDisk(path, root) } : {};
 }
 
-export function isWithin(path: string, root: string) {
-  const prefix = root.endsWith(sep) ? root : `${root}${sep}`;
-  return path === root || path.startsWith(prefix);
+/** The ordinary drive or UNC spelling of a Windows namespaced path. */
+export function withoutNamespace(path: string) {
+  return path
+    .replace(/^[\\/]{2}\?[\\/]UNC[\\/]/i, "\\\\")
+    .replace(/^[\\/]{2}\?[\\/](?=[a-z]:[\\/])/i, "");
+}
+
+export function relativePath(root: string, path: string, flavor = native) {
+  if (flavor === win32) {
+    root = withoutNamespace(root);
+    path = withoutNamespace(path);
+  }
+  const result = flavor.relative(root, path);
+  return result === ".." ||
+    result.startsWith(`..${flavor.sep}`) ||
+    flavor.isAbsolute(result)
+    ? null
+    : result;
+}
+
+export function isWithin(path: string, root: string, flavor = native) {
+  return relativePath(root, path, flavor) !== null;
+}
+
+/** Paths are canonicalized through the nearest existing ancestor by fullPath. */
+export function isWithinOnDisk(path: string, root: string, flavor = native) {
+  const relative = relativePath(root, path, flavor);
+  if (relative === null) return false;
+  if (flavor !== win32) return true;
+  // Verify the project boundary on disk. Its descendants may not exist yet,
+  // and a case-sensitive sibling can have the same folded name as the root.
+  let ancestor = win32.normalize(withoutNamespace(path));
+  for (const _ of relative.split("\\").filter(Boolean))
+    ancestor = win32.dirname(ancestor);
+  try {
+    const candidate = statSync(ancestor, { bigint: true });
+    const project = statSync(withoutNamespace(root), { bigint: true });
+    return (
+      candidate.isDirectory() &&
+      project.isDirectory() &&
+      project.ino !== 0n &&
+      candidate.dev === project.dev &&
+      candidate.ino === project.ino
+    );
+  } catch {
+    return false;
+  }
 }
 
 /** Whether every path is inside the working folder, resolved once. */
@@ -94,7 +152,7 @@ export function insideAll(
 ): Record<string, boolean> {
   const root = cwd ? fullPath(cwd, null) : null;
   return root
-    ? { inside_cwd: paths.every((path) => isWithin(path, root)) }
+    ? { inside_cwd: paths.every((path) => isWithinOnDisk(path, root)) }
     : {};
 }
 

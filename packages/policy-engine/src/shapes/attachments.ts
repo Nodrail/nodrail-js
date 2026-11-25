@@ -149,7 +149,7 @@ function memoryWrites(registry: Registry) {
 
 /**
  * A resource id goes into the action's resource, which every reviewer, log
- * and Cloud view shows, so it can't come from a classified argument (R317).
+ * and Cloud view shows, so it can't come from a classified argument.
  */
 function classifiedResource(
   registry: Registry,

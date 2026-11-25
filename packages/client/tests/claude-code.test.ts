@@ -187,7 +187,7 @@ describe("describing a call", () => {
   });
 
   test.each([
-    ["https://api.acme.com@evil.net/x", "https://evil.net/x"],
+    ["https://api.acme.com@evil.test/x", "https://evil.test/x"],
     ["https://API.acme.com", "https://api.acme.com/"],
     ["https://a.b/x/../y", "https://a.b/y"],
   ])("the URL %s is normalised to %s", (url, expected) => {

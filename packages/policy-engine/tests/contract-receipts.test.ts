@@ -1,4 +1,4 @@
-// Receipts read against their declared contract (DC-01.1, DC-01.2): the
+// Receipts read against their declared contract: the
 // fenced block with nesting, the flat header bridge on a team's real
 // vocabularies, and the one strict validator behind both.
 import { readFileSync } from "node:fs";

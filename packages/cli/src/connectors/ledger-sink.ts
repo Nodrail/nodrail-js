@@ -1,4 +1,4 @@
-// A mediated connection's calls in the run ledger (R316, WAVE3-DESIGN §5 K):
+// A mediated connection's calls in the run ledger:
 // each call becomes a `connection.call` event wrapping the connector's
 // record, appended under the run's lock, so a hook deciding the next call
 // in the same run reads it. A budget's settlement, when one is plugged in,

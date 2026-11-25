@@ -124,7 +124,7 @@ export const setupFields = {
   tested: testedField.optional(),
   /** What `nodrail observe` records, and when it runs (preview). */
   observe: observeField.optional(),
-  /** The Nodrail this project is connected to, and who decides (R383). */
+  /** The Nodrail this project is connected to, and who decides. */
   connect: connectField.optional(),
 };
 

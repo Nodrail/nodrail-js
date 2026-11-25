@@ -15,8 +15,14 @@ import {
   readSync,
   realpathSync,
 } from "node:fs";
-import { join, sep } from "node:path";
+import native, { join, win32 } from "node:path";
+import { canonicalPath, withoutNamespace } from "../paths.ts";
 import { checkWrite, type WriteCheck, type WriteCheckInput } from "./check.ts";
+import {
+  absoluteProjectPath,
+  projectPath,
+  type PathResult,
+} from "./contracts.ts";
 import { FILE_LIMITS } from "./limits.ts";
 import type { CurrentFile } from "./plan.ts";
 
@@ -27,7 +33,7 @@ const missing = (error: unknown) =>
   (error as NodeJS.ErrnoException).code === "ENOTDIR";
 
 /** The first problem on the way from the root to the file, or "absent"/"file". */
-function walk(root: string, path: string): CurrentFile | "file" {
+function walk(root: string, path: string): CurrentFile | string {
   const parts = path.split("/");
   let here = root;
   for (const [index, part] of parts.entries()) {
@@ -44,7 +50,7 @@ function walk(root: string, path: string): CurrentFile | "file" {
     if (!last && !stat.isDirectory()) return { state: "absent" };
     if (last && !stat.isFile()) return unsafe("isn't a regular file");
   }
-  return "file";
+  return here;
 }
 
 function readOpen(descriptor: number): CurrentFile {
@@ -73,16 +79,28 @@ export function readCurrentFile(
   projectRoot: string,
   path: string,
 ): CurrentFile {
-  let root: string;
+  return readFromRoot(realRoot(projectRoot), path);
+}
+
+function realRoot(projectRoot: string) {
   try {
-    root = realpathSync.native(projectRoot);
+    return realpathSync.native(projectRoot);
   } catch {
-    return unsafe("has no readable project folder");
+    return null;
   }
+}
+
+function readFromRoot(root: string | null, path: string): CurrentFile {
+  if (!root) return unsafe("has no readable project folder");
+  // This API takes a project-relative contract path, even on Windows.
+  const normalized = projectPath(root, root, path, native);
+  if (!normalized.ok || normalized.path !== path)
+    return unsafe("isn't a normalized project-relative path");
   const found = walk(root, path);
-  if (found !== "file") return found;
-  const full = join(root, ...path.split("/"));
-  if (!full.startsWith(root + sep)) return unsafe("is outside the project");
+  return typeof found === "string" ? readFile(found) : found;
+}
+
+function readFile(full: string): CurrentFile {
   let descriptor: number;
   try {
     descriptor = openSync(full, constants.O_RDONLY | constants.O_NOFOLLOW);
@@ -96,14 +114,55 @@ export function readCurrentFile(
   }
 }
 
-/** The project folder as given and as resolved, so either spelling is inside. */
-function spellings(projectRoot: string) {
-  try {
-    const real = realpathSync.native(projectRoot);
-    return real === projectRoot ? [projectRoot] : [projectRoot, real];
-  } catch {
-    return [projectRoot];
+function windowsParts(path: string) {
+  const absolute = win32.normalize(withoutNamespace(path));
+  const { root } = win32.parse(absolute);
+  return {
+    root,
+    parts: absolute.slice(root.length).split("\\").filter(Boolean),
+  };
+}
+
+/** Locate the on-disk root even when the tool uses another 8.3 spelling. */
+function windowsRelative(absolute: string, roots: string[], real: string) {
+  const { root, parts } = windowsParts(absolute);
+  for (const spelling of roots) {
+    const depth = windowsParts(spelling).parts.length;
+    if (depth >= parts.length) continue;
+    const ancestor = win32.join(root, ...parts.slice(0, depth));
+    if (realRoot(ancestor) === real) return parts.slice(depth).join("/");
   }
+  return null;
+}
+
+function windowsLocator(roots: string[], cwd: string, real: string) {
+  return (name: string): PathResult => {
+    const absolute = absoluteProjectPath(cwd, name, win32);
+    if (!absolute.ok) return absolute;
+    const path = windowsRelative(absolute.path, roots, real);
+    if (path === null) {
+      const written = projectPath(roots, cwd, name, win32);
+      return written.ok
+        ? {
+            ok: false,
+            code: "unsafe-path",
+            message: "has no matching project folder on disk",
+          }
+        : written;
+    }
+    // Validate the relative name before disk access. Keep links visible to the
+    // reader, but use the disk's long names for regular or not-yet-created files.
+    const written = projectPath(real, real, path, win32);
+    if (!written.ok) return written;
+    const found = walk(real, path);
+    if (typeof found !== "string" && found.state === "unsafe") return written;
+    return projectPath(
+      real,
+      real,
+      canonicalPath(join(real, ...path.split("/"))),
+      win32,
+    );
+  };
 }
 
 /**
@@ -111,19 +170,30 @@ function spellings(projectRoot: string) {
  * `preflight-only`: the host writes after this returns.
  */
 export function checkWriteOnDisk(
-  input: Omit<WriteCheckInput, "current" | "mediated" | "projectRoot"> & {
+  input: Omit<
+    WriteCheckInput,
+    "current" | "locate" | "mediated" | "pathFlavor" | "projectRoot"
+  > & {
     projectRoot: string;
   },
 ): WriteCheck {
   const read = new Map<string, CurrentFile>();
+  const real = realRoot(input.projectRoot);
+  const roots =
+    real && real !== input.projectRoot
+      ? [input.projectRoot, real]
+      : [input.projectRoot];
   const current = (path: string) => {
-    if (!read.has(path))
-      read.set(path, readCurrentFile(input.projectRoot, path));
+    if (!read.has(path)) read.set(path, readFromRoot(real, path));
     return read.get(path)!;
   };
   return checkWrite({
     ...input,
-    projectRoot: spellings(input.projectRoot),
+    projectRoot: roots,
+    pathFlavor: native,
+    ...(real && process.platform === "win32"
+      ? { locate: windowsLocator(roots, input.cwd, real) }
+      : {}),
     current,
   });
 }

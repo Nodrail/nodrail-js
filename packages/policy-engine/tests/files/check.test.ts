@@ -1,4 +1,4 @@
-// A whole write checked against file contracts before it runs (DC-04.2):
+// A whole write checked against file contracts before it runs:
 // every touched file planned and judged first, multi-file patches pass only
 // as a whole, deletes and moves out need their own permission, and the
 // answer is preflight-only unless a mediated writer applies it.
@@ -69,6 +69,12 @@ const added = (text: string) =>
     .map((line) => `+${line}`);
 
 describe("paths", () => {
+  test("a root-level contract matches directly under the project", () => {
+    const readme = { ...contract("adr"), root: "", pattern: "README.md" };
+    expect(governs(readme, "Readme.md")).toBe(true);
+    expect(governs(readme, "docs/README.md")).toBe(false);
+  });
+
   test.each([
     ["a.md", { ok: true, path: "a.md" }],
     [`${ROOT}/docs/adr/x.md`, { ok: true, path: "docs/adr/x.md" }],
@@ -92,6 +98,31 @@ describe("paths", () => {
         "/private/tmp/p/a.md",
       ),
     ).toEqual({ ok: true, path: "a.md" });
+  });
+
+  test.each([
+    ["c:/Build/Runner/App/docs/adr/x.md", { ok: true, path: "docs/adr/x.md" }],
+    [String.raw`docs\adr\x.md`, { ok: true, path: "docs/adr/x.md" }],
+    [
+      String.raw`\\?\C:\Build\Runner\App\docs\adr\x.md`,
+      { ok: true, path: "docs/adr/x.md" },
+    ],
+    [
+      String.raw`C:\BUILD\RUNNER~1\App\docs\adr\x.md`,
+      { ok: true, path: "docs/adr/x.md" },
+    ],
+    ["c:/Build/Runner/Application/docs/x.md", { ok: false, code: "outside" }],
+    ["d:/Build/Runner/App/docs/x.md", { ok: false, code: "outside" }],
+    [String.raw`docs\..\x.md`, { ok: false, code: "unsafe-path" }],
+    [String.raw`C:docs\x.md`, { ok: false, code: "unsafe-path" }],
+    ["docs/x.md:stream", { ok: false, code: "unsafe-path" }],
+    ["docs/adr./x.md", { ok: false, code: "unsafe-path" }],
+    ["docs/NUL.md", { ok: false, code: "unsafe-path" }],
+  ])("locates the Windows path %s off-host", (name, expected) => {
+    const cwd = "C:/Build/Runner/App";
+    expect(projectPath(["C:/Build/RUNNER~1/App", cwd], cwd, name)).toEqual(
+      expect.objectContaining(expected),
+    );
   });
 
   test("case and Unicode form never take a file out of a contract", () => {

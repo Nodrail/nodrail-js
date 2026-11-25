@@ -1,4 +1,4 @@
-// Gates on declared contracts (DC-01.4), end to end through
+// Gates on declared contracts, end to end through
 // `nodrail-policy hook` in a scratch git repository: receipts captured on the
 // stop event and on a hand-back, read against their contract, and gates
 // that need verdicts, `where`, recorded freshness and the revision.
@@ -287,7 +287,7 @@ describe("gates on valid receipts", { timeout: 60_000 }, () => {
       "allow",
     );
 
-    // R375: the latest receipt wins. A later one with a blocker, or invalid,
+    // The latest receipt wins. A later one with a blocker, or invalid,
     // closes the gate the earlier valid one opened, with no work between.
     await finished(s, { id: "r4", type: "reviewer" }, reviewer("ship", 1));
     expect(answer((await s.dispatch("github")).stdout).permissionDecision).toBe(

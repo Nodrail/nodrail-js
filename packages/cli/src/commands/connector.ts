@@ -83,7 +83,7 @@ export async function serveMediated(input: {
   stdin: Readable;
   stdout: Writable;
 }) {
-  // Each call also joins the run ledger the hooks of this folder use (R318),
+  // Each call also joins the run ledger the hooks of this folder use,
   // where it settles its budget reservation under the run's lock.
   const place = ledgerPlace(input.root);
   const mediate = {

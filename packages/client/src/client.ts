@@ -133,6 +133,12 @@ export type HostDecisionResult =
   | { key: string; action_id: string }
   | { key: string | null; error: { code: string } };
 
+type RequestOptions = {
+  body?: object;
+  headers?: Record<string, string>;
+  timeoutMs?: number;
+};
+
 export class NodrailClient {
   private readonly base: string;
   private readonly timeoutMs: number;
@@ -147,19 +153,11 @@ export class NodrailClient {
     this.secure = isSafeUrl(options.url);
   }
 
-  private async request(
-    path: string,
-    init: {
-      body?: object;
-      headers?: Record<string, string>;
-      timeoutMs?: number;
-    } = {},
-  ): Promise<unknown> {
+  private async response(path: string, init: RequestOptions = {}) {
     // The credential never travels in the clear.
     if (!this.secure) throw new Blocked("INSECURE_URL");
-    let response: Response;
     try {
-      response = await this.send(`${this.base}${path}`, {
+      return await this.send(`${this.base}${path}`, {
         method: init.body ? "POST" : "GET",
         headers: {
           authorization: `Bearer ${this.options.credential}`,
@@ -173,6 +171,13 @@ export class NodrailClient {
     } catch {
       throw new Blocked("UNAVAILABLE");
     }
+  }
+
+  private async request(path: string, init?: RequestOptions) {
+    return this.responseBody(await this.response(path, init));
+  }
+
+  private async responseBody(response: Response): Promise<unknown> {
     const body: unknown = await response.json().catch(() => null);
     if (response.ok) return body;
     const error =
@@ -199,6 +204,20 @@ export class NodrailClient {
    */
   async policy(): Promise<LivePolicy> {
     return (await this.request("/policy")) as LivePolicy;
+  }
+
+  /** Read the live policy conditionally using an ETag from a previous response. */
+  async policyIfChanged(etag?: string) {
+    const response = await this.response("/policy", {
+      headers: etag ? { "if-none-match": etag } : {},
+    });
+    if (response.status === 304 && etag)
+      return { changed: false as const, etag };
+    return {
+      changed: true as const,
+      etag: response.headers.get("etag"),
+      policy: (await this.responseBody(response)) as LivePolicy,
+    };
   }
 
   /**

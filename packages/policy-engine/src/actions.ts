@@ -297,7 +297,7 @@ function patchCall(
 function webFetchCall(input: ToolInput): ActionDescriptor | null {
   const url = nonEmptyText(input.url);
   if (!url || !URL.canParse(url)) return null;
-  // Without user info, so a@evil.net can't pass as a prefix of a.
+  // Without user info, so a@evil.test can't pass as a prefix of a.
   const { protocol, host, pathname, search } = new URL(url);
   const normal = `${protocol}//${host}${pathname}${search}`;
   const shown = redact(normal);

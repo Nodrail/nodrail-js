@@ -1,4 +1,4 @@
-// The Cloud hook's declared contracts (R344): `nodrail apply` writes the
+// The Cloud hook's declared contracts: `nodrail apply` writes the
 // compiled brief and input contracts to `.nodrail/contracts.json`, as it
 // writes `connections.json`, and the hook sends what Cloud's rules read
 // from them: the started agent's brief as its reporting projection in

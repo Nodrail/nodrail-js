@@ -1,10 +1,16 @@
 // Tool connections: MCP servers the setup declares. Both hosts call one as
 // `mcp__<connection>__<tool>` through the policy hook, with the subagent that
 // made the call, so the hook judges it as that agent before the server runs.
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, test } from "vitest";
+import { afterAll, describe, expect, test } from "vitest";
 import {
   connectionCall,
   connectionCalls,
@@ -238,9 +244,31 @@ describe("a connection's data", () => {
 
   // The project: .nodrail/connections.json, and memory/ beside it.
   const project = mkdtempSync(join(tmpdir(), "nodrail-data-"));
+  afterAll(() => rmSync(project, { recursive: true, force: true }));
   mkdirSync(join(project, ".nodrail"));
   mkdirSync(join(project, "memory"));
   writeFileSync(join(project, "memory/support.jsonl"), "{}\n");
+  symlinkSync(
+    join(project, "memory/support.jsonl"),
+    join(project, "memory/current.txt"),
+    "file",
+  );
+  symlinkSync(
+    join(project, "memory/support.jsonl"),
+    join(project, "memory/A-link.txt"),
+    "file",
+  );
+  mkdirSync(join(project, "snapshots"));
+  symlinkSync(
+    join(project, "memory"),
+    join(project, "snapshots/today"),
+    "junction",
+  );
+  symlinkSync(
+    join(project, "memory/pending.jsonl"),
+    join(project, "snapshots/pending.txt"),
+    "file",
+  );
   const file = join(project, ".nodrail/connections.json");
   writeFileSync(
     file,
@@ -248,7 +276,7 @@ describe("a connection's data", () => {
       connections: {
         "support-memory": {
           operations: { search_nodes: {} },
-          data: ["./memory/support.jsonl"],
+          data: ["./memory/support.jsonl", "./memory/pending.jsonl"],
         },
       },
     }),
@@ -271,6 +299,24 @@ describe("a connection's data", () => {
 - rule: Cat
   command: { prefix: "cat " }
   effect: allow
+- rule: Remove
+  command: { prefix: "rm " }
+  effect: allow
+- rule: Allow these brace alternatives
+  tool: shell
+  operation: command.compound
+  resource: { kind: command, match: exact, value: "cat memory/{logs,other}.jsonl" }
+  effect: allow
+- rule: Allow a letter sequence
+  tool: shell
+  operation: command.compound
+  resource: { kind: command, match: exact, value: "cat memory/suppor{s..v}.jsonl" }
+  effect: allow
+- rule: Allow a numeric sequence
+  tool: shell
+  operation: command.compound
+  resource: { kind: command, match: exact, value: "cat memory/{03..01..1}.jsonl" }
+  effect: allow
 - rule: Grep
   command: { prefix: "grep " }
   effect: allow
@@ -281,9 +327,9 @@ describe("a connection's data", () => {
   effect: allow
 `,
   );
-  const call = (tool_name: string, tool_input: object) =>
+  const call = (tool_name: string, tool_input: object, connections = file) =>
     cli(
-      ["hook", open, "--connections", file],
+      ["hook", open, "--connections", connections],
       JSON.stringify({
         hook_event_name: "PreToolUse",
         tool_name,
@@ -302,6 +348,20 @@ describe("a connection's data", () => {
     ["Bash", { command: "cat memory/support.jsonl" }],
     ["Bash", { command: "grep -r HERON memory" }],
     ["Bash", { command: "cat memory/*" }],
+    ["Bash", { command: "cat memory/sup*.jsonl" }],
+    ["Bash", { command: "cat memory/suppor?.jsonl" }],
+    ["Bash", { command: "cat memory/suppor[s-v].jsonl" }],
+    ["Bash", { command: "cat memory/cur*.txt" }],
+    ["Bash", { command: "cat memory/[!a]-li*.txt" }],
+    ["Bash", { command: "cat snapshots/t*/sup*.jsonl" }],
+    ["Bash", { command: "cat snapshots/**/cur*.txt" }],
+    ["Bash", { command: "cat snapshots/t*/support.jsonl" }],
+    ["Bash", { command: "cat mem*/./support.jsonl" }],
+    ["Bash", { command: "cat memory/{support,other}.jsonl" }],
+    ["Bash", { command: "cat {memory,logs}/sup*.jsonl" }],
+    ["Bash", { command: "cat **/sup*.jsonl" }],
+    ["Bash", { command: "cat memory/**/sup*.jsonl" }],
+    ["Bash", { command: `cat "${join(project, "memory", "sup*.jsonl")}"` }],
   ])("%s %j is denied, whatever the rules say", async (tool, input) => {
     const result = await call(tool, input);
     expect(result.stdout).toContain('"deny"');
@@ -314,6 +374,13 @@ describe("a connection's data", () => {
     ["mcp__support-memory__search_nodes", { query: "x" }],
     ["Read", { file_path: join(project, "memory/other.txt") }],
     ["Bash", { command: "ls" }],
+    ["Bash", { command: "rm *.log" }],
+    ["Bash", { command: "rm **/*.log" }],
+    ["Bash", { command: "cat *.jsonl" }],
+    ["Bash", { command: "cat memory/{logs,other}.jsonl" }],
+    ["Bash", { command: "cat memory/suppor[a-c].jsonl" }],
+    ["Bash", { command: "cat memory/sup*.log" }],
+    ["Bash", { command: "cat memory/sup*.jsonl/child" }],
     ["Grep", { pattern: "x", path: project }],
   ])("%s %j is left to the rules", async (tool, input) => {
     expect(await call(tool, input)).toEqual({
@@ -323,13 +390,90 @@ describe("a connection's data", () => {
     });
   });
 
-  test("a long run of glob characters is cut in linear time", async () => {
-    // CodeQL js/polynomial-redos flagged the old cut; it is linear by construction now.
-    const started = performance.now();
+  test("a matching dangling link is attributed to its protected destination", async () => {
     const result = await call("Bash", {
-      command: `cat ${"*".repeat(100_000)}`,
+      command: "cat snapshots/pending*.txt",
     });
-    expect(performance.now() - started).toBeLessThan(2_000);
-    expect(result.stdout).not.toContain("holds the data of connection");
+    expect(result.stdout).toContain(
+      "pending.jsonl holds the data of connection support-memory",
+    );
+  });
+
+  test.each(["cat memory/suppor{s..v}.jsonl", "cat memory/{03..01..1}.jsonl"])(
+    "the guard refuses unsupported brace sequences in %s",
+    async (command) => {
+      const result = await call("Bash", { command });
+      expect(result.stdout).toContain("holds the data of connection");
+    },
+  );
+
+  test.each([
+    ["parent navigation", "absent*/../public.txt"],
+    [
+      "too many segments once joined to the project",
+      `${"./".repeat(254)}absent*`,
+    ],
+  ])(
+    "refuses a wildcard with %s even with no matches",
+    async (_reason, pattern) => {
+      const result = await call("Bash", { command: `cat ${pattern}` });
+      expect(result.stdout).toContain("holds the data of connection");
+    },
+  );
+
+  test("a glob matching a protected directory also guards its uncreated children", async () => {
+    mkdirSync(join(project, "vault"));
+    const directories = join(project, ".nodrail/directories.json");
+    writeFileSync(
+      directories,
+      JSON.stringify({
+        connections: {
+          "support-memory": {
+            operations: { search_nodes: {} },
+            data: ["./vault"],
+          },
+        },
+      }),
+    );
+    const result = await call(
+      "Bash",
+      { command: "cat v?ult/./nested/item" },
+      directories,
+    );
+    expect(result.stdout).toContain("holds the data of connection");
+  });
+
+  test("refuses a glob with more results than the guard can inspect", async () => {
+    const large = join(project, "large");
+    mkdirSync(large);
+    try {
+      for (let index = 0; index < 500; index += 1)
+        writeFileSync(join(large, `entry-${index}.txt`), "");
+      const input = { command: "cat large/entry-*.txt" };
+      expect((await call("Bash", input)).stdout).toBe("");
+      const costly = await call("Bash", {
+        command: `cat large/entry-${"?".repeat(512)}.log`,
+      });
+      expect(costly.stdout).toContain("holds the data of connection");
+      writeFileSync(join(large, "entry-500.txt"), "");
+      const result = await call("Bash", input);
+      expect(result.stdout).toContain("holds the data of connection");
+    } finally {
+      rmSync(large, { recursive: true, force: true });
+    }
+  });
+
+  test.each([
+    ["a long run of stars", "*".repeat(100_000)],
+    ["an overlong suffix", `*${"/missing".repeat(12_000)}`],
+    ["an overly deep suffix below the length limit", `*${"/x".repeat(1800)}`],
+  ])("rejects %s within the CPU budget", async (_name, pattern) => {
+    const started = process.cpuUsage();
+    const result = await call("Bash", {
+      command: `cat ${pattern}`,
+    });
+    const { user, system } = process.cpuUsage(started);
+    expect((user + system) / 1000).toBeLessThan(2_000);
+    expect(result.stdout).toContain("holds the data of connection");
   });
 });

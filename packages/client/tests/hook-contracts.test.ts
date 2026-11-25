@@ -1,4 +1,4 @@
-// The Cloud hook and `.nodrail/contracts.json` (R344): the brief's reported
+// The Cloud hook and `.nodrail/contracts.json`: the brief's reported
 // fields in `params.brief` and classified inputs as `[classified]`, checked
 // by the SDK's own `withContractFields`, loaded only for a call a contract
 // covers. Without the file nothing changes; a file or checker that can't be

@@ -1,4 +1,4 @@
-// Briefs (DC-02.1) and tool inputs (DC-02.2) through `nodrail-policy hook`:
+// Briefs and tool inputs through `nodrail-policy hook`:
 // the brief an agent is started with and the arguments of a connection
 // operation, checked against their declared contracts on the exact call,
 // before any rule; typed `where` on rules and gates reads the valid value.

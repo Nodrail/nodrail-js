@@ -12,7 +12,7 @@ Parser and write reconstruction done; hook wiring pending.
 
 ## Next steps
 
-1. Wire the check into the hook (DC-04.3).
+1. Wire the check into the hook.
 2. Add the mediated writer.
 
 ## Open questions

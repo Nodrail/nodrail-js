@@ -28,7 +28,7 @@ import { PROTECT_LIST, type DesiredFile } from "./team-files.ts";
 export const EVIDENCE_FILE = ".nodrail/evidence.json";
 
 /**
- * Where apply writes the compiled brief and input contracts (R344), for
+ * Where apply writes the compiled brief and input contracts, for
  * the Cloud hook to send `params.brief` and classified inputs as Cloud's
  * rules read them. Like connections.json: written whole, never a secret.
  */
@@ -76,7 +76,7 @@ const readsLocal = (
   producers.some((p) => p.class === "runtime-observed");
 
 /**
- * `{ url, workspace_revision }` for the hook's `--evidence` (R341), when a
+ * `{ url, workspace_revision }` for the hook's `--evidence`, when a
  * gate reads evidence a verifier produces and the lock has a workspace
  * revision to ask about. The token is the person's, from NODRAIL_TOKEN.
  */
@@ -131,9 +131,12 @@ export function accountableFiles(input: {
   root: string;
   effective: string;
   env?: Env;
+  setup?: { connect: { decide: string } | null };
 }): DesiredFile[] {
   return [
-    evidenceConfig(input.root, input.effective, input.env ?? {}),
+    input.setup?.connect
+      ? null
+      : evidenceConfig(input.root, input.effective, input.env ?? {}),
     contractsFile(input.effective),
   ].filter((file): file is DesiredFile => file !== null);
 }
@@ -180,7 +183,7 @@ export type EvidenceLine = {
 };
 
 const SHARED =
-  "shared budgets are enforced only on a Cloud-managed connection; the local hook would hold every call it covers";
+  "shared budgets need a shared budget authority; the hook would deny every call they cover";
 const NO_GUARD =
   "runtime-observed evidence needs the setup guard, so agents can't run `nodrail evidence run` themselves or write the run ledger";
 
@@ -222,6 +225,7 @@ export function accountablePlan(input: {
   guard: { active: boolean; detail: string };
   /** Whether the hook gets `--evidence`, so Cloud can be asked. */
   cloud: boolean;
+  connected?: "cloud" | "local";
 }) {
   const document = effectiveDocument(input.effective);
   const budgets: BudgetLine[] = limitsIn(document).map((budget) => ({
@@ -236,7 +240,7 @@ export function accountablePlan(input: {
     counts: counts(budget),
     enforced:
       budget.across === "environment"
-        ? "Cloud-managed connection"
+        ? "shared budget authority"
         : budget.source === "admission"
           ? `the local hook reserves before each call (${windowOf(budget)}), settled on PostToolUse`
           : `the local hook stops further work at the limit (${windowOf(budget)}); a step without a reading is unknown and holds`,
@@ -252,9 +256,13 @@ export function accountablePlan(input: {
           : []),
         ...(cloud
           ? [
-              input.cloud
-                ? "Cloud's answer for the published workspace revision (NODRAIL_TOKEN with read)"
-                : "Cloud, once the lock has a workspace revision (until then unmet here)",
+              input.connected === "cloud"
+                ? "the control plane, using the host credential for the published workspace revision"
+                : input.connected === "local"
+                  ? "external evidence is unavailable in decide: local"
+                  : input.cloud
+                    ? "Cloud's answer for the published workspace revision (NODRAIL_TOKEN with read)"
+                    : "Cloud, once the lock has a workspace revision (until then unmet here)",
             ]
           : []),
       ];
@@ -296,7 +304,7 @@ export function accountablePlan(input: {
 /**
  * Whether the setup guard is on for this host: the hook apply writes always
  * carries the protect list, which refuses `nodrail` run by an agent and any
- * write to the run ledger (R364), wherever it resolves. Claude Code runs it
+ * write to the run ledger, wherever it resolves. Claude Code runs it
  * unless a settings file turns hooks off; Codex and Copilot run it once the
  * person trusts the folder, which apply checks for Codex.
  */
@@ -346,6 +354,7 @@ export function accountableHere(
     home: string;
     env: Env;
     managed?: { claude?: string };
+    decide?: "cloud" | "local";
   },
   runtime: Runtime,
   effective: string,
@@ -354,6 +363,7 @@ export function accountableHere(
   return accountablePlan({
     effective,
     guard: setupGuard(input, runtime, files),
+    connected: input.decide,
     cloud: files.some((file) => file.path === EVIDENCE_FILE),
   });
 }

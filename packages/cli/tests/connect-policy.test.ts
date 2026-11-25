@@ -1,5 +1,5 @@
 // With decide: cloud, plan compares what is live with the lock, and apply
-// publishes it (connected mode PR 2, R383/R385).
+// publishes it.
 import { describe, expect, test } from "vitest";
 import { EFFECTIVE_FILE } from "../src/setup/claude-code.ts";
 import { livePolicy, publishPolicy } from "../src/setup/connect-policy.ts";
@@ -38,12 +38,14 @@ function cloud(
     workspace?: string;
     rulesWrite?: boolean;
     issues?: unknown[];
+    sourceDigest?: string | null;
   } = {},
 ) {
   const sent: { method: string; path: string; body: unknown }[] = [];
   const fetcher = (async (input: string | URL, init: RequestInit = {}) => {
     const url = new URL(String(input));
-    const body = init.body ? JSON.parse(String(init.body)) : undefined;
+    const body =
+      typeof init.body === "string" ? JSON.parse(init.body) : undefined;
     sent.push({
       method: init.method ?? "GET",
       path: url.pathname + url.search,
@@ -65,6 +67,10 @@ function cloud(
         environment: "development",
         published_at: "2026-11-22T10:00:00.000Z",
         published_by: "Ada",
+        source_digest:
+          options.sourceDigest === undefined
+            ? (live.managed?.policy_revision ?? null)
+            : options.sourceDigest,
         ...live,
       });
     if (url.pathname === "/api/v1/rules/preview")
@@ -162,7 +168,7 @@ describe("the live policy against the lock", () => {
     const state = await livePolicy(plan(), io);
     expect(state.publish).toBeNull();
     expect(state.checks[0]!.detail).toBe(
-      "in sync: development runs lock aaaaaaaaaaaa (v4, Ada)",
+      "in sync: development serves lock aaaaaaaaaaaa (v4, Ada)",
     );
   });
 
@@ -210,6 +216,16 @@ describe("the live policy against the lock", () => {
     const [check] = (await livePolicy(plan(), io)).checks;
     expect(check).toMatchObject({ ok: false });
     expect(check!.detail).toContain("unknown agent ghost (line 3)");
+  });
+
+  test("a previously managed version with no source is republished", async () => {
+    const { io } = cloud(
+      { policy_revision: 4, managed: mine },
+      { sourceDigest: null },
+    );
+    const result = await livePolicy(plan(), io);
+    expect(result.publish?.managed).toEqual(mine);
+    expect(result.checks[0]!.detail).toContain("apply publishes lock");
   });
 
   test("a token that can't publish fails only when there's something to publish", async () => {

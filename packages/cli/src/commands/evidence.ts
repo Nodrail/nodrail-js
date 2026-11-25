@@ -1,18 +1,18 @@
-// `nodrail evidence run|submit|show` (DC-03.1, S05): evidence a gate can
+// `nodrail evidence run|submit|show`: evidence a gate can
 // wait for.
 //
 // - `run <name> -- <command>`: runtime-observed, on this machine. The CLI
 //   reads the work's revision before and after the command and the JSON
 //   the command wrote to $NODRAIL_EVIDENCE_OUT, validates it against the
 //   evidence's pinned contract and records the event in the ledger folder.
-//   The command's exit code alone is never a value (R294). The setup guard
+//   The command's exit code alone is never a value. The setup guard
 //   keeps agents from running this themselves.
 // - `submit <name> --result <file>`: externally verified, from CI. It asks
 //   GitHub Actions for an OIDC token for this workspace and sends the value
 //   to Cloud, which checks who sent it. Retries are idempotent.
 // - `show <name>`: what was recorded here, and whether each gate
 //   requirement reading it is met for the current revision.
-import { spawn, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import {
   existsSync,
@@ -46,6 +46,7 @@ import {
 import { cleanRevision, workRevision } from "@nodrail/policy-engine/revision";
 import { visibleLines } from "../api.ts";
 import { UsageError, type Io } from "../io.ts";
+import { spawn } from "../spawn.js";
 import { contractOf, parseEvidenceArgs, short } from "./evidence-shared.ts";
 import { submit } from "./evidence-submit.ts";
 import { policyHere } from "./policy-here.ts";
@@ -100,7 +101,6 @@ function runCommand(command: string[], cwd: string, env: Io["env"]) {
       cwd,
       env: env as NodeJS.ProcessEnv,
       stdio: "inherit",
-      shell: process.platform === "win32",
     });
     child.on("error", (error) => done({ code: 127, error: error.message }));
     child.on("close", (code, signal) =>

@@ -235,7 +235,7 @@ describe("3. when a requirement is met", () => {
     );
   });
 
-  test("only the latest step counts: a later failing QA closes the gate (R375)", () => {
+  test("only the latest step counts: a later failing QA closes the gate", () => {
     expect(pr([...shipped(), ...ran("qa", "fail")])).toBe("deny");
     expect(pr([...shipped(), finished("qa", "fail")])).toBe("deny");
     expect(pr([...shipped(), ...ran("qa", "fail"), ...ran("qa", "pass")])).toBe(

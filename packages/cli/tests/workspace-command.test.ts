@@ -1,10 +1,11 @@
 // `nodrail workspace publish|show` (W4.3): the lock's revision becomes the
 // one the team intends, digests only; `show` compares it with the lock and
 // each host here.
+import { basename } from "node:path";
 import { describe, expect, test } from "vitest";
 import { TOKEN } from "./support/fake-api.ts";
 import { fakeIo } from "./support/fake-io.ts";
-import { locked, RESOURCES, windows } from "./support/setup-project.ts";
+import { locked, RESOURCES } from "./support/setup-project.ts";
 
 type Sent = { method: string; path: string; query: string; body: any };
 
@@ -58,7 +59,7 @@ async function project(id: string | null = ID) {
   return { p, api, run };
 }
 
-describe.skipIf(windows)("nodrail workspace", () => {
+describe("nodrail workspace", () => {
   test("publish sends the lock's revision and file digests, after asking", async () => {
     const { p, api, run } = await project();
     const lock = p.read("nodrail.lock.yaml");
@@ -67,7 +68,7 @@ describe.skipIf(windows)("nodrail workspace", () => {
     expect(published.code).toBe(0);
     const post = api.seen.find((call) => call.method === "POST")!;
     expect(post.path).toBe("/api/v1/workspace-revisions");
-    expect(post.body.project).toBe(p.cwd.split("/").pop());
+    expect(post.body.project).toBe(basename(p.cwd));
     expect(post.body.project_id).toBe(ID);
     expect(api.seen[0]!.query).toBe(`?project_id=${ID}`);
     expect(post.body.revision).toBe(revision);

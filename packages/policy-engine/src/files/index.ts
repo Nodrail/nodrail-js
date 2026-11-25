@@ -1,9 +1,9 @@
-// File-content contracts (S07, DC-04.2, preview): a typed frontmatter and
+// File-content contracts (preview): a typed frontmatter and
 // section reader for complete files, the complete content each supported
 // write would leave (Claude Code Write and Edit, apply_patch), and a check
 // of a whole write against the contracts governing its files. Results are
 // `preflight-only` unless a mediated writer applies the write; none is
-// atomic. Not wired into the hook yet: DC-04.3 decides where it runs.
+// atomic. The hook does not call this check yet.
 export { FILE_LIMITS, GUARANTEES, type Guarantee } from "./limits.ts";
 export { readText, type FileIssue, type FileText } from "./text.ts";
 export {

@@ -122,16 +122,16 @@ A role on an attachment that doesn't accept it is an error, never ignored.
 
 Every attachment names a shape from the registry. The binding names in the second column are what plans, locks and test cases use.
 
-| ID  | Declared at                                                                                                                                                                                             | Binding                             |
-| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------- |
-| S01 | `receipts.<name>: { shape, format }` in `nodrail.yaml`; Agent `spec.receipt: <name>`. An Agent without `spec.receipt` gets the receipt of its own name, if there is one, shown in the plan as implicit. | `receipt:<name>`                    |
-| S02 | Agent `spec.brief: <shape>`, or `{ shape, format: header, header: { aliases } }` for the flat-line bridge                                                                                               | `brief:<agent>`                     |
-| S03 | `connections.<c>.operations.<tool>.input: <shape>`                                                                                                                                                      | `input:<c>.<tool>`                  |
-| S04 | `connections.<c>.operations.<tool>.output: <shape>`                                                                                                                                                     | `output:<c>.<tool>`                 |
-| S05 | `evidence.<name>: { shape, producers, subject }`                                                                                                                                                        | `evidence:<name>`                   |
-| S06 | `memory.<name>: { shape, connection, operations, writers, deleters, max_records }`                                                                                                                      | `memory:<name>`                     |
-| S07 | `files.<name>: { root, pattern, frontmatter, sections, max_bytes, writers }`                                                                                                                            | `file:<name>`                       |
-| S09 | `inventory: { shape, values }`                                                                                                                                                                          | `inventory`                         |
+| ID  | Declared at                                                                                                                                                                                             | Binding             |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------- |
+| S01 | `receipts.<name>: { shape, format }` in `nodrail.yaml`; Agent `spec.receipt: <name>`. An Agent without `spec.receipt` gets the receipt of its own name, if there is one, shown in the plan as implicit. | `receipt:<name>`    |
+| S02 | Agent `spec.brief: <shape>`, or `{ shape, format: header, header: { aliases } }` for the flat-line bridge                                                                                               | `brief:<agent>`     |
+| S03 | `connections.<c>.operations.<tool>.input: <shape>`                                                                                                                                                      | `input:<c>.<tool>`  |
+| S04 | `connections.<c>.operations.<tool>.output: <shape>`                                                                                                                                                     | `output:<c>.<tool>` |
+| S05 | `evidence.<name>: { shape, producers, subject }`                                                                                                                                                        | `evidence:<name>`   |
+| S06 | `memory.<name>: { shape, connection, operations, writers, deleters, max_records }`                                                                                                                      | `memory:<name>`     |
+| S07 | `files.<name>: { root, pattern, frontmatter, sections, max_bytes, writers }`                                                                                                                            | `file:<name>`       |
+| S09 | `inventory: { shape, values }`                                                                                                                                                                          | `inventory`         |
 
 ### S01 receipts
 
@@ -444,7 +444,7 @@ A numeric budget needs `required_engine_version: 5` in its file and compiles int
 | `sum: { tool, operation, path: input.… }`  | an integer input known before the call                     | the property's, e.g. usd_cents | admission | Enforced allowance                    |
 | `sum: { tool, operation, path: result.… }` | an integer result, measured after the call                 | the property's                 | measured  | Measured usage · stops further work   |
 | `tokens: N` with `source: measured`        | subagent tokens the host measured (Claude Code foreground) | `tokens`                       | measured  | Measured usage · stops further work   |
-| legacy `tokens:` / `usd:`                  | what agents reported in receipts (R283)                    | tokens / USD                   | agent     | Agent-reported usage · advisory limit |
+| legacy `tokens:` / `usd:`                  | what agents reported in receipts                           | tokens / USD                   | agent     | Agent-reported usage · advisory limit |
 
 Labels follow from the source and can't be configured. Sources never mix in one budget.
 
@@ -638,7 +638,7 @@ A lock that differs from the recompiled contracts is refused until the change is
 | `agent-reported`       | An agent's receipt or claim.                                                            | Requirements on `agent-reported`.                                             |
 | `runtime-observed`     | The local runtime (hook, adapter) saw it.                                               | `runtime-observed` and below.                                                 |
 | `externally-verified`  | A verifier configured on the server, with authenticated evidence for the exact subject. | Every gate authority.                                                         |
-| `person-authenticated` | A person signed in to the control plane: labels.                                                    | Only what asks for a person; never stands in for the others, nor they for it. |
+| `person-authenticated` | A person signed in to the control plane: labels.                                        | Only what asks for a person; never stands in for the others, nor they for it. |
 
 Structure proves conformance, not truth: `anchor: fresh`, `tests_passed: true` or `usage.usd: 0` in a valid receipt prove nothing. Provenance is relative to the deployment's trust boundary; local records can be altered by whoever owns the machine. Passing a gate never grants a permission the policy lacks.
 
@@ -662,13 +662,13 @@ The same projection applies to run events, schema descriptions, examples, errors
 
 ### Tokens and roles
 
-| Operation                                                 | Token scope                                                | Server roles                                                          |
-| --------------------------------------------------------- | ---------------------------------------------------------- | --------------------------------------------------------------------- |
-| Read projected schemas, reported records, views, insights | `workspace:read`                                           | Per existing view rules; viewers see their own sources.               |
-| Publish contracts (with the workspace revision)           | `policies:write`                                           | admin, policy_manager                                                 |
-| Report projected records                                  | `inventory:write` (reporting only)                         | Any member, for their own machines. Never authorizes.                 |
-| Submit authoritative evidence                             | a new `evidence:submit`, held by configured verifiers only | —                                                                     |
-| Edit inventory labels                                     | `policies:write` through the published workspace           | admin, policy_manager                                                 |
+| Operation                                                 | Token scope                                                | Server roles                                            |
+| --------------------------------------------------------- | ---------------------------------------------------------- | ------------------------------------------------------- |
+| Read projected schemas, reported records, views, insights | `workspace:read`                                           | Per existing view rules; viewers see their own sources. |
+| Publish contracts (with the workspace revision)           | `policies:write`                                           | admin, policy_manager                                   |
+| Report projected records                                  | `inventory:write` (reporting only)                         | Any member, for their own machines. Never authorizes.   |
+| Submit authoritative evidence                             | a new `evidence:submit`, held by configured verifiers only | —                                                       |
+| Edit inventory labels                                     | `policies:write` through the published workspace           | admin, policy_manager                                   |
 
 Existing reporting-only tokens gain no policy or evidence privileges. Tenancy comes from the authenticated context, never from a field.
 
@@ -686,12 +686,12 @@ Compile issue codes: `grammar`, `unknown-shape`, `extends-chain`, `depth`, `prop
 
 ## Limits
 
-| What                                                         | Bytes                                        |
-| ------------------------------------------------------------ | -------------------------------------------- |
-| Receipt block, fences included                               | 8 KiB                                        |
-| Brief, tool input, evidence, memory record                   | 16 KiB                                       |
-| Tool result                                                  | 64 KiB                                       |
-| File                                                         | 64 KiB by default, `max_bytes` up to 256 KiB |
-| Inventory labels                                             | 4 KiB                                        |
+| What                                       | Bytes                                        |
+| ------------------------------------------ | -------------------------------------------- |
+| Receipt block, fences included             | 8 KiB                                        |
+| Brief, tool input, evidence, memory record | 16 KiB                                       |
+| Tool result                                | 64 KiB                                       |
+| File                                       | 64 KiB by default, `max_bytes` up to 256 KiB |
+| Inventory labels                           | 4 KiB                                        |
 
 These apply at the transport or attachment boundary, before validation.

@@ -1,4 +1,4 @@
-// `nodrail budgets status|reconcile` (DC-03.3, R299): numeric budgets as the
+// `nodrail budgets status|reconcile`: numeric budgets as the
 // local run ledger counts them, and the person's word on a reservation
 // whose outcome is unknown. Everything is the engine's (`/ledger`): this
 // only reads it out and records what the person says, under the run's lock.

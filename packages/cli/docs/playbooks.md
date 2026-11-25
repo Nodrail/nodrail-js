@@ -513,7 +513,7 @@ observe:
   2. Give the project an `id:` in nodrail.yaml.
   3. Point `telemetry:` at `<your Nodrail address>/api/v1/otlp/v1/traces?environment=<slug>` (`https://app.nodrail.com` on Nodrail Cloud), with `bearer: { fromEnv: NODRAIL_TOKEN }` and the raw token in that variable.
 
-  The **Inventory** page then shows each person's machines, project by project, and Activity → **Reported locally** shows each decision and local run. All of it is evidence of local enforcement, recorded rather than decided again. Admins and policy managers see everyone; others see their own. `nodrail workspace publish` marks which locked revision the team should run.
+  The **Inventory** page then shows each person's machines, project by project, and Activity → **OTLP reports** shows each decision and local run. All of it is evidence of local enforcement, recorded rather than decided again. Admins and policy managers see everyone; others see their own. `nodrail workspace publish` marks which locked revision the team should run.
 
 ### Telemetry (preview)
 
@@ -550,33 +550,48 @@ A receiver that is down or busy (408, 429, 5xx, no connection) gets the same spa
 
 Claude Code and Codex can export their own telemetry too, which this doesn't switch on. Both send the person's email and account ids with every record, and Codex sends each tool call's arguments and output: route theirs through a Collector that drops what you don't want sent.
 
-### Connect to Nodrail (in progress)
+### Connect to Nodrail
 
-`connect:` names the control plane the project is connected to, a self-hosted Nodrail server or Nodrail Cloud, and who decides each call:
+Add a project `id` (a UUID) and name the control plane and policy source
+in `nodrail.yaml`:
 
 ```yaml
 connect:
-  url: https://app.nodrail.com       # or your self-hosted address; Nodrail Cloud when left out
-  workspace: acme                     # slugs, as in /app/<workspace>/<environment>
+  url: https://app.nodrail.com
+  workspace: acme
   environment: development
-  decide: cloud                       # cloud: the control plane decides, with its runs and budgets | local: this machine
-  enforce: on                         # on | watch: record what would be blocked, block nothing
-  credential: { fromEnv: NODRAIL_CREDENTIAL }   # the agent credential (ndr_…), never written
+  decide: cloud
+  enforce: on
+  credential: { fromEnv: NODRAIL_CREDENTIAL }
 ```
 
-`decide` has no default, so nobody is surprised by who decides. `plan` says it in words. With a credential, `plan` asks Nodrail whose credential it is, and fails when it belongs to another workspace or environment. It never prints the credential. When Nodrail can't be reached, the credential stays unchecked, not failed.
+With `decide: cloud`, `plan` checks the host credential's workspace and
+environment. It uses your management token to compare the live policy
+with the lock and show what `apply` would publish. `apply` needs that
+comparison before it installs the hook. Each publication names the
+project and its lock so `plan` can detect drift. See [the CLI reference](cli.md).
 
-With `decide: cloud`, the locked policy is what Nodrail runs. `plan` compares the live version with the lock: in sync, apply publishes, or drift when the rules were changed in Nodrail. Each version `apply` publishes names this project's `id` and lock, so the next `plan` can tell. Your own token publishes it, never the agent's credential. See `plan` in [the CLI reference](cli.md).
+On Claude Code, Codex and Copilot, `apply` installs `nodrail policy hook`
+with `--connect .nodrail/connect.json`. That file pins the digest from
+the lock and points to the host credential by reference. The hook verifies
+the destination and credential reference against the locked manifest before
+authenticating. Set the named environment variable where the host runs. The hook conditionally fetches
+the policy, checks its SHA-256 and decides locally. Evidence reads use the
+same credential. Decisions, reported steps and tool outcomes are queued
+for delivery to the control plane.
 
-With `decide: cloud`, `apply` sets up Claude Code with the **connected hook** (`nodrail connect hook`) instead of the local one:
+During an outage the hook uses a verified cached copy whose digest matches
+the lock. A missing cache, a mismatched live policy or a rejected credential
+blocks a tool call in enforcement mode. With a verified watch configuration,
+the hook records the evaluation failure locally under
+`~/.nodrail/watch-audit/` and lets the host handle ordinary calls. The setup
+guard still protects hook-owned files in watch mode. If the connection
+configuration cannot be verified against the repository lock, the hook
+refuses the call.
 
-- **Before every call**, the local guards run first, exactly as in the local hook: the protect list, the setup, the run ledger, git's folders and the connections' data. A call they refuse never leaves the machine.
-- **Everything else is decided by Nodrail**, with the same client hook the plugin ships. A call is allowed or denied at once, with the reason; nothing waits for a person. A call Nodrail hasn't answered in 25 seconds is denied.
-- **Subagent steps and call outcomes** go to Nodrail too, so its Runs show the run, its receipts and its budgets.
-- `.nodrail/connect.json` holds the address and the credential's **reference**, never the credential. Set `NODRAIL_CREDENTIAL`, or the variable you named, where Claude Code runs. Without it, every call is blocked, never let through.
-- `apply` publishes the locked policy first. When the live policy can't be checked (no token, Nodrail unreachable), it refuses rather than install a hook against rules nobody compared with the lock.
-
-`decide: cloud` sets up Claude Code only for now; `plan` refuses it for Codex and Copilot. `enforce: watch` is checked but still refused.
+`decide: local` uses the repository policy and skips control-plane
+publication, policy pulls, evidence reads and decision reporting.
+With `enforce: watch`, inspect the local record with `nodrail policy runs`.
 
 ### Tested versions (proposed)
 

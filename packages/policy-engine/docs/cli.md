@@ -49,6 +49,14 @@ nodrail-policy eval rules.yaml \
 
 A shell command that only reads files, or searches a folder, in a shape the hook knows exactly is also judged as that file read or search, and the stricter of the two decisions holds: a deny over an allow. So the file rules decide `cat src/app.ts` as they decide the Read tool, secrets included, and a rule about the command itself keeps its meaning. With `--protect-list`, such a read of the setup's files, such as Codex reading a skill, isn't refused for naming them: it changes nothing, and the file rules decide it. Any other command that names them is. The shapes are `cat`, `head`, `tail` (not `-f`), `nl -ba` and `wc` on one file or several, up to 20, each judged as its own read so one secret among them denies the command; `sed -n '<lines>p'` and `grep` on one file; `ls`; and `rg`, with or without `--files`, with flags that only shape the output and one optional `-g` glob. A path with a wildcard or a leading `~` is left a command, because the shell expands it first; an `rg` pattern or glob may hold wildcards only where it is quoted. `rg --hidden`, `-u`, `--no-ignore` and `grep -r` stay commands too: they read dotfiles such as `.env` without naming them. Codex reads files this way.
 
+`--connect <file>` reads the setup written by `nodrail apply`. Cloud mode
+fetches the live policy with the host credential, verifies it against the
+lock digest and uses an ETag to revalidate the cached file. During an outage
+only a matching, previously verified copy can decide. The host also uses
+its credential to read evidence and report decisions. In local mode the
+hook evaluates the supplied repository policy. Watch mode records verdicts
+and lets the host continue once policy verification succeeds.
+
 `--connections <file>` reads calls to the setup's tool connections as their declarations say. Claude Code and Codex both name a call to an MCP server `mcp__<connection>__<tool>`. For a connection the file declares, the call is tool `<connection>`, operation `<tool>`, and the resource is the one its declaration names, such as `{ kind: collection, from: collection }`: the `collection` argument's value, as a `collection`. A tool the connection doesn't declare, or a call without the argument its resource comes from, is denied with the reason. The agent is the one the host names, never one written in the arguments. A file that can't be read blocks every call. `nodrail apply` writes it as `.nodrail/connections.json`; only its `operations` are read.
 
 `--telemetry <file>` sends each decision as an OpenTelemetry span to the receiver the file names (`nodrail apply` writes it as `.nodrail/telemetry.json`). The hook only adds the span to a bounded queue in `~/.nodrail/telemetry/` and starts a separate sender, so a receiver that is slow or down never delays or changes a decision; a file that can't be read turns telemetry off with a warning, and the hook goes on.

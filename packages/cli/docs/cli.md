@@ -180,7 +180,7 @@ Whether apply *could* go ahead (`ready`, the exit code) is one question; whether
 | `inactive` | It doesn't run yet; the reason says what to do, such as trusting the hook in Codex or running `apply`. |
 | `unknown` | The host couldn't be asked, such as `codex` missing from `PATH`. |
 
-With `connect:` and `decide: cloud` (see [Connect to Nodrail](playbooks.md#connect-to-nodrail-in-progress)), `plan` also compares the policy live in that environment with the lock, using your own token for that address (`nodrail login --url <address>`). It reports one of:
+With `connect:` and `decide: cloud` (see [Connect to Nodrail](playbooks.md#connect-to-nodrail)), `plan` also compares the policy live in that environment with the lock, using your own token for that address (`nodrail login --url <address>`). It reports one of:
 
 - **in sync**
 - **apply publishes** the lock, with what it adds, changes and removes

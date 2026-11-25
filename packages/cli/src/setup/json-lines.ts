@@ -1,5 +1,5 @@
-import { spawn } from "node:child_process";
 import type { Env } from "../config.ts";
+import { spawn } from "../spawn.js";
 
 /** A JSON-RPC message, as servers on stdio send them, one per line. */
 export type Message = {
@@ -32,7 +32,6 @@ export function askServer<T>(input: {
       cwd: input.cwd,
       env: input.env as NodeJS.ProcessEnv,
       stdio: ["pipe", "pipe", "ignore"],
-      shell: process.platform === "win32",
     });
     let settled = false;
     const done = (error: Error | null, value?: T) => {

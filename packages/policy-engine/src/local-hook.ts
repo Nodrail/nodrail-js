@@ -7,7 +7,7 @@ import {
   type ToolInput,
 } from "./actions.ts";
 import { connectionCall, type ConnectionCalls } from "./connections.ts";
-import { checkContracts, type ContractCall } from "./contract-calls.ts";
+import { checkContracts } from "./contract-calls.ts";
 import type { Observed } from "./hook-telemetry.ts";
 import type { BudgetAuthority } from "./budget-ledger.ts";
 import type { Descriptor } from "./evaluator.ts";
@@ -41,6 +41,11 @@ export const toDescriptor = (
   resourceId: action.resource.id,
   params: action.params as Descriptor["params"],
 });
+
+export type StepReport = {
+  message: string | null;
+  via: "stop" | "handback";
+};
 
 export type LocalHookOptions = Identity & {
   document: PolicyDocument;
@@ -76,7 +81,7 @@ export type LocalHookOptions = Identity & {
   /** Told of every judged call, as it was judged; can't change the result. */
   observe?: ((observed: Observed) => void) | null;
   /** Told of every run event recorded; can't change the result. */
-  report?: ((run: string, event: RunEvent) => void) | null;
+  report?: ((run: string, event: RunEvent, step?: StepReport) => void) | null;
 };
 
 /**
@@ -113,12 +118,17 @@ export type Judged = {
   /** What was decided, when the call could be described at all. */
   action: ActionDescriptor | null;
   decision: SimulationResult | null;
+  refusal?: string;
 };
 
-const refused = (text: string): Judged => ({
+const refused = (
+  text: string,
+  action: ActionDescriptor | null = null,
+): Judged => ({
   result: deny(text),
-  action: null,
+  action,
   decision: null,
+  refusal: text,
 });
 
 const heldByRun = (decision: SimulationResult) =>
@@ -133,7 +143,7 @@ function denied(decision: SimulationResult, subject: string) {
   if (!heldByRun(decision))
     return `Nodrail: rule ${decision.matchedRuleId} denies ${subject}.`;
   return decision.reason === "budget"
-    ? `Nodrail: ${decision.explanation} Over the limit, ${subject} is denied.`
+    ? `Nodrail: ${decision.explanation} So ${subject} is denied.`
     : `Nodrail: ${decision.explanation} Until then, ${subject} is denied; meet the gate, then try again.`;
 }
 
@@ -259,25 +269,55 @@ export function judgeToolCall(
   return judged;
 }
 
-function judgeCall(stdin: string, options: LocalHookOptions): Judged {
+function describeEvent(stdin: string, options: LocalHookOptions) {
   const event = parseEvent(stdin);
   if (event?.hook_event_name !== "PreToolUse")
-    return refused(
-      "Nodrail: unsupported hook event, so this action is blocked.",
-    );
+    return "Nodrail: unsupported hook event, so this action is blocked.";
   const name = nonEmptyText(event.tool_name);
   const input = event.tool_input;
   if (!name || typeof input !== "object" || input === null)
-    return refused(
-      "Nodrail: this call could not be identified, so it is blocked.",
-    );
-  const contracted = contractedCall(name, input as ToolInput, event, options);
+    return "Nodrail: this call could not be identified, so it is blocked.";
+  const action = describedCall(name, input as ToolInput, event, options);
+  return typeof action === "string"
+    ? action
+    : { action, event, input: input as ToolInput };
+}
+
+function integrityOf(
+  call: Exclude<ReturnType<typeof describeEvent>, string>,
+  options: LocalHookOptions,
+) {
+  const { action, input, event } = call;
+  return (
+    guardRefusal(action, input, event, options) ??
+    dataRefusal(action, input, event, options)
+  );
+}
+
+/**
+ * Enforce the same protected paths, setup files and connection data in watch
+ * mode as in the policy evaluator, even if policy or ledger reads fail.
+ */
+export function toolIntegrity(stdin: string, options: LocalHookOptions) {
+  const call = describeEvent(stdin, options);
+  if (typeof call === "string") return null;
+  const reason = integrityOf(call, options);
+  return reason ? deny(reason) : null;
+}
+
+function judgeCall(stdin: string, options: LocalHookOptions): Judged {
+  const call = describeEvent(stdin, options);
+  if (typeof call === "string") return refused(call);
+  const { action, event, input } = call;
+  const guarded = integrityOf(call, options);
+  if (guarded) return refused(guarded, action);
+  const contracted = checkContracts(
+    options.document,
+    action,
+    input as ToolInput,
+  );
   if ("refusal" in contracted) return refused(contracted.refusal);
-  const { action, values } = contracted;
-  const guarded =
-    guardRefusal(action, input as ToolInput, event, options) ??
-    dataRefusal(action, input as ToolInput, event, options);
-  if (guarded) return refused(guarded);
+  const { values } = contracted;
 
   const { document, now, unmatched, run } = options;
   const caller = callerOf(event, options);
@@ -298,7 +338,7 @@ function judgeCall(stdin: string, options: LocalHookOptions): Judged {
     );
   // A shell command that only reads a file is also judged as that read, so
   // the file rules apply to it, secrets included. The stricter decision wins.
-  const reads = readView(action, input as ToolInput, event) ?? [];
+  const reads = readView(action, input, event) ?? [];
   const { view, decision } = reads.reduce(
     (strictest, read) =>
       stricter(strictest, { view: read, decision: judge(read) }),
@@ -329,11 +369,11 @@ function judgeCall(stdin: string, options: LocalHookOptions): Judged {
  * declaration says, any other as the host's tool it is. Why not, if it
  * can't be read.
  */
-function describedCall(
+export function describedCall(
   name: string,
   input: ToolInput,
   event: { cwd?: unknown },
-  options: LocalHookOptions,
+  options: Pick<LocalHookOptions, "connections" | "host">,
 ): ActionDescriptor | string {
   const declared = options.connections
     ? connectionCall(name, input, options.connections, options.host)
@@ -347,52 +387,9 @@ function describedCall(
   );
 }
 
-/**
- * The call as an action, with its declared brief or input checked on the
- * exact call before any rule; or why it is refused.
- */
-function contractedCall(
-  name: string,
-  input: ToolInput,
-  event: { cwd?: unknown },
-  options: LocalHookOptions,
-): ContractCall {
-  const described = describedCall(name, input, event, options);
-  if (typeof described === "string") return { refusal: described };
-  return checkContracts(options.document, described, input);
-}
-
 export function decideToolCall(
   stdin: string,
   options: LocalHookOptions,
 ): HookResult {
   return judgeToolCall(stdin, options).result;
-}
-
-/**
- * What the local hook refuses whatever the rules say, for a hook that asks
- * Nodrail for everything else (connected mode, R383): the same protect
- * list, setup and connection-data checks, run here before the call leaves
- * the machine, so a connected setup is never weaker than a local one.
- * Null for a call these don't refuse, and for any event but PreToolUse.
- */
-export function guardRefusalFor(
-  stdin: string,
-  options: Pick<
-    LocalHookOptions,
-    "protect" | "setup" | "connections" | "data" | "host"
-  >,
-): string | null {
-  const event = parseEvent(stdin);
-  if (event?.hook_event_name !== "PreToolUse") return null;
-  const name = nonEmptyText(event.tool_name);
-  const input = event.tool_input;
-  if (!name || typeof input !== "object" || input === null) return null;
-  const full = options as LocalHookOptions;
-  const action = describedCall(name, input as ToolInput, event, full);
-  if (typeof action === "string") return action;
-  return (
-    guardRefusal(action, input as ToolInput, event, full) ??
-    dataRefusal(action, input as ToolInput, event, full)
-  );
 }

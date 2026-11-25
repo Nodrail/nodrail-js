@@ -1,4 +1,4 @@
-// Decision reporting to the control plane (R388, M1.3): the hook queues each
+// Decision reporting to the control plane: the hook queues each
 // decision and outcome on disk and a detached sender batches them to
 // `POST /runtime/decisions`. Nothing here may change or delay a decision.
 import { createServer, type IncomingMessage } from "node:http";
@@ -19,11 +19,20 @@ import {
   decisionSink,
   outcomeOf,
 } from "../src/decision-report";
+import {
+  decisionDestination,
+  decisionFolder,
+} from "../src/decision-destination";
 import { sendDecisionQueue } from "../src/decision-sender";
 import type { Observed } from "../src/hook-telemetry";
 import { compilePolicies } from "../src/yaml";
-import { enqueue, readStatus, spoolFolder } from "../src/telemetry";
+import { enqueue, readStatus } from "../src/telemetry";
 import { cli, homeAt, self } from "./run-cli.ts";
+
+const env = { NODRAIL_CREDENTIAL: "ndr_000000000000_secret" };
+
+const folderFor = (home: string, file: string) =>
+  decisionFolder(home, file, decisionDestination(file, env).binding);
 
 const RULES = `- rule: Edit sources
   tool: files
@@ -172,6 +181,8 @@ describe("what the hook queues", () => {
     const { rules, file } = project();
     const home = fresh("nodrail-home-");
     const restore = homeAt(home);
+    const previous = process.env.NODRAIL_CREDENTIAL;
+    process.env.NODRAIL_CREDENTIAL = env.NODRAIL_CREDENTIAL;
     try {
       const without = await cli(["hook", rules], pre("toolu_1"));
       const started = Date.now();
@@ -198,7 +209,7 @@ describe("what the hook queues", () => {
       );
       expect(deniedWith).toEqual(denied);
       await cli(["hook", rules, "--report", file], post("toolu_1"));
-      const folder = spoolFolder(home, file, "decisions");
+      const folder = folderFor(home, file);
       const entries = queued(folder);
       expect(entries.map((entry) => entry.type)).toEqual([
         "decision",
@@ -213,7 +224,58 @@ describe("what the hook queues", () => {
       expect(entries[2].key).toBe(entries[0].item.idempotency_key);
     } finally {
       restore();
+      if (previous === undefined) delete process.env.NODRAIL_CREDENTIAL;
+      else process.env.NODRAIL_CREDENTIAL = previous;
     }
+  });
+
+  test("sends a recorded step and its receipt before the decisions that follow", async () => {
+    const { file, dir } = project("https://nodrail.example");
+    const folder = folderFor(dir, file);
+    mkdirSync(folder, { recursive: true });
+    writeFileSync(join(folder, "sending"), "1");
+    const sink = decisionSink({
+      file,
+      env,
+      host: "claude-code",
+      document: compiled(),
+      self: ["/nonexistent"],
+      warn: () => undefined,
+      home: dir,
+    })!;
+    const receipt = "RECEIPT qa\nresult: PASS";
+    sink.step(
+      "run-1",
+      {
+        type: "step.finished",
+        step: "s1",
+        agent: "qa",
+        at: new Date().toISOString(),
+        verdict: null,
+        findings: [],
+        usage: {},
+      },
+      { message: `Internal notes\n\n${receipt}`, via: "stop" },
+    );
+    sink.observe({
+      judged: allowedWrite("src/a.ts", {}, null),
+      event: { session_id: "s", tool_use_id: "t" },
+      agent: "dev",
+    });
+    const plane = controlPlane();
+    await sendDecisionQueue(folder, file, env, plane.send);
+    expect(plane.seen.map(({ path }) => path)).toEqual([
+      "/api/v1/runtime/steps",
+      "/api/v1/runtime/decisions",
+      "/api/v1/runtime/heartbeat",
+    ]);
+    expect(plane.seen[0]!.body).toEqual({
+      run: { key: "run-1" },
+      step: { id: "s1", agent: "qa" },
+      event: "finished",
+      via: "stop",
+      receipt: { text: receipt },
+    });
   });
 
   test("a report file that can't be read turns reporting off, not the hook", async () => {
@@ -232,13 +294,14 @@ describe("what the hook queues", () => {
     const document = compiled();
     const sink = decisionSink({
       file,
+      env,
       host: "claude-code",
       document,
       self: ["/nonexistent"],
       warn: () => undefined,
       home,
     });
-    const folder = spoolFolder(home, file, "decisions");
+    const folder = folderFor(home, file);
     // A sender is at work (its lock is fresh), so none starts here.
     mkdirSync(folder, { recursive: true });
     writeFileSync(join(folder, "sending"), "1");
@@ -288,9 +351,9 @@ function controlPlane(options: { failFirst?: number; refuse?: string[] } = {}) {
 }
 
 function queueFolder(entries: object[]) {
-  const folder = fresh("nodrail-queue-");
+  const { dir, file } = project("https://nodrail.example");
+  const folder = folderFor(dir, file);
   for (const entry of entries) enqueue(folder, entry);
-  const { file } = project("https://nodrail.example");
   return { folder, file };
 }
 
@@ -307,8 +370,6 @@ const item = (key: string) => ({
     policy_digest: null,
   },
 });
-
-const env = { NODRAIL_CREDENTIAL: "ndr_000000000000_secret" };
 
 describe("the sender", () => {
   test("batches decisions, then reports outcomes on the rows they got", async () => {
@@ -328,13 +389,79 @@ describe("the sender", () => {
     expect(batches.map((call) => call.body.decisions.length)).toEqual([
       100, 50,
     ]);
-    expect(plane.seen.at(-1)).toEqual({
+    expect(plane.seen.find(({ path }) => path.endsWith("/reports"))).toEqual({
       path: "/api/v1/runtime/actions/row-1/reports",
       body: { report_key: `${keys[0]}:outcome`, outcome: "success" },
+    });
+    expect(plane.seen.at(-1)).toEqual({
+      path: "/api/v1/runtime/heartbeat",
+      body: { policy_digest: null },
     });
     expect(readStatus(folder)).toMatchObject({ state: "ok", sent: 151 });
     expect(queued(folder)).toEqual([]);
   });
+
+  test("settles each part of one Copilot patch from its single outcome", async () => {
+    const event = { session_id: "s1", tool_use_id: "patch-1" };
+    const key = callKey("copilot", event)!;
+    const parts = [0, 1].map((index) =>
+      callKey("copilot", {
+        ...event,
+        tool_use_id: `patch-1#${index}`,
+        nodrail_call_part: { id: "patch-1", index },
+      })!,
+    );
+    const { folder, file } = queueFolder([
+      ...parts.map(item),
+      { type: "outcome", key, outcome: "success" },
+    ]);
+    const plane = controlPlane();
+    await sendDecisionQueue(folder, file, env, plane.send);
+    expect(plane.seen.filter(({ path }) => path.endsWith("/reports"))).toEqual(
+      parts.map((part, index) => ({
+        path: `/api/v1/runtime/actions/row-${index + 1}/reports`,
+        body: { report_key: `${part}:outcome`, outcome: "success" },
+      })),
+    );
+  });
+
+  test.each([1, 2])(
+    "settles a shared patch when %i part decisions were refused",
+    async (rejected) => {
+      const key = "copilot:patch";
+      const parts = [`${key}#0`, `${key}#2`];
+      const digest = "a".repeat(64);
+      const { folder, file } = queueFolder([
+        ...parts.map(item),
+        {
+          type: "outcome",
+          key,
+          outcome: "success",
+          tokens: 8,
+          settlements: parts.map((part) => ({
+            key: part,
+            policyDigest: digest,
+          })),
+        },
+      ]);
+      const plane = controlPlane({ refuse: parts.slice(0, rejected) });
+      await sendDecisionQueue(folder, file, env, plane.send);
+      expect(plane.seen.filter(({ path }) => path.endsWith("/settle"))).toEqual(
+        parts.map((part) => ({
+          path: "/api/v1/runtime/budgets/settle",
+          body: {
+            call_fingerprint: part,
+            policy_digest: digest,
+            outcome: "success",
+            tokens: 8,
+          },
+        })),
+      );
+      expect(
+        plane.seen.filter(({ path }) => path.endsWith("/reports")),
+      ).toHaveLength(2 - rejected);
+    },
+  );
 
   test("a control plane that is down keeps the queue; the retry sends the same keys", async () => {
     const { folder, file } = queueFolder([item("k:1"), item("k:2")]);
@@ -347,11 +474,13 @@ describe("the sender", () => {
     });
     expect(queued(folder)).toHaveLength(2);
     await sendDecisionQueue(folder, file, env, plane.send);
-    const keysSent = plane.seen.map((call) =>
-      call.body.decisions.map(
-        (entry: { idempotency_key: string }) => entry.idempotency_key,
-      ),
-    );
+    const keysSent = plane.seen
+      .filter(({ path }) => path.endsWith("/decisions"))
+      .map((call) =>
+        call.body.decisions.map(
+          (entry: { idempotency_key: string }) => entry.idempotency_key,
+        ),
+      );
     expect(keysSent).toEqual([
       ["k:1", "k:2"],
       ["k:1", "k:2"],
@@ -359,6 +488,44 @@ describe("the sender", () => {
     expect(readStatus(folder)).toMatchObject({ state: "ok", sent: 2 });
     expect(plane.rows.size).toBe(2);
   });
+
+  test.each([
+    { url: "https://other.example" },
+    { workspace: "other" },
+    { environment: "production" },
+    {},
+  ])(
+    "quarantines waiting decisions and receipts after reconnecting (%j)",
+    async (changed) => {
+      const { folder, file } = queueFolder([
+        item("k:1"),
+        {
+          type: "step",
+          item: { receipt: { text: "work from the old connection" } },
+        },
+        { type: "outcome", key: "k:1", outcome: "failure" },
+      ]);
+      const plane = controlPlane({ failFirst: 1 });
+      await sendDecisionQueue(folder, file, env, plane.send);
+      expect(plane.seen).toHaveLength(1);
+      writeFileSync(
+        file,
+        JSON.stringify({
+          ...JSON.parse(readFileSync(file, "utf8")),
+          ...changed,
+        }),
+      );
+      const currentEnv = Object.keys(changed).length
+        ? env
+        : { NODRAIL_CREDENTIAL: "new-token" };
+      await sendDecisionQueue(folder, file, currentEnv, plane.send);
+      expect(plane.seen).toHaveLength(1);
+      expect(queued(folder)).toHaveLength(3);
+      expect(readStatus(folder)?.error).toContain(
+        "another or unbound destination",
+      );
+    },
+  );
 
   test("a failure after the decisions went in counts nothing twice", async () => {
     const { folder, file } = queueFolder([

@@ -6,7 +6,7 @@ import {
   symlinkSync,
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { join, resolve, sep } from "node:path";
+import { join, sep } from "node:path";
 import { describe, expect, test } from "vitest";
 import { describeArguments, describeToolCall } from "../src/actions";
 import { classifyArguments, classifyCommand } from "../src/commands";
@@ -26,8 +26,10 @@ const documentOf = (result: CompileResult) => {
 
 const now = new Date("2026-11-09T12:00:00.000Z");
 
-// Paths take the machine's own form: /repo here, D:\repo on Windows.
-const repo = resolve("/repo");
+// The project has an identity on disk, even when the paths under it are new.
+const repo = realpathSync.native(
+  mkdtempSync(join(tmpdir(), "nodrail-commands-")),
+);
 const inRepo = (...parts: string[]) => join(repo, ...parts);
 
 const rules = documentOf(
@@ -954,11 +956,12 @@ describe("tool calls", () => {
         ),
     ],
   ])("%s built to be slow is judged at once", (_label, judge) => {
-    const start = performance.now();
+    const start = process.cpuUsage();
     judge();
-    // Linear code takes milliseconds; a quadratic one would take minutes. The
-    // margin keeps a slow CI machine from failing it.
-    expect(performance.now() - start).toBeLessThan(2000);
+    // The fork's CPU time excludes time spent waiting for other CI workers.
+    // Linear code takes milliseconds; quadratic code would take minutes.
+    const { user, system } = process.cpuUsage(start);
+    expect((user + system) / 1000).toBeLessThan(2000);
   });
 
   test("a patch of more than 1,000 files can't be described, so a person reviews it", () => {
@@ -1315,7 +1318,7 @@ describe("the local hook", () => {
   });
 });
 
-describe("a line that makes a link and goes on (R376)", () => {
+describe("a line that makes a link and goes on", () => {
   test.each([
     "ln -s ../x sub/g5 && cp f sub/g5/y",
     "ln -s ../x sub/g5; cp f sub/g5/y",

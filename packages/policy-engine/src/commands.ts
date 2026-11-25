@@ -404,7 +404,7 @@ export function classifyCommand(line: string): CommandShape {
   const text = trimShellSpace(line);
   const parts = chainParts(text);
   // A link made in one part and used in the next doesn't exist yet when the
-  // line is judged, so such a line is judged whole (R376).
+  // line is judged, so such a line is judged whole.
   if (parts && programWords(text).some(makesLink))
     return { operation: "command.compound", text };
   return parts

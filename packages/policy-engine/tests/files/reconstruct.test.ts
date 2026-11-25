@@ -1,4 +1,4 @@
-// The complete file each supported write leaves (DC-04.2): Claude Code Write
+// The complete file each supported write leaves: Claude Code Write
 // and Edit replayed as Claude Code applies them, and apply_patch parsed and
 // applied with exact matching. What can't be known exactly is refused.
 import { describe, expect, test } from "vitest";

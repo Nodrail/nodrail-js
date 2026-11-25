@@ -6,6 +6,7 @@
 // leave the requirement unmet with the reason. A positive answer is cached
 // for at most 5 minutes per (requirement, subject); a negative one never.
 // Node only.
+import { createHash } from "node:crypto";
 import {
   existsSync,
   mkdirSync,
@@ -27,6 +28,7 @@ export type RemoteConfig = {
   url: string;
   token: string;
   workspaceRevision: string;
+  runtime?: boolean;
   fetch?: typeof fetch;
   timeoutMs?: number;
 };
@@ -89,7 +91,7 @@ export async function fetchEvidenceStatus(
   const base = config.url.replace(/\/$/, "");
   try {
     const response = await (config.fetch ?? fetch)(
-      `${base}/api/v1/evidence/status?${query.toString()}`,
+      `${base}/api/v1${config.runtime ? "/runtime" : ""}/evidence/status?${query.toString()}`,
       {
         headers: { authorization: `Bearer ${config.token}` },
         signal: AbortSignal.timeout(config.timeoutMs ?? REMOTE_TIMEOUT_MS),
@@ -109,8 +111,20 @@ export async function fetchEvidenceStatus(
 
 const cacheFile = (ledger: string) =>
   join(evidenceDirectory(ledger), "remote-cache.json");
-const cacheKey = (config: RemoteConfig, ask: RemoteAsk) =>
-  `${config.workspaceRevision}|${ask.gate}|${ask.index}|${ask.subject}`;
+const cacheKey = (scope: string, ask: RemoteAsk) =>
+  `${scope}|${ask.gate}|${ask.index}|${ask.subject}`;
+
+const cacheScope = (config: RemoteConfig) =>
+  createHash("sha256")
+    .update(
+      JSON.stringify([
+        config.url,
+        config.token,
+        config.runtime ?? false,
+        config.workspaceRevision,
+      ]),
+    )
+    .digest("hex");
 
 type Cache = Record<string, { at: number; status: RemoteStatus }>;
 
@@ -155,8 +169,9 @@ export async function remoteStatuses(
   const now = options.now.getTime();
   const cache = readCache(options.ledger);
   const missing: RemoteAsk[] = [];
+  const scope = cacheScope(config);
   for (const ask of asks) {
-    const hit = cache[cacheKey(config, ask)];
+    const hit = cache[cacheKey(scope, ask)];
     if (hit?.status.met && now - hit.at < POSITIVE_CACHE_MS)
       found.set(`${ask.gate}#${ask.index}`, hit.status);
     else missing.push(ask);
@@ -169,7 +184,7 @@ export async function remoteStatuses(
     const answer = answers[index]!;
     found.set(`${ask.gate}#${ask.index}`, answer);
     if (answer.met) {
-      cache[cacheKey(config, ask)] = { at: now, status: answer };
+      cache[cacheKey(scope, ask)] = { at: now, status: answer };
       changed = true;
     }
   });

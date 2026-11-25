@@ -62,26 +62,32 @@ describe("nodrail example", () => {
   });
 });
 
-describe.skipIf(windows)("the example, planned and deciding", () => {
+describe("the example, planned and deciding", () => {
   const desk = mkdtempSync(join(tmpdir(), "nodrail-desk-"));
   cpSync(SOURCE, desk, { recursive: true });
   const bin = codexTools();
   const env = { PATH: bin };
 
-  test("plans on either host from its lock, starting nothing", async () => {
-    for (const runtime of ["claude-code", "codex"]) {
+  test.each(windows ? ["claude-code"] : ["claude-code", "codex"])(
+    "plans on %s from its lock, starting nothing",
+    async (runtime) => {
       const { code, out } = await run(desk, ["plan", "--runtime", runtime], {
-        env,
+        env: {
+          ...env,
+          ...(windows
+            ? { PATHEXT: ".CMD", SystemRoot: process.env.SystemRoot! }
+            : {}),
+        },
       });
       expect(out).toContain("✓ policy: matches nodrail.lock.yaml");
       expect(out).toContain(
         "handbook: runs nodrail connector files-search --folder ./handbook --receipts ./activity",
       );
       expect(code).toBe(0);
-    }
-    expect(existsSync(join(desk, "activity/reads.jsonl"))).toBe(false);
-    // Each plan starts the fake hosts' programs; the first is slow when cold.
-  }, 30_000);
+      expect(existsSync(join(desk, "activity/reads.jsonl"))).toBe(false);
+    },
+    30_000,
+  );
 
   test("decides each call as the README's table says", async () => {
     const policy = await run(desk, ["policy", "export", "--frozen"]);

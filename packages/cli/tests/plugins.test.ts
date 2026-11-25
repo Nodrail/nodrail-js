@@ -53,7 +53,7 @@ const files = (runtime = "runtime: claude-code") => ({
 
 const json = (text: string) => JSON.parse(text) as Record<string, any>;
 
-describe.skipIf(windows)("plugins on Claude Code", () => {
+describe("plugins on Claude Code", () => {
   test("plan lists the marketplace and says the folder must be trusted", async () => {
     const p = await locked(files());
     const { code, out } = await p.run("plan");

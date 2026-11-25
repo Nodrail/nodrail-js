@@ -125,7 +125,7 @@ export function evidenceBindingLines(binding: Binding) {
   ];
 }
 
-/** The label a budget's source gives it (R302): never configured. */
+/** The label a budget's source gives it: never configured. */
 function labelOf(item: Item) {
   if (item.count !== undefined) return BUDGET_LABELS["enforced-allowance"];
   if (typeof item.sum === "object" && item.sum !== null) {
